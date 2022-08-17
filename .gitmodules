@@ -4,3 +4,6 @@
 [submodule "source/min-lib"]
 	path = source/min-lib
 	url = https://github.com/Cycling74/min-lib.git
+[submodule "source/cpython"]
+	path = source/cpython
+	url = https://github.com/python/cpython.git
