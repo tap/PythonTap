@@ -3,6 +3,18 @@ This package was created using the Min-DevKit for Max, an API and supporting too
 
 
 
+```
+cd source/cpython
+./configure
+make
+```
+
+
+
+
+
+
+
 ## Prerequisites
 
 You can use the objects provided in this package as-is.
