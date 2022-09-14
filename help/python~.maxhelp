@@ -10,7 +10,7 @@
 		}
 ,
 		"classnamespace" : "box",
-		"rect" : [ 59.0, 104.0, 605.0, 577.0 ],
+		"rect" : [ 100.0, 100.0, 605.0, 577.0 ],
 		"bglocked" : 0,
 		"openinpresentation" : 0,
 		"default_fontsize" : 13.0,
@@ -136,7 +136,7 @@
 					"numinlets" : 2,
 					"numoutlets" : 1,
 					"outlettype" : [ "signal" ],
-					"patching_rect" : [ 271.0, 175.0, 44.0, 24.0 ],
+					"patching_rect" : [ 271.0, 90.0, 44.0, 24.0 ],
 					"text" : "*~ 0.5"
 				}
 
@@ -148,7 +148,7 @@
 					"numinlets" : 2,
 					"numoutlets" : 1,
 					"outlettype" : [ "signal" ],
-					"patching_rect" : [ 340.0, 135.0, 64.0, 24.0 ],
+					"patching_rect" : [ 340.0, 50.0, 64.0, 24.0 ],
 					"text" : "saw~ 221"
 				}
 
@@ -196,7 +196,7 @@
 					"numinlets" : 2,
 					"numoutlets" : 1,
 					"outlettype" : [ "signal" ],
-					"patching_rect" : [ 270.0, 135.0, 64.0, 24.0 ],
+					"patching_rect" : [ 270.0, 50.0, 64.0, 24.0 ],
 					"text" : "saw~ 110"
 				}
 
@@ -210,6 +210,19 @@
 					"outlettype" : [ "signal" ],
 					"patching_rect" : [ 270.0, 210.0, 56.0, 24.0 ],
 					"text" : "python~"
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"attr" : "bologna",
+					"id" : "obj-7",
+					"maxclass" : "attrui",
+					"numinlets" : 1,
+					"numoutlets" : 1,
+					"outlettype" : [ "" ],
+					"parameter_enable" : 0,
+					"patching_rect" : [ 340.0, 155.0, 150.0, 24.0 ]
 				}
 
 			}
@@ -269,6 +282,13 @@
 				"patchline" : 				{
 					"destination" : [ "obj-1", 0 ],
 					"source" : [ "obj-6", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-1", 0 ],
+					"source" : [ "obj-7", 0 ]
 				}
 
 			}

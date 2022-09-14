@@ -13,11 +13,16 @@ include(${C74_MIN_API_DIR}/script/min-pretarget.cmake)
 #############################################################
 
 
+
+
 include_directories(
     "${C74_INCLUDES}"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../cpython"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../cpython/include"
+    "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.8/Headers"
+    "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.8/Headers/cpython"
+    "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.8/Headers/internal"
 )
+    #"${CMAKE_CURRENT_SOURCE_DIR}/../../cpython"
+    #"${CMAKE_CURRENT_SOURCE_DIR}/../../cpython/include"
 
 
 set( SOURCE_FILES
@@ -32,7 +37,11 @@ add_library(
 )
 
 if (APPLE)
-    SET(PYTHON_LIB "${CMAKE_CURRENT_SOURCE_DIR}/../../cpython/libpython3.10.a")
+    #SET(PYTHON_LIB "${CMAKE_CURRENT_SOURCE_DIR}/../../cpython/libpython3.10.a")
+    find_library(PYTHON_LIB "Python3")
+
+    #target_link_libraries(${PROJECT_NAME} PUBLIC ${PYTHON_LIBRARY})
+    #    target_link_libraries(${PROJECT_NAME} "-framework ${CARBON_LIBRARY}")
 endif ()
 target_link_libraries(${PROJECT_NAME} PUBLIC ${PYTHON_LIB})
 
