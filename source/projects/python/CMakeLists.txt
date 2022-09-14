@@ -13,26 +13,37 @@ include(${C74_MIN_API_DIR}/script/min-pretarget.cmake)
 #############################################################
 
 
-include_directories( 
-	"${C74_INCLUDES}"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../cpython"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../cpython/include"
-)
+if (APPLE)
+    include_directories(
+        "${C74_INCLUDES}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../cpython"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../cpython/include"
+    )
+else()
+    include_directories(
+        "${C74_INCLUDES}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../cpython"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../cpython/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../cpython/PC"
+    )
+endif()
 
 
 set( SOURCE_FILES
-	${PROJECT_NAME}.cpp
+    ${PROJECT_NAME}.cpp
 )
 
 
-add_library( 
-	${PROJECT_NAME} 
-	MODULE
-	${SOURCE_FILES}
+add_library(
+    ${PROJECT_NAME}
+    MODULE
+    ${SOURCE_FILES}
 )
 
 if (APPLE)
     SET(PYTHON_LIB "${CMAKE_CURRENT_SOURCE_DIR}/../../cpython/libpython3.10.a")
+else()
+    SET(PYTHON_LIB "${CMAKE_CURRENT_SOURCE_DIR}/../../cpython/PCBuild/amd64/python310.lib")
 endif ()
 target_link_libraries(${PROJECT_NAME} PUBLIC ${PYTHON_LIB})
 
