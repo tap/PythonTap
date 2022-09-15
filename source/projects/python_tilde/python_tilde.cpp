@@ -1,6 +1,6 @@
 /// @file
-///    @copyright    Copyright 2022 Timothy Place. All rights reserved.
-///    @license            Use of this source code is governed by the MIT License found in the License.md file.
+/// @copyright  Copyright 2022 Timothy Place. All rights reserved.
+/// @license           Use of this source code is governed by the MIT License found in the License.md file.
 
 #include "c74_min.h"
 
@@ -11,9 +11,15 @@
 using namespace c74::min;
 
 
-
 c74::max::t_max_err python_attr_set(c74::max::t_object* x, c74::max::t_object* maxattr, const long argc, const c74::max::t_atom* argv);
 c74::max::t_max_err python_attr_get(c74::max::t_object* x, c74::max::t_object* maxattr, long* argc, c74::max::t_atom** argv);
+
+c74::max::t_max_err python_mess_int(c74::max::t_object* x, long value);
+c74::max::t_max_err python_mess_float(c74::max::t_object* x, double value);
+c74::max::t_max_err python_mess_symbol(c74::max::t_object* x, c74::max::t_symbol* value);
+c74::max::t_max_err python_mess_bang(c74::max::t_object* x);
+c74::max::t_max_err python_mess_clear(c74::max::t_object* x);
+c74::max::t_max_err python_mess_gimme(c74::max::t_object* x, c74::max::t_symbol* name, long ac, c74::max::t_atom* av);
 
 
 class python : public object<python>, public vector_operator<> {
@@ -43,16 +49,7 @@ class python : public object<python>, public vector_operator<> {
                 ; // TODO: implement
             else {
                 err = c74::max::object_attr_addattr_parse(m_owner->maxobj(), m_name.c_str(), "dynamicattr", k_sym_long, 0, "1");
-                if (!err) {
-                    //printf("setting value %s %f\n", paramname->s_name, atom_getfloat(argv));
-                    //err = object_attr_setvalueof(x, paramname, 1, argv);
-                    //if (err) {
-                    //    object_error((t_object *)x, "failed to set attribute for %s", paramname->s_name);
-                    //}
-                    //if (x->m_wrapper)
-                    //    object_method(x->m_wrapper, gensym("makedynamicattr"), x, paramname);
-                }
-                else {
+                if (err) {
                     c74::max::object_error((c74::max::t_object*)m_owner, "failed to make dynamic attribute for %s", m_name.c_str());
                 }
             }
@@ -73,11 +70,61 @@ class python : public object<python>, public vector_operator<> {
     };
 
 
+    class python_message {
+    public:
+        python_message(python* owner, string a_name, PyObject* a_function, strings in_types)
+        : m_owner(owner)
+        , m_name(a_name)
+        , m_function(a_function)
+        , m_in_types(in_types)
+        {
+            if (m_owner->maxobj() == NULL)
+                return; // this occurs during dummy construction
+
+            c74::max::t_max_err err;
+
+            if (a_name == "int")
+                err = c74::max::object_addmethod(m_owner->maxobj(), (c74::max::method)python_mess_int, m_name.c_str(), c74::max::A_LONG, 0);
+            else if (a_name == "float")
+                err = c74::max::object_addmethod(m_owner->maxobj(), (c74::max::method)python_mess_float, m_name.c_str(), c74::max::A_FLOAT, 0);
+            else if (a_name == "symbol")
+                err = c74::max::object_addmethod(m_owner->maxobj(), (c74::max::method)python_mess_symbol, m_name.c_str(), c74::max::A_SYM, 0);
+            else if (a_name == "bang")
+                err = c74::max::object_addmethod(m_owner->maxobj(), (c74::max::method)python_mess_bang, m_name.c_str(), 0);
+            else if (in_types.size() == 0 && a_name == "clear")
+                err = c74::max::object_addmethod(m_owner->maxobj(), (c74::max::method)python_mess_clear, m_name.c_str(), 0);
+            else
+                err = c74::max::object_addmethod(m_owner->maxobj(), (c74::max::method)python_mess_gimme, m_name.c_str(), c74::max::A_GIMME, 0);
+
+
+            if (err)
+                ; // TODO: implement
+        }
+
+        python_message(const python_message&) = default;
+
+        PyObject* function() const {
+            return m_function;
+        }
+
+        strings arg_types() const {
+            return m_in_types;
+        }
+
+    private:
+        python*             m_owner;
+        string              m_name;
+        PyObject*           m_function;
+        strings             m_in_types;
+        symbol              m_out_type;
+    };
+
+
 public:
     MIN_DESCRIPTION {"Run python code."};
     MIN_TAGS        {"programming"};
     MIN_AUTHOR      {"Tim Place"};
-    MIN_RELATED     {"python, mxj~"};
+    MIN_RELATED     {"python"};
 
 
     inlet<>  m_inlet        { this, "(signal) post greeting to the max console" };
@@ -98,6 +145,7 @@ public:
         m_updating_source = true;
 
         if (m_module) {
+            Py_DECREF(m_instance);
             Py_DECREF(m_module);
             PyImport_ReloadModule(m_module);
         }
@@ -125,13 +173,12 @@ public:
         // Creates an instance of the class
         if (PyCallable_Check(pClass)) {
             m_instance = PyObject_CallObject(pClass, nullptr);
-            Py_DECREF(pClass);
         }
         else {
            cerr << "Cannot instantiate the Python class " << m_python_source << endl;
-           Py_DECREF(pClass);
            return;
         }
+        Py_DECREF(pClass);
 
         string instantiation_str = "me = ";
         instantiation_str += m_python_source;
@@ -144,14 +191,15 @@ public:
             PyErr_Print();
             return;
         }
+        else
+            Py_DECREF(ret);
         auto attribute_dict = PyRun_String("attributes", Py_eval_input, pModuleDict, pModuleDict);
         if (attribute_dict == nullptr) {
             cout << "ERROR" << endl;
             PyErr_Print();
             return;
         }
-
-        if (attribute_dict) {
+        else {
             auto attribute_dict_pstr = PyObject_Str(attribute_dict);
             string attr_dict_str = PyUnicode_AsUTF8(attribute_dict_pstr);
 
@@ -167,8 +215,24 @@ public:
 
                 auto* attr = new python_attr(this, key_str, type_str); // TODO: leaking
                 m_python_attributes[key_str] = attr;
+
+                Py_DECREF(name);
+                Py_DECREF(value);
+                Py_DECREF(key);
             }
+
+            Py_DECREF(attr_dict_keys);
+            Py_DECREF(attribute_dict_pstr);
+            Py_DECREF(attribute_dict);
         }
+
+        std::for_each(m_python_messages.begin(), m_python_messages.end() , [this](std::pair<std::string, python_message*> element){
+            //cout << "removing method named " << element.first << endl;
+            auto err = c74::max::object_deletemethod(maxobj(), c74::max::gensym(element.first.c_str()));
+            if (err)
+                cerr << "Error removing method" << endl;
+        });
+
 
         auto pDir = PyObject_Dir(m_instance); // returns array of members
         auto member_count = PyList_Size(pDir);
@@ -182,10 +246,15 @@ public:
             if (m_python_attributes.find(member_name_str) != m_python_attributes.end())
                 continue;
 
-            auto io_dict = PyRun_String("get_type_hints(me.process)", Py_eval_input, pModuleDict, pModuleDict);
-            auto io_pstr = PyObject_Str(io_dict);
-            auto io_str = PyUnicode_AsUTF8(io_pstr);
-            cout << member_name_str << "    "<< io_str << endl;
+            string run_str {"get_type_hints(me."};
+            run_str += member_name_str;
+            run_str += ")";
+            auto io_dict = PyRun_String(run_str.c_str(), Py_eval_input, pModuleDict, pModuleDict);
+
+            //auto io_pstr = PyObject_Str(io_dict);
+            //auto io_str = PyUnicode_AsUTF8(io_pstr);
+            //Py_DECREF(io_pstr);
+            //cout << member_name_str << "    "<< io_str << endl;
 
             auto method = PyObject_GetAttrString(m_instance, member_name_str.c_str());
             if (PyMethod_Check(method)) {
@@ -197,14 +266,84 @@ public:
                             m_process_args = PyTuple_New(2);
                         Py_IncRef(m_instance); // because the tuple will *steal* a reference
                         PyTuple_SetItem(m_process_args, 0, m_instance);
+
+                        int     in_count = 0;
+                        int     out_count = 0;
+                        auto    keys = PyDict_Keys(io_dict);
+                        auto    key_count = PyDict_Size(io_dict);
+
+                        for (auto k = 0; k < key_count; ++k) {
+                            auto key = PyList_GetItem(keys, k);
+                            auto value = PyDict_GetItem(io_dict, key);
+                            auto name = PyObject_GetAttrString(value, "__name__");
+
+                            auto key_str = PyUnicode_AsUTF8(key);
+                            auto type_str = PyUnicode_AsUTF8(name);
+
+                            // cout << "KEY: " << key_str << "    Value: " << type_str << endl;
+
+                            if (string("return") == key_str) { // output
+                                if (string("tuple") == type_str) {
+                                    // it's a tuple, so we have to test it to find out
+                                    // because we are using Python 3.8 which doesn't support full tuple annotations
+                                    PyTuple_SetItem(m_process_args, 1, PyFloat_FromDouble(0.0)); // pyfloat ref is stolen by the tuple
+                                    auto pOutValue = PyObject_CallObject(m_process_fn, m_process_args);
+                                    out_count = PyTuple_Size(pOutValue);
+                                    Py_DECREF(pOutValue);
+                                }
+                                else
+                                    out_count = 1;
+                            }
+                            else { // input
+                                ++in_count;
+                            }
+
+                            Py_DECREF(name);
+                            Py_DECREF(value);
+                            Py_DECREF(key);
+                        }
+                        cout << "Audio inputs: " << in_count << "    outputs: " << out_count << endl;
                     }
-                    else
-                        m_python_messages[member_name_str] = fn;
+                    else {
+                        strings argument_types;
+                        auto    keys = PyDict_Keys(io_dict);
+                        auto    key_count = PyDict_Size(io_dict);
+
+                        for (auto k = 0; k < key_count; ++k) {
+                            auto key = PyList_GetItem(keys, k);
+                            auto value = PyDict_GetItem(io_dict, key);
+                            auto name = PyObject_GetAttrString(value, "__name__");
+
+                            auto key_str = PyUnicode_AsUTF8(key);
+                            auto type_str = PyUnicode_AsUTF8(name);
+
+                            cout << "KEY: " << key_str << "    Value: " << type_str << endl;
+
+                            if (string("return") == key_str) { // output
+                                if (string("tuple") == type_str) {
+                                }
+                            }
+                            else {
+                                argument_types.push_back(type_str);
+                            }
+
+                            Py_DECREF(name);
+                            Py_DECREF(value);
+                            Py_DECREF(key);
+                        }
+
+                        auto* mess = new python_message(this, member_name_str, fn, argument_types); // TODO: leaking
+                        m_python_messages[member_name_str] = mess;
+                    }
                 }
             }
-
+            Py_DECREF(method);
+            Py_DECREF(io_dict);
+            Py_DECREF(member_name);
+            Py_DECREF(member);
             Py_DECREF(pModuleDict);
         }
+        Py_DECREF(pDir);
         m_updating_source = false;
     }
 
@@ -212,7 +351,7 @@ public:
     python(const atoms& args = {}) {
         // char pythonhome[] {"PYTHONHOME=/Users/tim/Documents/Max 8/Packages/python/source/cpython/Lib"};
         // char pythonpath[] {"PYTHONPATH=/Users/tim/Documents/Max 8/Packages/python/source/cpython/Lib:/Users/tim/Documents/Max 8/Packages/python/misc:/Users/tim/Library/Python/3.8/lib/python/site-packages"};
-        char pythonpath[] {"PYTHONPATH=$PYTHONPATH:/Users/tim/Documents/Max 8/Packages/python/misc"};
+        char pythonpath[] {"PYTHONPATH=$PYTHONPATH:/Users/tim/Documents/Max 8/Packages/python/python"};
         // /Users/tim/Library/Python/3.8/lib/python/site-packages
         // /usr/local/lib/python3.10/site-packages
 
@@ -221,13 +360,13 @@ public:
         Py_Initialize();
 
         if (args.empty())
-            m_python_source = "python_thru";
+            m_python_source = "default";
         else
             m_python_source = to_string(args);
 
         update_source();
 
-        string source_fullpath {"/Users/tim/Documents/Max 8/Packages/python/misc/"};
+        string source_fullpath {"/Users/tim/Documents/Max 8/Packages/python/python/"};
         source_fullpath += m_python_source;
         source_fullpath += ".py";
         path p {source_fullpath};
@@ -237,42 +376,50 @@ public:
 
     ~python() {
         Py_XDECREF(m_process_args);
+        Py_XDECREF(m_process_fn);
+        Py_XDECREF(m_instance);
         Py_XDECREF(m_module);
     }
 
+    
+    void message_gimme(symbol name, long ac, c74::max::t_atom* av) {
+        auto mess = m_python_messages[name.c_str()];
+        if (mess) {
+            PyObject *pArgs = PyTuple_New(ac+1);
+            Py_IncRef(m_instance); // because the tuple will *steal* a reference
+            PyTuple_SetItem(pArgs, 0, m_instance);
 
-    message<> anything { this, "anything", "Execute python function.",
-        MIN_FUNCTION {
-            PyObject *function = m_python_messages[args[0]];
-            if (function) {
-                PyObject *pArgs = PyTuple_New(2);
-                PyObject *pValue = PyFloat_FromDouble(args[1]);// PyLong_FromLong(13);
-                PyTuple_SetItem(pArgs, 0, m_instance);
-                PyTuple_SetItem(pArgs, 1, pValue);
+            auto arg_types = mess->arg_types();
+            for (auto i=0; i<ac; ++i){
+                PyObject *pValue;
 
-                auto result = PyObject_Call(function, pArgs, NULL);
-                if (result) {
-                    auto result_str = PyObject_Str(result);
-                    Py_ssize_t size;
-                    const char* data = PyUnicode_AsUTF8AndSize(result_str, &size);
-                    cout << "RESULT: " << data << endl;
-                }
+                if (arg_types[i] == "int")
+                    pValue = PyLong_FromLong(c74::max::atom_getlong(av));
+                else if (arg_types[i] == "float")
+                    pValue = PyFloat_FromDouble(c74::max::atom_getfloat(av));
+                else if (arg_types[i] == "str")
+                    pValue = PyUnicode_DecodeFSDefault(c74::max::atom_getsym(av)->s_name);
                 else
-                    PyErr_Print();
+                    pValue = PyLong_FromLong(-1974);
+
+                PyTuple_SetItem(pArgs, i+1, pValue);
+                // tuple steals ownership
             }
 
-            return {};
-        }
-    };
+            auto result = PyObject_Call(mess->function(), pArgs, NULL);
+            if (result) {
+            //    auto result_str = PyObject_Str(result);
+            //    Py_ssize_t size;
+            //    const char* data = PyUnicode_AsUTF8AndSize(result_str, &size);
+            //    cout << "RESULT: " << data << endl;
+                Py_DECREF(result);
+            }
+            else
+                PyErr_Print();
 
-
-    // the actual attribute for the message
-    attribute<symbol> greeting { this, "greeting", "hello world",
-        description {
-            "Greeting to be posted. "
-            "The greeting will be posted to the Max console when a bang is received."
+            Py_DECREF(pArgs);
         }
-    };
+    }
 
 
     void attr_set(const symbol& name, const long argc, const c74::max::t_atom* argv) {
@@ -290,6 +437,7 @@ public:
                 value = PyUnicode_DecodeFSDefault(c74::max::atom_getsym(argv)->s_name);
 
             PyObject_SetAttrString(m_instance, name.c_str(), value);
+            Py_DECREF(value);
         }
     }
 
@@ -313,6 +461,8 @@ public:
             c74::max::atom_setlong(*argv, PyLong_AsLong(value));
         else // if (attr->type() == "symbol")
             c74::max::atom_setsym(*argv, c74::max::gensym(PyUnicode_AsUTF8(value)));
+
+        Py_DECREF(value);
     }
 
 
@@ -338,14 +488,14 @@ public:
 
 
 private:
-    string                                  m_python_source {};
-    PyObject*                               m_module {};
-    PyObject*                               m_instance {};
-    PyObject*                               m_process_fn {};
-    PyObject*                               m_process_args {};
-    std::unordered_map<string, PyObject*>   m_python_messages;
-    std::unordered_map<string, python_attr*> m_python_attributes;
-    std::atomic<bool>                       m_updating_source { false };
+    string                                      m_python_source {};
+    PyObject*                                   m_module {};
+    PyObject*                                   m_instance {};
+    PyObject*                                   m_process_fn {};
+    PyObject*                                   m_process_args {};
+    std::unordered_map<string, python_message*> m_python_messages;
+    std::unordered_map<string, python_attr*>    m_python_attributes;
+    std::atomic<bool>                           m_updating_source { false };
 };
 
 
@@ -363,6 +513,58 @@ c74::max::t_max_err python_attr_get(c74::max::t_object* x, c74::max::t_object* m
     auto            self = &(wrapper_find_self<python>(x))->m_min_object;
 
     self->attr_get(attr_name, argc, argv);
+    return c74::max::MAX_ERR_NONE;
+}
+
+
+c74::max::t_max_err python_mess_int(c74::max::t_object* x, long value) {
+    auto                self = &(wrapper_find_self<python>(x))->m_min_object;
+    c74::max::t_atom    a;
+
+    c74::max::atom_setlong(&a, value);
+    self->message_gimme(symbol("int"), 1, &a);
+    return c74::max::MAX_ERR_NONE;
+}
+
+
+c74::max::t_max_err python_mess_float(c74::max::t_object* x, double value) {
+    auto                self = &(wrapper_find_self<python>(x))->m_min_object;
+    c74::max::t_atom    a;
+
+    c74::max::atom_setfloat(&a, value);
+    self->message_gimme(k_sym_float, 1, &a);
+    return c74::max::MAX_ERR_NONE;
+}
+
+
+c74::max::t_max_err python_mess_symbol(c74::max::t_object* x, c74::max::t_symbol* value) {
+    auto self = &(wrapper_find_self<python>(x))->m_min_object;
+
+    self->message_gimme(value, 0, nullptr);
+    return c74::max::MAX_ERR_NONE;
+}
+
+
+c74::max::t_max_err python_mess_bang(c74::max::t_object* x) {
+    auto self = &(wrapper_find_self<python>(x))->m_min_object;
+
+    self->message_gimme(k_sym_bang, 0, nullptr);
+    return c74::max::MAX_ERR_NONE;
+}
+
+
+c74::max::t_max_err python_mess_clear(c74::max::t_object* x) {
+    auto self = &(wrapper_find_self<python>(x))->m_min_object;
+
+    self->message_gimme(symbol("clear"), 0, nullptr);
+    return c74::max::MAX_ERR_NONE;
+}
+
+
+c74::max::t_max_err python_mess_gimme(c74::max::t_object* x, c74::max::t_symbol* name, long ac, c74::max::t_atom* av) {
+    auto self = &(wrapper_find_self<python>(x))->m_min_object;
+
+    self->message_gimme(name, ac, av);
     return c74::max::MAX_ERR_NONE;
 }
 

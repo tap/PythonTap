@@ -36,10 +36,15 @@ class allpass:
         if new_delay_in_samples != self._delay_in_samples:
             self._delay_in_samples = new_delay_in_samples
             print(f"Setting Delay to {delay_in_ms} ms ({self._delay_in_samples} samples @ fs={sampling_frequency})")
-            self._x = np.zeros(self._delay_in_samples)
-            self._y = np.zeros(self._delay_in_samples)
-            self._write_index = 0
-            self._read_index = 1
+            self.clear()
+
+
+    def clear(self) -> None:
+        print("zeroing history to reset allpass filter")
+        self._x = np.zeros(self._delay_in_samples)
+        self._y = np.zeros(self._delay_in_samples)
+        self._write_index = 0
+        self._read_index = 1
 
 
     def process(self, input: float) -> float:

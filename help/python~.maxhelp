@@ -208,21 +208,21 @@
 					"numinlets" : 1,
 					"numoutlets" : 1,
 					"outlettype" : [ "signal" ],
-					"patching_rect" : [ 270.0, 210.0, 56.0, 24.0 ],
-					"text" : "python~"
+					"patching_rect" : [ 270.0, 210.0, 97.0, 24.0 ],
+					"text" : "python~ allpass"
 				}
 
 			}
 , 			{
 				"box" : 				{
-					"attr" : "bologna",
+					"attr" : "fs",
 					"id" : "obj-7",
 					"maxclass" : "attrui",
 					"numinlets" : 1,
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"parameter_enable" : 0,
-					"patching_rect" : [ 340.0, 155.0, 150.0, 24.0 ]
+					"patching_rect" : [ 340.0, 155.0, 175.0, 24.0 ]
 				}
 
 			}
