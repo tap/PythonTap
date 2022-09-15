@@ -22,9 +22,7 @@ if (APPLE)
 else()
     include_directories(
         "${C74_INCLUDES}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../cpython"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../cpython/include"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../cpython/PC"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../support/include"
     )
 endif()
 

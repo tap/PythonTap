@@ -27,12 +27,34 @@ public:
 
 
     python(const atoms& args = {}) {
+#ifdef MAC_VERSION
         char pythonhome[] {"PYTHONHOME=/Users/tim/Documents/Max 8/Packages/python/source/cpython/Lib"};
         char pythonpath[] {"PYTHONPATH=/Users/tim/Documents/Max 8/Packages/python/source/cpython/Lib:/Users/tim/Documents/Max 8/Packages/python/misc"};
+#else // WIN_VERSION
+        //char pythonhome[]{ "PYTHONHOME=/Users/tim/Documents/Max 8/Packages/python/source/cpython/Lib" };
+        //char pythonpath[]{ "PYTHONPATH=/Users/tim/Documents/Max 8/Packages/python/source/cpython/Lib:/Users/tim/Documents/Max 8/Packages/python/misc" };
+        //char pythonpath[]{ "PYTHONPATH=%PYTHONPATH%;C:\\Users\\placetimothy\\Documents\\Max 8\\Packages\\python\\misc" };
+#endif
 
-        putenv(pythonhome);
-        putenv(pythonpath);
+        //putenv(pythonhome);
+        //putenv(pythonpath);
         Py_Initialize();
+
+
+        int wtf = PyRun_SimpleString("import os\n"
+            "import sys\n"
+            "log = open('C:\\\\Users\\\\placetimothy\\\\Documents\\\\Max 8\\\\Packages\\\\python\\\\python.log', 'a')\n"
+            "sys.stdout = log\n"
+            "print('Hello World')\n"
+            "print(sys.path)\n"
+            "sys.path.append('C:\\\\Users\\\\placetimothy\\\\Documents\\\\Max 8\\\\Packages\\\\python\\\\site-packages')\n"
+            "sys.path.append('C:\\\\Users\\\\placetimothy\\\\Documents\\\\Max 8\\\\Packages\\\\python\\\\misc')\n"
+        );
+        if (wtf < 0)
+            PyErr_Print();
+
+        // TODO: watch the python.log file to access script output
+
 
         if (args.empty())
             m_python_source = "tap_test";
@@ -99,10 +121,6 @@ public:
  */
                 }
             }
-
-            //int wtf = PyRun_SimpleString("import tap_test \n" "tap_test.bar()\n");
-            //if (wtf < 0)
-            //    PyErr_Print();
         }
         else {
             PyErr_Print();
