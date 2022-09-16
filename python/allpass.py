@@ -63,4 +63,3 @@ class allpass:
         if m_write_index == self.m_delay_in_samples: m_write_index = 0 
 
         return y
-

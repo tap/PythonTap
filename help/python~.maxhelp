@@ -4,7 +4,7 @@
 		"appversion" : 		{
 			"major" : 8,
 			"minor" : 3,
-			"revision" : 1,
+			"revision" : 2,
 			"architecture" : "x64",
 			"modernui" : 1
 		}
@@ -208,14 +208,14 @@
 					"numinlets" : 1,
 					"numoutlets" : 1,
 					"outlettype" : [ "signal" ],
-					"patching_rect" : [ 270.0, 210.0, 97.0, 24.0 ],
-					"text" : "python~ allpass"
+					"patching_rect" : [ 270.0, 210.0, 56.0, 24.0 ],
+					"text" : "python~"
 				}
 
 			}
 , 			{
 				"box" : 				{
-					"attr" : "fs",
+					"attr" : "gain",
 					"id" : "obj-7",
 					"maxclass" : "attrui",
 					"numinlets" : 1,

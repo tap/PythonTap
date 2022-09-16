@@ -31,9 +31,6 @@ class python : public object<python>, public vector_operator<> {
         , m_name(a_name)
         , m_typename(a_type)
         {
-            if (m_owner->maxobj() == NULL)
-                return; // this occurs during dummy construction
-
             symbol max_type;
 
             if (m_typename == "int")
@@ -145,9 +142,12 @@ public:
         m_updating_source = true;
 
         if (m_module) {
+            Py_DECREF(m_process_args);
             Py_DECREF(m_instance);
-            Py_DECREF(m_module);
-            PyImport_ReloadModule(m_module);
+
+            //auto old_module = m_module;
+            m_module = PyImport_ReloadModule(m_module);
+            //Py_DECREF(old_module);
         }
         else {
             auto pName = PyUnicode_DecodeFSDefault(m_python_source.c_str());
@@ -238,29 +238,29 @@ public:
         auto member_count = PyList_Size(pDir);
         for (auto i=0; i<member_count; ++i) {
             auto member = PyList_GetItem(pDir, i);
-            auto member_name = PyObject_Str(member);
-            string member_name_str = PyUnicode_AsUTF8(member_name);
+            //auto member_name = PyObject_Str(member);
+            //string member_name_str = PyUnicode_AsUTF8(member_name);
+            string member_name_str = PyUnicode_AsUTF8(member);
 
             if (member_name_str[0] == '_')
                 continue;
             if (m_python_attributes.find(member_name_str) != m_python_attributes.end())
                 continue;
 
-            string run_str {"get_type_hints(me."};
+            string run_str { "get_type_hints(me." };
             run_str += member_name_str;
             run_str += ")";
             auto io_dict = PyRun_String(run_str.c_str(), Py_eval_input, pModuleDict, pModuleDict);
+            if (io_dict == nullptr)
+                PyErr_Print();
 
-            //auto io_pstr = PyObject_Str(io_dict);
-            //auto io_str = PyUnicode_AsUTF8(io_pstr);
-            //Py_DECREF(io_pstr);
-            //cout << member_name_str << "    "<< io_str << endl;
+            //cout endl; cout << member_name_str << endl;
 
             auto method = PyObject_GetAttrString(m_instance, member_name_str.c_str());
             if (PyMethod_Check(method)) {
-                auto fn = PyMethod_Function(method);
+                auto fn = PyMethod_Function(method); // returnes a *borrowed* reference
                 if (PyFunction_Check(fn)) {
-                    if (member_name_str == "process") {
+                    if (member_name_str == "process" && io_dict) {
                         m_process_fn = fn;
                         if (!m_process_args)
                             m_process_args = PyTuple_New(2);
@@ -317,7 +317,7 @@ public:
                             auto key_str = PyUnicode_AsUTF8(key);
                             auto type_str = PyUnicode_AsUTF8(name);
 
-                            cout << "KEY: " << key_str << "    Value: " << type_str << endl;
+                            // cout << "KEY: " << key_str << "    Value: " << type_str << endl;
 
                             if (string("return") == key_str) { // output
                                 if (string("tuple") == type_str) {
@@ -339,7 +339,7 @@ public:
             }
             Py_DECREF(method);
             Py_DECREF(io_dict);
-            Py_DECREF(member_name);
+            //Py_DECREF(member_name);
             Py_DECREF(member);
             Py_DECREF(pModuleDict);
         }
@@ -349,15 +349,51 @@ public:
 
 
     python(const atoms& args = {}) {
-        // char pythonhome[] {"PYTHONHOME=/Users/tim/Documents/Max 8/Packages/python/source/cpython/Lib"};
-        // char pythonpath[] {"PYTHONPATH=/Users/tim/Documents/Max 8/Packages/python/source/cpython/Lib:/Users/tim/Documents/Max 8/Packages/python/misc:/Users/tim/Library/Python/3.8/lib/python/site-packages"};
-        char pythonpath[] {"PYTHONPATH=$PYTHONPATH:/Users/tim/Documents/Max 8/Packages/python/python"};
-        // /Users/tim/Library/Python/3.8/lib/python/site-packages
-        // /usr/local/lib/python3.10/site-packages
+        if (maxobj() == NULL)
+            return; // this occurs during dummy construction
 
-        // putenv(pythonhome);
-        putenv(pythonpath);
+        #ifdef MAC_VERSION
+        {
+            char pythonhome[] {"PYTHONHOME=/Users/tim/Documents/Max 8/Packages/python/support-mac"};
+            char pythonpath[] {"PYTHONPATH=$PYTHONPATH:/Users/tim/Documents/Max 8/Packages/python/python"};
+            putenv(pythonhome);
+            putenv(pythonpath);
+        }
+        #endif
+
         Py_Initialize();
+
+        #ifdef WIN_VERSION
+        {
+            auto err = PyRun_SimpleString(
+                "import os\n"
+                "import sys\n"
+                "log = open('C:\\\\Users\\\\placetimothy\\\\Documents\\\\Max 8\\\\Packages\\\\python\\\\python.log', 'a')\n"
+                "sys.stdout = log\n"
+                "print('Hello World')\n"
+                "print(sys.path)\n"
+                "sys.path.append('C:\\\\Users\\\\placetimothy\\\\Documents\\\\Max 8\\\\Packages\\\\python\\\\site-packages')\n"
+                "sys.path.append('C:\\\\Users\\\\placetimothy\\\\Documents\\\\Max 8\\\\Packages\\\\python\\\\misc')\n"
+            );
+            if (err < 0)
+                PyErr_Print();
+        }
+        #else // MAC or LINUX
+        {
+            auto err = PyRun_SimpleString(
+                "import sys\n"
+                "log = open('/Users/tim/Documents/Max 8/Packages/python/python.log', 'a')\n"
+                "sys.stdout = log\n"
+                "print('Hello World')\n"
+                "print(sys.path)\n"
+            );
+            if (err < 0)
+                PyErr_Print();
+        }
+        #endif
+
+        // TODO: watch the python.log file to access script output
+
 
         if (args.empty())
             m_python_source = "default";
@@ -376,7 +412,6 @@ public:
 
     ~python() {
         Py_XDECREF(m_process_args);
-        Py_XDECREF(m_process_fn);
         Py_XDECREF(m_instance);
         Py_XDECREF(m_module);
     }
@@ -491,7 +526,7 @@ private:
     string                                      m_python_source {};
     PyObject*                                   m_module {};
     PyObject*                                   m_instance {};
-    PyObject*                                   m_process_fn {};
+    PyObject*                                   m_process_fn {}; // borrowed reference
     PyObject*                                   m_process_args {};
     std::unordered_map<string, python_message*> m_python_messages;
     std::unordered_map<string, python_attr*>    m_python_attributes;

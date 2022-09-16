@@ -1,4 +1,4 @@
-# Copyright 2018 The Min-DevKit Authors. All rights reserved.
+# Copyright 2022 Timothy Place. All rights reserved.
 # Use of this source code is governed by the MIT License found in the License.md file.
 
 cmake_minimum_required(VERSION 3.0)

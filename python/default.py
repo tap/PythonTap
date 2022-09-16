@@ -18,3 +18,4 @@ class default:
     def process(self, x: float) -> float:
         y = x * self.gain
         return y
+

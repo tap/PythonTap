@@ -2,6 +2,14 @@
 This package was created using the Min-DevKit for Max, an API and supporting tools for writing externals in modern C++.
 
 
+To instal packages on the Mac:
+
+1. cd into the package root
+2. `PYTHONHOME=./support-mac ./support-mac/bin/pip3 install numpy`
+
+
+
+
 
 ```
 cd source/cpython
