@@ -1,0 +1,84 @@
+name: build
+
+# Builds the tap.python package on macOS and Windows.
+# The embedded Python runtime is installed by scripts/install-runtime.*
+# before configuring, since the externals link against it.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Python runtime (universal libpython for linking)
+        run: ./scripts/install-runtime.sh --universal
+
+      - name: Configure (universal arm64 + x86_64)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Verify externals are universal
+        run: |
+          set -e
+          ls -la externals
+          for mxo in externals/*.mxo; do
+            bin="$mxo/Contents/MacOS/$(basename "$mxo" .mxo)"
+            echo "== $mxo =="
+            lipo -info "$bin"
+            lipo -info "$bin" | grep -q "arm64" && lipo -info "$bin" | grep -q "x86_64" \
+              || { echo "ERROR: $bin is not universal"; exit 1; }
+          done
+
+      - name: Verify libpython resolves via rpath
+        run: |
+          bin="externals/tap.python~.mxo/Contents/MacOS/tap.python~"
+          otool -L "$bin"
+          otool -L "$bin" | grep -q "@rpath/libpython" \
+            || { echo "ERROR: libpython is not linked via @rpath"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tap-python-macos
+          path: externals/*.mxo
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Python runtime
+        run: powershell -ExecutionPolicy Bypass -File scripts\install-runtime.ps1
+
+      - name: Configure
+        run: cmake -S . -B build -A x64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: |
+          $env:PATH = "$PWD\support;$env:PATH"   # so the test binary finds python3xx.dll
+          ctest --test-dir build --output-on-failure -C Release
+
+      - name: List externals
+        run: dir externals
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tap-python-windows
+          path: externals/*.mxe64
