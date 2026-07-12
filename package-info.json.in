@@ -1,13 +1,15 @@
 {
-	"author" : "Cycling '74",
-	"description" : "Lightweight reference implementation of a package built using the Min-API.",
-	"homepatcher" : "C++ Object Development Kit.maxpat",
-	"max_version_min" : "8.0", "max_version_max" : "none",
 	"name" : "@C74_PACKAGE_NAME@",
+	"version" : "@GIT_VERSION_MAJ@.@GIT_VERSION_MIN@.@GIT_VERSION_SUB@",
+	"author" : "Timothy Place",
+	"description" : "Write Max objects in Python: tap.python~ runs a Python class as an audio object, generating Max attributes and messages from its type hints, with hot-reload on save.",
+	"homepatcher" : "",
+	"max_version_min" : "9.0",
+	"max_version_max" : "none",
 	"os" : {
 		"macintosh" : {
 			"platform" : [ "x64", "aarch64" ],
-			"min_version" : "none"
+			"min_version" : "11.0"
 		},
 		"windows" : {
 			"platform" : [ "x64" ],
@@ -15,10 +17,10 @@
 		}
 	},
 	"package_extra" : {
-		"reverse_domain" : "com.cycling74",
-		"copyright" : "Copyright (c) 2018 Cycling '74"
+		"reverse_domain" : "com.74objects",
+		"copyright" : "Copyright (c) 2022-2026 Timothy Place",
+		"add_verinfo" : true
 	},
-	"tags" : [ ],
-	"version" : "@GIT_VERSION_MAJ@.@GIT_VERSION_MIN@.@GIT_VERSION_SUB@",
-	"website" : "http://www.github.com/Cycling74/min-devkit"
+	"website" : "https://github.com/tap/python",
+	"tags" : [ "python", "programming", "dsp" ]
 }
