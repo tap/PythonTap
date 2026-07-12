@@ -57,6 +57,10 @@ single clean root commit.**
       vendored runtimes and hardcoded home paths are already gone)
 - [ ] `License.md` third-party section still matches what the install script
       installs (Python version, packages)
+- [ ] after the first push to `main`, the ReadMe build badge shows green — it
+      points at `main`, so it reads "no status" until the cut-over push
+      triggers the workflow there (and renders publicly only once the repo
+      is public)
 
 ## Known limitations to track as issues once public (not blockers)
 

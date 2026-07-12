@@ -1,5 +1,11 @@
 # tap.python
 
+[![build](https://github.com/tap/python/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/tap/python/actions/workflows/build.yml)
+[![Max 9](https://img.shields.io/badge/Max-9%2B-9cf)](https://cycling74.com/products/max)
+[![Python 3.13](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)](https://www.python.org)
+[![platforms](https://img.shields.io/badge/platforms-macOS%20universal%20%7C%20Windows%20x64-lightgrey)](#requirements)
+[![license: MIT](https://img.shields.io/badge/license-MIT-green)](License.md)
+
 Write Max objects in Python.
 
 `tap.python~` embeds a CPython interpreter inside a Max external and runs a Python class as an audio object:
