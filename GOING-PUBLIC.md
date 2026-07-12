@@ -14,6 +14,14 @@ single clean root commit.**
 
 ## Cut-over procedure
 
+0. **Rename the repository to `tap.python`** (GitHub → Settings → General →
+   Rename). Old `tap/python` URLs, clones, and remotes redirect automatically.
+   Rationale: a git clone's folder name *is* the Max package name (Min derives
+   `C74_PACKAGE_NAME` from it), so the repo name should match the `tap.python~`
+   object rather than squatting the generic name "python" — and it makes the
+   repo findable once public. The badge URLs and package-info website field in
+   the tree already point at `tap/tap.python`.
+
 1. Merge (or fast-forward) this branch's tree to `main` locally and make sure you're
    happy with the result. Do **not** push yet.
 
