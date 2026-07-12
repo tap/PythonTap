@@ -4,10 +4,16 @@
 
 #pragma once
 
-#include "tap.python_tilde_runtime.h"    // includes Python.h; must come before c74_min.h pulls in system headers
+#define PY_SSIZE_T_CLEAN
+#include <Python.h>    // CPython insists on being included before system headers
 
+// c74_min.h must be the FIRST min header in the translation unit: it defines
+// C74_MIN_WITH_IMPLEMENTATION so the min wrapper's out-of-line statics get
+// emitted here. If c74_min_api.h sneaks in first (e.g. via our helper headers),
+// the include guards swallow those definitions and the external fails to link.
 #include "c74_min.h"
 
+#include "tap.python_tilde_runtime.h"
 #include "tap.python_tilde_cglue.h"
 #include "tap.python_tilde_attribute.h"
 #include "tap.python_tilde_message.h"
