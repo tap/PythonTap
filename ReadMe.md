@@ -74,13 +74,20 @@ Python sources live in the package's `python` folder. `[tap.python~ name]` impor
 
 ## Building from source
 
-Requires CMake 3.19+, a C++20 compiler (Xcode 12+ / Visual Studio 2019+), and the runtime installed as above (the build links against it — on CI or for building universal macOS binaries, use `./scripts/install-runtime.sh --universal`).
+Requires CMake 3.19+ and a C++20 compiler (Xcode 12+ / Visual Studio 2019+). The build links against the embedded runtime, so install it first (see [Installation](#installation)).
 
 ```sh
 git submodule update --init --recursive
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release    # externals land in externals/
 ctest --test-dir build                  # unit tests (mock kernel, no Max needed)
+```
+
+On macOS the default build is **universal** (arm64 + x86_64), so it links against a universal `libpython` — install the runtime with `./scripts/install-runtime.sh --universal` (as CI does). Building against a native-only runtime fails at link time with `symbol(s) not found for architecture arm64` (or `x86_64`). For faster local iteration, build for just your machine's architecture, which pairs with the plain native install:
+
+```sh
+./scripts/install-runtime.sh                                                    # native libpython
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64  # your arch
 ```
 
 On Windows, configure with `cmake -S . -B build -A x64`.
