@@ -12,6 +12,7 @@
 #include "tap.python_tilde_attribute.h"
 #include "tap.python_tilde_message.h"
 
+#include <cstring>
 #include <memory>
 #include <unordered_map>
 
@@ -31,8 +32,10 @@ public:
 
     argument<symbol> m_source_arg { this, "source", "Python source file in the package's python folder, without the .py extension. It must define a class of the same name." };
 
-    watcher m_file_watcher { this,
-        MIN_FUNCTION {    // will trigger any time our python source file is modified
+    // Max's filewatcher (created in the constructor) sends this message any
+    // time our python source file is modified.
+    message<> m_filechanged { this, "filechanged",
+        MIN_FUNCTION {
             cout << "Source file update detected. Reloading." << endl;
             update_source();
             return {};
@@ -63,19 +66,27 @@ public:
 
         update_source();
 
+        // watch the source file for changes (delivered as our 'filechanged' message)
         const auto watched_file = m_scripts_dir / (m_python_source + ".py");
-        try {
-            path p { watched_file.string() };
-            m_file_watcher.begin(p);
+        char filename[c74::max::MAX_PATH_CHARS] {};
+        std::strncpy(filename, watched_file.string().c_str(), c74::max::MAX_PATH_CHARS - 1);
+        short             path_id {};
+        c74::max::t_fourcc filetype {};
+        if (c74::max::locatefile_extended(filename, &path_id, &filetype, nullptr, 0) == 0) {
+            m_filewatcher = c74::max::filewatcher_new(maxobj(), path_id, filename);
+            if (m_filewatcher)
+                c74::max::filewatcher_start(m_filewatcher);
         }
-        catch (...) {
+        else
             cerr << "Unable to watch " << watched_file.string() << " for changes." << endl;
-        }
     }
 
 
     ~python() {
-        if (maxobj() == NULL || !Py_IsInitialized())
+        if (m_filewatcher)
+            c74::max::object_free(m_filewatcher);
+
+        if (!Py_IsInitialized())
             return;    // dummy construction, or the runtime never came up
 
         runtime::gil_lock lock;
@@ -312,6 +323,7 @@ public:
 private:
     string                                                       m_python_source {};
     std::filesystem::path                                        m_scripts_dir {};
+    void*                                                        m_filewatcher {};
     PyObject*                                                    m_module {};        // strong
     PyObject*                                                    m_instance {};      // strong
     PyObject*                                                    m_process_fn {};    // strong

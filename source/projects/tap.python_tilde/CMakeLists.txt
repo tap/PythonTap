@@ -25,7 +25,8 @@ if (APPLE)
     file(GLOB PYTHON_LIB "${SUPPORT_DIR}/lib/libpython3.*.dylib")
 else ()
     set(PYTHON_INCLUDE_DIR "${SUPPORT_DIR}/include")
-    file(GLOB PYTHON_LIB "${SUPPORT_DIR}/libs/python3*.lib")
+    # python3[0-9]* excludes python3.lib, the limited-ABI stub — we use the full API
+    file(GLOB PYTHON_LIB "${SUPPORT_DIR}/libs/python3[0-9]*.lib")
 endif ()
 
 if (NOT PYTHON_LIB OR NOT EXISTS "${PYTHON_INCLUDE_DIR}")
