@@ -40,15 +40,19 @@ namespace max {
 #include "tap.python_tilde.cpp"   // include the object source so we can instantiate it
 
 
-// The mock kernel has no Max package on disk, so construction takes the
-// "no runtime installed" path: the object must come up inert (silent output,
-// no crash) rather than attempting to start Python. Real behavioral coverage
-// (loading a class, generated attributes/messages, audio processing) requires
-// the embedded interpreter and is exercised in Max against the help patcher.
-SCENARIO("object instantiates without a Python runtime") {
+// The object locates its package relative to the executable. In most test
+// environments no support/ runtime exists at that location, so construction
+// takes the "no runtime installed" path and the object must come up inert
+// (silent output, no crash). On CI the test binary can land inside the repo
+// where scripts/install-runtime.* has installed support/ — then the object
+// starts the real interpreter, loads python/default.py, and process() passes
+// audio through at the default gain of 1.0, which we assert instead: a free
+// end-to-end integration test. In-Max behavior is validated against the help
+// patcher.
+SCENARIO("object instantiates, with or without a Python runtime") {
     ext_main(nullptr);
 
-    GIVEN("An instance of tap.python~ with no runtime available") {
+    GIVEN("An instance of tap.python~") {
         test_wrapper<python> an_instance;
         python&              my_object = an_instance;
 
@@ -62,9 +66,17 @@ SCENARIO("object instantiates without a Python runtime") {
 
             my_object(ina, outa);
 
-            THEN("the object outputs silence instead of crashing") {
-                for (auto& s : output)
-                    REQUIRE(s == 0.0);
+            if (Py_IsInitialized()) {
+                THEN("default.py processes the audio at unity gain") {
+                    for (size_t i = 0; i < output.size(); ++i)
+                        REQUIRE(output[i] == input[i]);
+                }
+            }
+            else {
+                THEN("the object outputs silence instead of crashing") {
+                    for (auto& s : output)
+                        REQUIRE(s == 0.0);
+                }
             }
         }
     }
