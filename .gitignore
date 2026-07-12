@@ -1,0 +1,23 @@
+__*
+*.sdf
+*.suo
+*.sln
+*.opensdf
+*.o
+*.dylib
+*.pyc
+__pycache__/
+.DS_Store
+.vs
+build/
+build-*/
+sysbuild
+tmp
+log.txt
+python.log
+externals
+extensions
+package-info.json
+
+# Python runtime installed by scripts/install-runtime.* — never commit it
+support/
