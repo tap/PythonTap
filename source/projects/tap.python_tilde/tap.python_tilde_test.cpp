@@ -8,29 +8,32 @@
 
 // The mock kernel does not implement these Max functions, which the object
 // references for its dynamically generated attributes/messages and its file
-// watcher. Provide inert stubs so the test binary links; none of them run in
-// the no-runtime path exercised below.
+// watcher. Provide inert stubs so the test binary links (the headers declare
+// them with C linkage); none of them run in the no-runtime path exercised
+// below.
 namespace c74 {
 namespace max {
-    MOCK_EXPORT t_object* attribute_new(const char*, t_symbol*, long, method, method) {
-        return nullptr;
+    extern "C" {
+        t_object* attribute_new(const char*, t_symbol*, long, method, method) {
+            return nullptr;
+        }
+        t_max_err object_addattr(void*, t_object*) {
+            return MAX_ERR_GENERIC;
+        }
+        t_max_err object_attr_addattr_parse(t_object*, const char*, const char*, t_symbol*, long, const char*) {
+            return MAX_ERR_GENERIC;
+        }
+        t_max_err object_addmethod(t_object*, method, const char*, ...) {
+            return MAX_ERR_NONE;
+        }
+        t_max_err object_deletemethod(t_object*, t_symbol*) {
+            return MAX_ERR_NONE;
+        }
+        void* filewatcher_new(t_object*, const short, const char*) {
+            return nullptr;
+        }
+        void filewatcher_start(void*) {}
     }
-    MOCK_EXPORT t_max_err object_addattr(void*, t_object*) {
-        return MAX_ERR_GENERIC;
-    }
-    MOCK_EXPORT t_max_err object_attr_addattr_parse(t_object*, const char*, const char*, t_symbol*, long, const char*) {
-        return MAX_ERR_GENERIC;
-    }
-    MOCK_EXPORT t_max_err object_addmethod(t_object*, method, const char*, ...) {
-        return MAX_ERR_NONE;
-    }
-    MOCK_EXPORT t_max_err object_deletemethod(t_object*, t_symbol*) {
-        return MAX_ERR_NONE;
-    }
-    MOCK_EXPORT void* filewatcher_new(t_object*, const short, const char*) {
-        return nullptr;
-    }
-    MOCK_EXPORT void filewatcher_start(void*) {}
 }    // namespace max
 }    // namespace c74
 
