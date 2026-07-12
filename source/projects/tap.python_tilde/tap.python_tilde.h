@@ -10,9 +10,9 @@
 #include <cstdlib>
 #include <Python.h>
 
-#include "python_tilde_cglue.h"
-#include "python_tilde_attribute.h"
-#include "python_tilde_message.h"
+#include "tap.python_tilde_cglue.h"
+#include "tap.python_tilde_attribute.h"
+#include "tap.python_tilde_message.h"
 
 using namespace c74::min;
 

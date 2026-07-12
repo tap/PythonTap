@@ -3,7 +3,7 @@
 /// @license           Use of this source code is governed by the MIT License found in the License.md file.
 
 #include "c74_min_unittest.h"
-#include "python_tilde.cpp"
+#include "tap.python_tilde.cpp"
 
 
 SCENARIO("object produces correct output") {

@@ -209,7 +209,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "signal" ],
 					"patching_rect" : [ 270.0, 210.0, 56.0, 24.0 ],
-					"text" : "python~"
+					"text" : "tap.python~"
 				}
 
 			}
