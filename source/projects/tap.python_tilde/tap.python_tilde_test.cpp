@@ -67,14 +67,16 @@ SCENARIO("object instantiates, with or without a Python runtime") {
 
             if (Py_IsInitialized()) {
                 THEN("default.py processes the audio at unity gain") {
-                    for (size_t i = 0; i < output.size(); ++i)
+                    for (size_t i = 0; i < output.size(); ++i) {
                         REQUIRE(output[i] == input[i]);
+                    }
                 }
             }
             else {
                 THEN("the object outputs silence instead of crashing") {
-                    for (auto& s : output)
+                    for (auto& s : output) {
                         REQUIRE(s == 0.0);
+                    }
                 }
             }
         }
