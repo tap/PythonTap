@@ -1,0 +1,59 @@
+name: Tap House Style
+
+# Enforces the shared Tap House Rules: a drift check against the canonical
+# TapHouse configs, a clang-format layout check, and clang-tidy (naming +
+# mandatory braces) over the object's own sources.
+#
+# Unlike a pure-source package, tap.python~ links an embedded Python runtime,
+# and its CMake hard-requires that runtime to be installed (see
+# scripts/install-runtime). Rather than install it just to produce a compile
+# database, the clang-tidy job invokes clang-tidy directly over the project's
+# translation units with explicit include paths and the system Python headers
+# (python3-dev) — clang-tidy only parses, it does not build or link.
+on: [push, pull_request]
+
+jobs:
+  drift:
+    # Fails if this repo's .clang-format / .clang-tidy / STYLE.md diverge from
+    # the canonical TapHouse copies. Pinned to the v2 tag.
+    uses: tap/taphouse/.github/workflows/drift-check.yml@v2
+    with:
+      ref: v2
+
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format-18
+      - name: clang-format check (sources and headers)
+        run: clang-format-18 --dry-run --Werror $(git ls-files 'source/projects/*.cpp' 'source/projects/*.h')
+
+  clang-tidy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y clang-tidy-18 python3-dev
+      - name: clang-tidy (tap.python~ own TUs, naming + mandatory braces)
+        run: |
+          sdk=source/min-api/max-sdk-base/c74support
+          incs="-Isource/projects/tap.python_tilde -Isource/min-api/include -I$sdk"
+          for d in "$sdk"/*-includes; do incs="$incs -I$d"; done
+          incs="$incs $(python3-config --includes)"
+          fail=0
+          for tu in tap.python_tilde.cpp tap.python_tilde_test.cpp; do
+            out=$(clang-tidy-18 "source/projects/tap.python_tilde/$tu" \
+                    -header-filter='.*/source/projects/.*' \
+                    --warnings-as-errors='readability-*' \
+                    -- -std=c++20 $incs 2>/dev/null || true)
+            # Ignore diagnostics from outside our own sources (min-api, Python, system).
+            if echo "$out" | grep -E "warning:|error:" | grep -q "source/projects/tap.python_tilde"; then
+              echo "$out" | grep -A2 "source/projects/tap.python_tilde.*\(warning\|error\):"
+              fail=1
+            fi
+          done
+          [ "$fail" -eq 0 ] && echo "clang-tidy clean." || { echo "::error::clang-tidy found violations"; exit 1; }
