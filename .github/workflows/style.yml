@@ -41,7 +41,7 @@ jobs:
       - name: clang-tidy (tap.python~ own TUs, naming + mandatory braces)
         run: |
           sdk=source/min-api/max-sdk-base/c74support
-          incs="-Isource/projects/tap.python_tilde -Isource/min-api/include -I$sdk"
+          incs="-Isource/projects/tap.python_tilde -Isource/min-api/include -I$sdk -Isource/min-api/test"
           for d in "$sdk"/*-includes; do incs="$incs -I$d"; done
           incs="$incs $(python3-config --includes)"
           fail=0

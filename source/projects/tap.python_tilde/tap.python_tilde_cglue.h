@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "c74_min_api.h"
+
 // C-style trampolines registered on the Max class for the attributes and
 // messages that are created dynamically from the user's Python class.
 // Implementations are in tap.python_tilde.cpp.
