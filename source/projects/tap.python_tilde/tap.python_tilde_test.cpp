@@ -4,7 +4,7 @@
 
 #include <vector>
 
-#include "c74_min_unittest.h"     // required unit-test header (defines main via Catch)
+#include "c74_min_unittest.h" // required unit-test header (defines main via Catch)
 
 // The mock kernel does not implement these Max functions, which the object
 // references for its dynamically generated attributes/messages and its file
@@ -12,8 +12,8 @@
 // them with C linkage); none of them run in the no-runtime path exercised
 // below.
 namespace c74 {
-namespace max {
-    extern "C" {
+    namespace max {
+        extern "C" {
         t_object* attribute_new(const char*, t_symbol*, long, method, method) {
             return nullptr;
         }
@@ -33,12 +33,11 @@ namespace max {
             return nullptr;
         }
         void filewatcher_start(void*) {}
-    }
-}    // namespace max
-}    // namespace c74
+        }
+    } // namespace max
+} // namespace c74
 
-#include "tap.python_tilde.cpp"   // include the object source so we can instantiate it
-
+#include "tap.python_tilde.cpp" // include the object source so we can instantiate it
 
 // The object locates its package relative to the executable. In most test
 // environments no support/ runtime exists at that location, so construction
@@ -58,11 +57,11 @@ SCENARIO("object instantiates, with or without a Python runtime") {
 
         WHEN("audio is processed") {
             std::vector<double> input(64, 0.5);
-            std::vector<double> output(64, 1.0);    // non-zero so we can tell clear() ran
-            double*             inp[1]  = { input.data() };
-            double*             outp[1] = { output.data() };
-            audio_bundle        ina { inp, 1, static_cast<long>(input.size()) };
-            audio_bundle        outa { outp, 1, static_cast<long>(output.size()) };
+            std::vector<double> output(64, 1.0); // non-zero so we can tell clear() ran
+            double*             inp[1]  = {input.data()};
+            double*             outp[1] = {output.data()};
+            audio_bundle        ina{inp, 1, static_cast<long>(input.size())};
+            audio_bundle        outa{outp, 1, static_cast<long>(output.size())};
 
             my_object(ina, outa);
 
