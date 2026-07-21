@@ -33,8 +33,8 @@ jobs:
           submodules: recursive
       - name: Install the embedded Python runtime (needed to configure)
         run: ./scripts/install-runtime.sh
-      - name: Install clang-tidy (LLVM 18)
-        run: brew install llvm@18
+      - name: Install clang-tidy (LLVM 20 — parses the macOS SDK libc++)
+        run: brew install llvm@20
       - name: Configure (compile database)
         # Single-arch: the package otherwise defaults to a universal build
         # (arm64;x86_64), whose two -arch flags make one compile command emit
@@ -43,7 +43,7 @@ jobs:
         run: cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_OSX_ARCHITECTURES=arm64
       - name: clang-tidy (Max externals' own TUs; min-api and deps excluded)
         run: |
-          tidy="$(brew --prefix llvm@18)/bin/clang-tidy"
+          tidy="$(brew --prefix llvm@20)/bin/clang-tidy"
           files=$(python3 -c "import json; print('\n'.join(e['file'] for e in json.load(open('build/compile_commands.json')) if '/source/projects/' in e['file']))")
           fail=0
           # Scope diagnostics to this object's OWN headers. A broad
