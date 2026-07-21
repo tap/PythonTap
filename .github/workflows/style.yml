@@ -46,8 +46,13 @@ jobs:
           tidy="$(brew --prefix llvm@18)/bin/clang-tidy"
           files=$(python3 -c "import json; print('\n'.join(e['file'] for e in json.load(open('build/compile_commands.json')) if '/source/projects/' in e['file']))")
           fail=0
+          # Scope diagnostics to this object's OWN headers. A broad
+          # '.*/source/projects/.*' also matches the bundled CPython headers,
+          # which the build includes via a relative path that passes back
+          # through source/projects (…/tap.python_tilde/../../../support/…),
+          # flooding the run with CPython naming violations.
           for f in $files; do
-            out=$("$tidy" -p build -header-filter='.*/source/projects/.*' --warnings-as-errors='readability-*' "$f" 2>/dev/null || true)
+            out=$("$tidy" -p build -header-filter='.*/tap\.python_tilde/tap\.python_tilde.*' --warnings-as-errors='readability-*' "$f" 2>/dev/null || true)
             if echo "$out" | grep -qE "warning:|error:"; then echo "$out"; fail=1; fi
           done
           [ "$fail" -eq 0 ] && echo "clang-tidy clean." || { echo "::error::clang-tidy found violations"; exit 1; }
