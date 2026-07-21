@@ -5,6 +5,7 @@
 #pragma once
 
 #include "c74_min_api.h"
+#include "tap.python_tilde_cglue.h"
 
 class python;
 
