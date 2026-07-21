@@ -36,14 +36,18 @@ jobs:
       - name: Install clang-tidy (LLVM 18)
         run: brew install llvm@18
       - name: Configure (compile database)
-        run: cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-      - name: clang-tidy (project TUs; min-api and fetched deps excluded)
+        # Single-arch: the package otherwise defaults to a universal build
+        # (arm64;x86_64), whose two -arch flags make one compile command emit
+        # two compiler jobs — which clang-tidy cannot process ("expected exactly
+        # one compiler job"). One arch is enough to lint the sources.
+        run: cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_OSX_ARCHITECTURES=arm64
+      - name: clang-tidy (Max externals' own TUs; min-api and deps excluded)
         run: |
           tidy="$(brew --prefix llvm@18)/bin/clang-tidy"
-          files=$(python3 -c "import json; print('\n'.join(e['file'] for e in json.load(open('build/compile_commands.json')) if 'source/projects' in e['file']))")
+          files=$(python3 -c "import json; print('\n'.join(e['file'] for e in json.load(open('build/compile_commands.json')) if '/source/projects/' in e['file']))")
           fail=0
           for f in $files; do
-            out=$("$tidy" -p build --warnings-as-errors='readability-*' "$f" 2>/dev/null || true)
+            out=$("$tidy" -p build -header-filter='.*/source/projects/.*' --warnings-as-errors='readability-*' "$f" 2>/dev/null || true)
             if echo "$out" | grep -qE "warning:|error:"; then echo "$out"; fail=1; fi
           done
           [ "$fail" -eq 0 ] && echo "clang-tidy clean." || { echo "::error::clang-tidy found violations"; exit 1; }

@@ -153,8 +153,9 @@ namespace tap::python {
 #else
         PyStatus status = PyConfig_SetBytesString(&config, &config.home, home.string().c_str());
 #endif
-            if (!PyStatus_Exception(status))
+            if (!PyStatus_Exception(status)) {
                 status = Py_InitializeFromConfig(&config);
+            }
             PyConfig_Clear(&config);
 
             if (PyStatus_Exception(status)) {
@@ -173,8 +174,9 @@ namespace tap::python {
 #else
             PyObject* dir = PyUnicode_DecodeFSDefault(scripts_dir.string().c_str());
 #endif
-                if (sys_path && dir)
+                if (sys_path && dir) {
                     PyList_Insert(sys_path, 0, dir); // does not steal the reference
+                }
                 Py_XDECREF(dir);
             }
 
