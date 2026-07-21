@@ -1,0 +1,49 @@
+name: Tap House Style
+
+# Enforces the shared Tap House Rules: (1) a drift check against the canonical
+# TapHouse configs, (2) a clang-format layout check, and (3) clang-tidy naming +
+# mandatory-braces over the external's own translation units.
+#
+# tap.python~ only configures with the embedded Python runtime present, and that
+# runtime installs on macOS/Windows only — so the clang-tidy gate (which needs a
+# compile database) runs on macOS. The drift and clang-format checks are
+# platform-independent and stay on Linux.
+on: [push, pull_request]
+
+jobs:
+  drift:
+    uses: tap/taphouse/.github/workflows/drift-check.yml@v4
+    with:
+      ref: v4
+
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: sudo apt-get update -q && sudo apt-get install -y -q clang-format-18
+      - name: clang-format check (own sources)
+        run: clang-format-18 --dry-run --Werror $(git ls-files 'source/projects/*.cpp' 'source/projects/*.h')
+
+  clang-tidy:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install the embedded Python runtime (needed to configure)
+        run: ./scripts/install-runtime.sh
+      - name: Install clang-tidy (LLVM 18)
+        run: brew install llvm@18
+      - name: Configure (compile database)
+        run: cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+      - name: clang-tidy (project TUs; min-api and fetched deps excluded)
+        run: |
+          tidy="$(brew --prefix llvm@18)/bin/clang-tidy"
+          files=$(python3 -c "import json; print('\n'.join(e['file'] for e in json.load(open('build/compile_commands.json')) if 'source/projects' in e['file']))")
+          fail=0
+          for f in $files; do
+            out=$("$tidy" -p build --warnings-as-errors='readability-*' "$f" 2>/dev/null || true)
+            if echo "$out" | grep -qE "warning:|error:"; then echo "$out"; fail=1; fi
+          done
+          [ "$fail" -eq 0 ] && echo "clang-tidy clean." || { echo "::error::clang-tidy found violations"; exit 1; }

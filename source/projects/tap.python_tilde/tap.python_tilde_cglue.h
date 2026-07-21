@@ -8,8 +8,10 @@
 // messages that are created dynamically from the user's Python class.
 // Implementations are in tap.python_tilde.cpp.
 
-c74::max::t_max_err python_attr_set(c74::max::t_object* x, c74::max::t_object* maxattr, const long argc, const c74::max::t_atom* argv);
-c74::max::t_max_err python_attr_get(c74::max::t_object* x, c74::max::t_object* maxattr, long* argc, c74::max::t_atom** argv);
+c74::max::t_max_err python_attr_set(c74::max::t_object* x, c74::max::t_object* maxattr, const long argc,
+                                    const c74::max::t_atom* argv);
+c74::max::t_max_err python_attr_get(c74::max::t_object* x, c74::max::t_object* maxattr, long* argc,
+                                    c74::max::t_atom** argv);
 
 c74::max::t_max_err python_mess_int(c74::max::t_object* x, long value);
 c74::max::t_max_err python_mess_float(c74::max::t_object* x, double value);
