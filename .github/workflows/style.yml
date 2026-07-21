@@ -4,10 +4,12 @@ name: Tap House Style
 # TapHouse configs, (2) a clang-format layout check, and (3) clang-tidy naming +
 # mandatory-braces over the external's own translation units.
 #
-# tap.python~ only configures with the embedded Python runtime present, and that
-# runtime installs on macOS/Windows only — so the clang-tidy gate (which needs a
-# compile database) runs on macOS. The drift and clang-format checks are
-# platform-independent and stay on Linux.
+# All three run on Linux with the same clang-tidy-18 as the rest of the family.
+# tap.python~ only *configures* (via CMake) with the bundled Python runtime,
+# which installs on macOS/Windows only — but linting just needs headers, so the
+# clang-tidy step compiles the TUs directly against min-api and the system
+# Python headers instead of a compile database. (Running the lint on macOS
+# instead means fighting the SDK's libc++ against a standalone clang-tidy.)
 on: [push, pull_request]
 
 jobs:
@@ -26,33 +28,29 @@ jobs:
         run: clang-format-18 --dry-run --Werror $(git ls-files 'source/projects/*.cpp' 'source/projects/*.h')
 
   clang-tidy:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Install the embedded Python runtime (needed to configure)
-        run: ./scripts/install-runtime.sh
-      - name: Install clang-tidy (LLVM 20 — parses the macOS SDK libc++)
-        run: brew install llvm@20
-      - name: Configure (compile database)
-        # Single-arch: the package otherwise defaults to a universal build
-        # (arm64;x86_64), whose two -arch flags make one compile command emit
-        # two compiler jobs — which clang-tidy cannot process ("expected exactly
-        # one compiler job"). One arch is enough to lint the sources.
-        run: cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_OSX_ARCHITECTURES=arm64
-      - name: clang-tidy (Max externals' own TUs; min-api and deps excluded)
+      - name: Install tools
+        run: sudo apt-get update -q && sudo apt-get install -y -q clang-tidy-18 python3-dev
+      - name: clang-tidy (this object's own TUs; min-api, CPython, deps excluded)
         run: |
-          tidy="$(brew --prefix llvm@20)/bin/clang-tidy"
-          files=$(python3 -c "import json; print('\n'.join(e['file'] for e in json.load(open('build/compile_commands.json')) if '/source/projects/' in e['file']))")
+          d=source/projects/tap.python_tilde
+          msdk=source/min-api/max-sdk-base/c74support
+          pyinc=$(python3 -c "import sysconfig; print(sysconfig.get_path('include'))")
+          inc="-Isource/min-api/include -I$msdk -I$msdk/max-includes -I$msdk/msp-includes -I$msdk/jit-includes -I$pyinc -I$d"
+          # Scope diagnostics to this object's own headers: a path filter over
+          # source/projects would also match the bundled CPython headers, which
+          # are reached via …/tap.python_tilde/../../../support/… .
+          hf='.*/tap\.python_tilde/tap\.python_tilde.*'
           fail=0
-          # Scope diagnostics to this object's OWN headers. A broad
-          # '.*/source/projects/.*' also matches the bundled CPython headers,
-          # which the build includes via a relative path that passes back
-          # through source/projects (…/tap.python_tilde/../../../support/…),
-          # flooding the run with CPython naming violations.
-          for f in $files; do
-            out=$("$tidy" -p build -header-filter='.*/tap\.python_tilde/tap\.python_tilde.*' --warnings-as-errors='readability-*' "$f" 2>/dev/null || true)
+          check() { # <file> <extra compile args…>
+            local f="$1"; shift
+            out=$(clang-tidy-18 -header-filter="$hf" --warnings-as-errors='readability-*' "$f" -- -std=c++17 $inc "$@" 2>/dev/null || true)
             if echo "$out" | grep -qE "warning:|error:"; then echo "$out"; fail=1; fi
-          done
+          }
+          check "$d/tap.python_tilde.cpp" -DC74_MIN_API
+          check "$d/tap.python_tilde_test.cpp" -DC74_MIN_API -DMIN_TEST -Isource/min-api/test -DCATCH_CONFIG_NO_CPP17_UNCAUGHT_EXCEPTIONS
           [ "$fail" -eq 0 ] && echo "clang-tidy clean." || { echo "::error::clang-tidy found violations"; exit 1; }
