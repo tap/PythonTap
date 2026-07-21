@@ -1,0 +1,56 @@
+name: Tap House Style
+
+# Enforces the shared Tap House Rules: (1) a drift check against the canonical
+# TapHouse configs, (2) a clang-format layout check, and (3) clang-tidy naming +
+# mandatory-braces over the external's own translation units.
+#
+# All three run on Linux with the same clang-tidy-18 as the rest of the family.
+# tap.python~ only *configures* (via CMake) with the bundled Python runtime,
+# which installs on macOS/Windows only — but linting just needs headers, so the
+# clang-tidy step compiles the TUs directly against min-api and the system
+# Python headers instead of a compile database. (Running the lint on macOS
+# instead means fighting the SDK's libc++ against a standalone clang-tidy.)
+on: [push, pull_request]
+
+jobs:
+  drift:
+    uses: tap/taphouse/.github/workflows/drift-check.yml@v4
+    with:
+      ref: v4
+
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: sudo apt-get update -q && sudo apt-get install -y -q clang-format-18
+      - name: clang-format check (own sources)
+        run: clang-format-18 --dry-run --Werror $(git ls-files 'source/projects/*.cpp' 'source/projects/*.h')
+
+  clang-tidy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install tools
+        run: sudo apt-get update -q && sudo apt-get install -y -q clang-tidy-18 python3-dev
+      - name: clang-tidy (this object's own TUs; min-api, CPython, deps excluded)
+        run: |
+          d=source/projects/tap.python_tilde
+          msdk=source/min-api/max-sdk-base/c74support
+          pyinc=$(python3 -c "import sysconfig; print(sysconfig.get_path('include'))")
+          inc="-Isource/min-api/include -I$msdk -I$msdk/max-includes -I$msdk/msp-includes -I$msdk/jit-includes -I$pyinc -I$d"
+          # Scope diagnostics to this object's own headers: a path filter over
+          # source/projects would also match the bundled CPython headers, which
+          # are reached via …/tap.python_tilde/../../../support/… .
+          hf='.*/tap\.python_tilde/tap\.python_tilde.*'
+          fail=0
+          check() { # <file> <extra compile args…>
+            local f="$1"; shift
+            out=$(clang-tidy-18 -header-filter="$hf" --warnings-as-errors='readability-*' "$f" -- -std=c++17 $inc "$@" 2>/dev/null || true)
+            if echo "$out" | grep -qE "warning:|error:"; then echo "$out"; fail=1; fi
+          }
+          check "$d/tap.python_tilde.cpp" -DC74_MIN_API
+          check "$d/tap.python_tilde_test.cpp" -DC74_MIN_API -DMIN_TEST -Isource/min-api/test -DCATCH_CONFIG_NO_CPP17_UNCAUGHT_EXCEPTIONS
+          [ "$fail" -eq 0 ] && echo "clang-tidy clean." || { echo "::error::clang-tidy found violations"; exit 1; }
