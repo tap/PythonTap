@@ -21,6 +21,6 @@
 		"copyright" : "Copyright (c) 2022-2026 Timothy Place",
 		"add_verinfo" : true
 	},
-	"website" : "https://github.com/tap/Python-Max",
+	"website" : "https://github.com/tap/PythonTap",
 	"tags" : [ "python", "programming", "dsp" ]
 }
