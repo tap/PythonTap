@@ -83,11 +83,11 @@ cmake --build build --config Release    # externals land in externals/
 ctest --test-dir build                  # unit tests (mock kernel, no Max needed)
 ```
 
-On macOS the default build is **universal** (arm64 + x86_64), so it links against a universal `libpython` — install the runtime with `./scripts/install-runtime.sh --universal` (as CI does). Building against a native-only runtime fails at link time with `symbol(s) not found for architecture arm64` (or `x86_64`). For faster local iteration, build for just your machine's architecture, which pairs with the plain native install:
+On macOS the build matches the architectures of the installed runtime: a universal `libpython` (installed with `./scripts/install-runtime.sh --universal`, as CI does) gives a **universal** (arm64 + x86_64) external — required for anything you ship — while a plain native install gives a faster native-only build for local iteration. An explicit `-DCMAKE_OSX_ARCHITECTURES=...` overrides the default, but must not be wider than the runtime or the link fails with `symbol(s) not found for architecture arm64` (or `x86_64`).
 
 ```sh
-./scripts/install-runtime.sh                                                    # native libpython
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64  # your arch
+./scripts/install-runtime.sh --universal   # universal libpython → universal external (ship this)
+./scripts/install-runtime.sh               # native libpython → native external (fast iteration)
 ```
 
 On Windows, configure with `cmake -S . -B build -A x64`.

@@ -16,9 +16,30 @@ string(REGEX REPLACE "(.*)/" "" THIS_PACKAGE_NAME "${CMAKE_CURRENT_SOURCE_DIR}")
 if (APPLE)
     # Build universal binaries (Apple Silicon + Intel) by default. Max 9 runs
     # natively on Apple Silicon; never ship an Intel-only external.
+    #
+    # ...but never build wider than the embedded Python runtime in support/,
+    # which the external links against: a universal build over a native-only
+    # runtime fails at link with "symbol(s) not found for architecture ...".
+    # install-runtime.sh installs native by default and universal with
+    # --universal (as CI does), so when the runtime is already present, match
+    # its architectures. An explicitly-set CMAKE_OSX_ARCHITECTURES still wins.
     if (NOT CMAKE_OSX_ARCHITECTURES)
-        set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS architectures" FORCE)
-        message(STATUS "CMAKE_OSX_ARCHITECTURES set to ${CMAKE_OSX_ARCHITECTURES}")
+        set(_tap_python_archs "arm64;x86_64")
+        set(_tap_python_archs_source "universal default; no support/ runtime yet")
+        file(GLOB _tap_python_dylib "${CMAKE_CURRENT_SOURCE_DIR}/support/lib/libpython3.*.dylib")
+        if (_tap_python_dylib)
+            list(GET _tap_python_dylib 0 _tap_python_dylib)
+            execute_process(COMMAND lipo -archs "${_tap_python_dylib}"
+                            OUTPUT_VARIABLE _tap_runtime_archs
+                            OUTPUT_STRIP_TRAILING_WHITESPACE
+                            ERROR_QUIET)
+            if (_tap_runtime_archs)
+                string(REPLACE " " ";" _tap_python_archs "${_tap_runtime_archs}")
+                set(_tap_python_archs_source "matching the support/ runtime")
+            endif ()
+        endif ()
+        set(CMAKE_OSX_ARCHITECTURES "${_tap_python_archs}" CACHE STRING "macOS architectures" FORCE)
+        message(STATUS "CMAKE_OSX_ARCHITECTURES set to ${CMAKE_OSX_ARCHITECTURES} (${_tap_python_archs_source})")
     endif ()
 
     # Minimum macOS is 11.0, tracking Max 9's system requirement. Min's

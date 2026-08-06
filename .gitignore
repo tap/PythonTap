@@ -21,3 +21,7 @@ package-info.json
 
 # Python runtime installed by scripts/install-runtime.* — never commit it
 support/
+
+# Unit-test build output (mock kernel + test executable land here, as in the
+# other *-Max packages)
+/tests/
