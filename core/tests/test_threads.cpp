@@ -37,12 +37,14 @@ SCENARIO("Attributes and messages from another thread are safe while audio runs"
     }};
 
     // this thread plays Max's main/scheduler threads
+    const value              quarter{0.25};
+    const std::vector<value> half{0.5};
     for (int i = 0; i < 2000; ++i) {
         if (i % 2 == 0) {
-            p.set_attribute("level", 0.25);
+            p.set_attribute("level", quarter);
         }
         else {
-            p.call("set_level", std::vector<value>{0.5});
+            p.call("set_level", half);
         }
         p.get_attribute("level", value_type::real);
     }

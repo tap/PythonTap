@@ -18,6 +18,7 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 namespace tap::python {
@@ -42,12 +43,52 @@ namespace tap::python {
         std::string error;
     };
 
+    namespace detail {
+
+        /// The thread that called initialize(); its thread state belongs to the interpreter.
+        inline std::thread::id& init_thread() {
+            static std::thread::id s_init_thread;
+            return s_init_thread;
+        }
+
+        /// Keeps one Python thread state alive for the life of the calling thread, by holding a
+        /// PyGILState_Ensure() open without the GIL (plan 1.4). Without it, every gil_lock on a
+        /// thread Python did not create (Max's audio and scheduler threads) would create and destroy
+        /// a thread state — an allocation and an interpreter-wide lock per audio vector — and wipe
+        /// that thread's Python state (threading.local, contexts) every time.
+        class thread_state_keeper {
+          public:
+            thread_state_keeper()
+                : m_outer{PyGILState_Ensure()}
+                , m_thread_state{PyEval_SaveThread()} {}
+
+            ~thread_state_keeper() {
+                // At thread exit, give the thread state back. Never on the interpreter's own thread
+                // (its state outlives us), nor once the interpreter is going away.
+                if (std::this_thread::get_id() == init_thread() || !Py_IsInitialized() || Py_IsFinalizing()) {
+                    return;
+                }
+                PyEval_RestoreThread(m_thread_state);
+                PyGILState_Release(m_outer);
+            }
+
+            thread_state_keeper(const thread_state_keeper&)            = delete;
+            thread_state_keeper& operator=(const thread_state_keeper&) = delete;
+
+          private:
+            PyGILState_STATE m_outer;
+            PyThreadState*   m_thread_state;
+        };
+
+    } // namespace detail
+
     /// RAII guard for the GIL. Every call into the CPython API after initialize() must hold one of
     /// these — hosts call in from several threads (e.g. Max's main, scheduler and audio threads).
+    /// The first gil_lock on a thread gives it a Python thread state that lives as long as the thread.
     class gil_lock {
       public:
         gil_lock()
-            : m_state{PyGILState_Ensure()} {}
+            : m_state{acquire()} {}
 
         ~gil_lock() { PyGILState_Release(m_state); }
 
@@ -56,6 +97,11 @@ namespace tap::python {
 
       private:
         PyGILState_STATE m_state;
+
+        static PyGILState_STATE acquire() {
+            static thread_local detail::thread_state_keeper s_keeper;
+            return PyGILState_Ensure();
+        }
     };
 
     namespace detail {
@@ -170,6 +216,22 @@ namespace tap::python {
 
     } // namespace detail
 
+    /// Print the pending Python exception to sys.stderr (the host console) and clear it. Caller
+    /// holds the GIL; does nothing when no exception is set.
+    ///
+    /// Use this, never PyErr_Print(): for a SystemExit, PyErr_Print() calls Py_Exit() and ends the
+    /// host process — so user code calling sys.exit() would quit Max. Here a SystemExit is reported
+    /// like any other exception. It also leaves sys.last_exc unset, so a failed call does not keep
+    /// its frames (and the objects they reference) alive.
+    inline void report_exception() {
+        PyObject* exception = PyErr_GetRaisedException();
+        if (!exception) {
+            return;
+        }
+        PyErr_DisplayException(exception);
+        Py_DECREF(exception);
+    }
+
     /// Replace the console sink (e.g. a test capturing Python's output). Thread-safe.
     inline void set_console(log_function sink) {
         auto&                       state = detail::console();
@@ -195,6 +257,7 @@ namespace tap::python {
         std::call_once(s_once, [&] {
             set_console(options.console);
             detail::scripts_directory() = options.scripts_dir;
+            detail::init_thread()       = std::this_thread::get_id();
             PyImport_AppendInittab("_maxconsole", detail::console_module_init);
 
             PyConfig config;
