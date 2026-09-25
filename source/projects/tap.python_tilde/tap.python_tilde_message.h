@@ -11,23 +11,19 @@ class python;
 
 using namespace c74::min;
 
-/// A Max message dynamically added to a tap.python~ instance, bound to a method
-/// of the user's Python class. Owns a strong reference to the Python function so
-/// the binding survives (and is correctly released across) module reloads.
-/// Instances are owned via unique_ptr in the object's message map; the caller is
-/// responsible for holding the GIL during construction and destruction.
+/// A Max message dynamically added to a tap.python~ instance for a method of the
+/// user's Python class. It only registers the Max method; the Python side (the
+/// bound function and its argument types) is owned by the core's processor, which
+/// the object's message handler dispatches to by name. Instances are owned via
+/// unique_ptr in the object's message map and rebuilt on every reload.
 class python_message {
   public:
-    python_message(c74::max::t_object* owner, const string& a_name, PyObject* a_function, const strings& in_types)
+    python_message(c74::max::t_object* owner, const string& name)
         : m_owner{owner}
-        , m_name{a_name}
-        , m_function{a_function}
-        , m_in_types{in_types} {
+        , m_name{name} {
         if (m_owner == nullptr) {
             return; // this occurs during dummy construction
         }
-
-        Py_XINCREF(m_function);
 
         c74::max::t_max_err err{};
 
@@ -56,18 +52,10 @@ class python_message {
         }
     }
 
-    ~python_message() { Py_XDECREF(m_function); }
-
     python_message(const python_message&)            = delete;
     python_message& operator=(const python_message&) = delete;
-
-    PyObject* function() const { return m_function; }
-
-    const strings& arg_types() const { return m_in_types; }
 
   private:
     c74::max::t_object* m_owner;
     string              m_name;
-    PyObject*           m_function; // strong reference
-    strings             m_in_types;
 };

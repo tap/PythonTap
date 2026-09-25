@@ -39,9 +39,13 @@ endif ()
 list(GET PYTHON_LIB 0 PYTHON_LIB)
 message(STATUS "Embedding Python: ${PYTHON_LIB}")
 
+# The host-independent CPython layer (tap::python), shared with the core's own Linux test battery.
+set(TAP_PYTHON_CORE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../core/include")
+
 include_directories(
     "${C74_INCLUDES}"
     "${PYTHON_INCLUDE_DIR}"
+    "${TAP_PYTHON_CORE_INCLUDE_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
@@ -52,7 +56,7 @@ include_directories(
 
 set(SOURCE_FILES
     ${PROJECT_NAME}.h
-    ${PROJECT_NAME}_runtime.h
+    ${PROJECT_NAME}_package.h
     ${PROJECT_NAME}_cglue.h
     ${PROJECT_NAME}_attribute.h
     ${PROJECT_NAME}_message.h
@@ -72,9 +76,7 @@ if (APPLE)
 endif ()
 
 include(${C74_MIN_API_DIR}/script/min-posttarget.cmake)
-
-# Min's posttarget pins C++17; the object uses C++20.
-set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 20)
+# (C++20 is forced on this target and its test by the root CMakeLists.txt.)
 
 
 #############################################################

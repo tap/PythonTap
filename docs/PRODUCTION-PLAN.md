@@ -3,7 +3,8 @@
 Drafting record for taking `tap.python~` from a working sketch to a shippable 1.0. It grew out of
 a four-dimension audit (threading/RT safety, CPython C-API use, build/CI/supply chain,
 tests/docs/conventions) in September 2026; the findings are summarized per phase below with
-file:line anchors as of commit `b6dc003`. Keep this file current as phases land — tick items and
+file:line anchors as of commit `b6dc003` (since Phase 0.1, the CPython-facing code those anchors
+point at lives in `core/include/tap/python/processor.h` and `runtime.h`). Keep this file current as phases land — tick items and
 note the PR that closed them.
 
 ## The bar
@@ -35,15 +36,19 @@ Every later phase needs proof, and today the one unit test passes on either bran
 core split (D6) makes the CPython layer buildable and testable on Linux, so fixes can be
 reproduced and pinned there first.
 
-- [ ] **0.1 Extract the core (D6).** `core/include/tap/python/` — `runtime.h` (initialization,
+- [x] **0.1 Extract the core (D6).** `core/include/tap/python/` — `runtime.h` (initialization,
   `gil_lock`, the console module), `value.h` (the Max-atom value model and its coercion rules),
   `processor.h` (load/reload, introspection, attribute/message dispatch, `process()`). The
   extraction is behavior-preserving except where noted in its PR; the known bugs are fixed in
   Phase 1 against tests that reproduce them.
-- [ ] **0.2 Linux core battery.** `core/tests/` (Catch2, the family's FetchContent pin) against
+- [x] **0.2 Linux core battery.** `core/tests/` (Catch2, the family's FetchContent pin) against
   CPython 3.13 from `find_package(Python3)`: runtime start-up and the console, the coercion table,
   load/reload/error paths, attribute and message dispatch, `process()`, a real audio thread racing
-  main-thread messages, and the shipped examples. A `linux-core` CI job, plus an ASan/UBSan job.
+  main-thread messages, and the shipped examples. A `linux-core` CI job, plus ASan/UBSan and TSan
+  rows. The Max test target moved to C++20 with it (the core needs `std::span`).
+  *Found on the way:* a newly created processor gets a module this process already imported,
+  even if its file changed since (the first load goes through `sys.modules`) — pinned as an honest
+  limit, fixed by file-based loading (3.5).
 - [ ] **0.3 Injectable package root for the Max test.** Under `MIN_TEST`, let the test set the
   package root (e.g. `TAP_PYTHON_PACKAGE_ROOT`). Today `package_root()` walks five levels up from
   the test binary on macOS and lands outside the repo, so the macOS job never starts Python.

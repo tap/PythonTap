@@ -6,6 +6,7 @@
 
 #include "c74_min_api.h"
 #include "tap.python_tilde_cglue.h"
+#include "tap/python/value.h"
 
 class python;
 
@@ -17,18 +18,20 @@ using namespace c74::min;
 /// (the underlying Max attribute object stays registered on the Max object).
 class python_attr {
   public:
-    python_attr(c74::max::t_object* owner, const string& a_name, const string& a_type)
+    python_attr(c74::max::t_object* owner, const string& name, const tap::python::value_type type)
         : m_owner{owner}
-        , m_name{a_name}
-        , m_typename{a_type} {
-        if (m_typename == "int") {
+        , m_name{name}
+        , m_value_type{type} {
+        switch (m_value_type) {
+        case tap::python::value_type::integer:
             m_type = k_sym_long;
-        }
-        else if (m_typename == "float") {
+            break;
+        case tap::python::value_type::real:
             m_type = k_sym_float64;
-        }
-        else {
+            break;
+        case tap::python::value_type::symbol:
             m_type = k_sym_symbol;
+            break;
         }
 
         m_attrobj = c74::max::attribute_new(m_name.c_str(), m_type, 0, (c74::max::method)python_attr_get,
@@ -48,12 +51,16 @@ class python_attr {
     python_attr(const python_attr&)            = delete;
     python_attr& operator=(const python_attr&) = delete;
 
+    /// The Max attribute type (long, float64 or symbol).
     symbol type() const { return m_type; }
 
+    /// The core value type the attribute was created with; fixed for the attribute's lifetime.
+    tap::python::value_type value_type() const { return m_value_type; }
+
   private:
-    c74::max::t_object* m_owner;
-    string              m_name;
-    string              m_typename;
-    symbol              m_type;
-    c74::max::t_object* m_attrobj{};
+    c74::max::t_object*     m_owner;
+    string                  m_name;
+    tap::python::value_type m_value_type;
+    symbol                  m_type;
+    c74::max::t_object*     m_attrobj{};
 };
