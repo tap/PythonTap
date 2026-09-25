@@ -6,6 +6,19 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ## Unreleased
 
+### Installation
+
+- The runtime installers verify the CPython download against a SHA256 committed in
+  `scripts/runtime.lock`, and install attrs and numpy at the versions and hashes pinned in
+  `scripts/requirements.lock` (previously: the release's own checksum file, and whatever PyPI
+  served that day). `scripts/update-locks.py` moves the pins.
+- Re-running an installer no longer deletes the runtime first: the old one is kept until the new
+  one is complete and restored if anything fails. The Windows installer now stops on a failed
+  `tar` or `pip` instead of reporting success. On an Apple Silicon Mac, a Terminal running under
+  Rosetta now installs the arm64 runtime Max needs. `install-runtime.sh` rejects unknown options.
+- The `PBS_RELEASE`/`PYTHON_SERIES` environment overrides (and the `.ps1` parameters) are gone:
+  the pins live in the lock files.
+
 ### Changed (breaking)
 
 - **Reserved method names.** A method named like a message Max or the object handles itself —

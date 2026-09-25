@@ -22,25 +22,50 @@ if (APPLE)
     # which the external links against: a universal build over a native-only
     # runtime fails at link with "symbol(s) not found for architecture ...".
     # install-runtime.sh installs native by default and universal with
-    # --universal (as CI does), so when the runtime is already present, match
-    # its architectures. An explicitly-set CMAKE_OSX_ARCHITECTURES still wins.
-    if (NOT CMAKE_OSX_ARCHITECTURES)
-        set(_tap_python_archs "arm64;x86_64")
-        set(_tap_python_archs_source "universal default; no support/ runtime yet")
-        file(GLOB _tap_python_dylib "${CMAKE_CURRENT_SOURCE_DIR}/support/lib/libpython3.*.dylib")
-        if (_tap_python_dylib)
-            list(GET _tap_python_dylib 0 _tap_python_dylib)
-            execute_process(COMMAND lipo -archs "${_tap_python_dylib}"
-                            OUTPUT_VARIABLE _tap_runtime_archs
-                            OUTPUT_STRIP_TRAILING_WHITESPACE
-                            ERROR_QUIET)
-            if (_tap_runtime_archs)
-                string(REPLACE " " ";" _tap_python_archs "${_tap_runtime_archs}")
-                set(_tap_python_archs_source "matching the support/ runtime")
-            endif ()
+    # --universal (as CI does), so when the runtime is present, match its
+    # architectures.
+    #
+    # The detected value is remembered, and detection re-runs on every configure
+    # for as long as CMAKE_OSX_ARCHITECTURES still holds it — so reinstalling the
+    # runtime (native <-> universal) is picked up by an existing build folder.
+    # A value you set yourself is never overwritten, but it is checked below.
+    set(_tap_python_dylib "")
+    set(_tap_runtime_archs "")
+    file(GLOB _tap_python_dylib "${CMAKE_CURRENT_SOURCE_DIR}/support/lib/libpython3.*.dylib")
+    if (_tap_python_dylib)
+        list(GET _tap_python_dylib 0 _tap_python_dylib)
+        execute_process(COMMAND lipo -archs "${_tap_python_dylib}"
+                        OUTPUT_VARIABLE _tap_runtime_archs
+                        OUTPUT_STRIP_TRAILING_WHITESPACE
+                        ERROR_QUIET)
+        string(REPLACE " " ";" _tap_runtime_archs "${_tap_runtime_archs}")
+    endif ()
+
+    if (NOT CMAKE_OSX_ARCHITECTURES OR "${CMAKE_OSX_ARCHITECTURES}" STREQUAL "${TAP_PYTHON_AUTO_ARCHITECTURES}")
+        if (_tap_runtime_archs)
+            set(_tap_python_archs "${_tap_runtime_archs}")
+            set(_tap_python_archs_source "matching the support/ runtime")
+        else ()
+            set(_tap_python_archs "arm64;x86_64")
+            set(_tap_python_archs_source "universal default; no support/ runtime yet")
         endif ()
         set(CMAKE_OSX_ARCHITECTURES "${_tap_python_archs}" CACHE STRING "macOS architectures" FORCE)
+        set(TAP_PYTHON_AUTO_ARCHITECTURES "${_tap_python_archs}" CACHE INTERNAL
+            "The CMAKE_OSX_ARCHITECTURES value last detected from the runtime")
         message(STATUS "CMAKE_OSX_ARCHITECTURES set to ${CMAKE_OSX_ARCHITECTURES} (${_tap_python_archs_source})")
+    endif ()
+
+    # Whatever the source, refuse to configure a build the runtime cannot link.
+    if (_tap_runtime_archs)
+        foreach (_arch ${CMAKE_OSX_ARCHITECTURES})
+            if (NOT _arch IN_LIST _tap_runtime_archs)
+                message(FATAL_ERROR
+                    "CMAKE_OSX_ARCHITECTURES includes ${_arch}, but the runtime in support/ only has "
+                    "${_tap_runtime_archs} — the link would fail. Run ./scripts/install-runtime.sh "
+                    "--universal for a universal build, or configure with a narrower "
+                    "-DCMAKE_OSX_ARCHITECTURES.")
+            endif ()
+        endforeach ()
     endif ()
 
     # Minimum macOS is 11.0, tracking Max 9's system requirement. Min's

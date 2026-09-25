@@ -88,6 +88,9 @@ target_link_libraries(${PROJECT_NAME} PUBLIC "${PYTHON_LIB}")
 
 if (APPLE)
     target_link_options(${PROJECT_NAME} PRIVATE "-Wl,-rpath,@loader_path/../../../../support/lib")
+    # Only that relative rpath: without this CMake also embeds the absolute path of
+    # the build machine's support/lib, which would leak into every shipped binary.
+    set_target_properties(${PROJECT_NAME} PROPERTIES BUILD_WITH_INSTALL_RPATH ON)
 endif ()
 
 include(${C74_MIN_API_DIR}/script/min-posttarget.cmake)

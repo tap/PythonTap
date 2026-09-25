@@ -51,7 +51,7 @@ class default:
    powershell -ExecutionPolicy Bypass -File scripts\install-runtime.ps1
    ```
 
-   The script also installs the Python packages used by the examples (`attrs`, `numpy`). To add more packages later:
+   The script verifies the download against the SHA256 committed in `scripts/runtime.lock`, and installs the Python packages used by the examples (`attrs`, `numpy`) at the versions and hashes pinned in `scripts/requirements.lock`. Re-running it replaces the runtime safely: the previous one is kept until the new one is complete and restored if anything fails — but packages you added yourself are not carried over. To add more packages:
    ```sh
    ./support/bin/python3 -m pip install <package>      # macOS
    .\support\python.exe -m pip install <package>       # Windows
@@ -84,7 +84,9 @@ cmake --build build --config Release    # externals land in externals/
 ctest --test-dir build                  # unit tests (mock kernel, no Max needed)
 ```
 
-On macOS the build matches the architectures of the installed runtime: a universal `libpython` (installed with `./scripts/install-runtime.sh --universal`, as CI does) gives a **universal** (arm64 + x86_64) external — required for anything you ship — while a plain native install gives a faster native-only build for local iteration. An explicit `-DCMAKE_OSX_ARCHITECTURES=...` overrides the default, but must not be wider than the runtime or the link fails with `symbol(s) not found for architecture arm64` (or `x86_64`).
+On macOS the build matches the architectures of the installed runtime: a universal `libpython` (installed with `./scripts/install-runtime.sh --universal`, as CI does) gives a **universal** (arm64 + x86_64) external — required for anything you ship — while a plain native install gives a faster native-only build for local iteration. Reinstalling the runtime (native ↔ universal) is picked up by an existing build folder on the next configure. An explicit `-DCMAKE_OSX_ARCHITECTURES=...` overrides the default, but configure refuses one wider than the runtime (the link would fail).
+
+The runtime and packages are pinned in `scripts/runtime.lock` and `scripts/requirements.lock`; to move a pin, run `python3 scripts/update-locks.py` with the new versions (`--help` lists them), review the diff, and commit it.
 
 ```sh
 ./scripts/install-runtime.sh --universal   # universal libpython → universal external (ship this)
