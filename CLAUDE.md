@@ -28,7 +28,10 @@ its phases, and the audit findings behind them. Tick its items (with the PR) as 
 - **`python/`** — the user's script folder in the package (and the examples: `default.py`,
   `allpass.py`, `allpass-doc.ipynb`).
 - **`scripts/install-runtime.{sh,ps1}`** — installs python-build-standalone CPython 3.13 plus attrs and
-  numpy into `support/` (gitignored). The macOS/Windows build links against it.
+  numpy into `support/` (gitignored), verified against `scripts/runtime.lock` (per-platform archive
+  SHA256s) and `scripts/requirements.lock` (pip `--require-hashes`, wheels only). Never hand-edit the
+  locks: `scripts/update-locks.py` regenerates them (moving a pin is deliberate — D4). CI installs from
+  the same locks, and caches `support/` keyed on them. The macOS/Windows build links against it.
 
 ## Build & test
 
@@ -54,7 +57,10 @@ without `support/`. The Max unit test resolves the package from its binary's fol
 so on every platform it runs the real interpreter and `python/default.py`.
 
 CI (`build.yml`): `linux-core` (release, asan-ubsan, tsan), `linux-max-glue`, `macos` (universal +
-`lipo`/`otool` checks), `windows`. `style.yml`: TapHouse drift check, clang-format, clang-tidy.
+`lipo`/`otool` checks, including no absolute rpath), `windows`. `style.yml`: TapHouse drift check,
+clang-format, clang-tidy (a clang-tidy failure or crash fails the gate, not just a finding). Workflows
+run with `contents: read`, pin third-party actions by commit SHA (tag noted beside it), and cancel
+superseded runs.
 
 ## Threads and the GIL (load-bearing)
 
