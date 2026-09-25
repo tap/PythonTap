@@ -4,7 +4,8 @@
 # Build for the tap.python package (Min-API based Max externals).
 # Requires the embedded Python runtime in support/ — run
 # scripts/install-runtime.sh (macOS) or scripts/install-runtime.ps1 (Windows)
-# from the package root first.
+# from the package root first. On Linux (development only: the mock-kernel
+# unit test), a system CPython 3.13 is embedded instead.
 
 cmake_minimum_required(VERSION 3.19)
 project(tap-python)

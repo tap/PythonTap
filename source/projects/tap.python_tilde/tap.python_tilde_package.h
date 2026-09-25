@@ -36,14 +36,23 @@ namespace tap::python {
     }
 
     /// Root of the Max package containing this external.
-    /// mac: <package>/externals/tap.python~.mxo/Contents/MacOS/tap.python~
-    /// win: <package>/externals/tap.python~.mxe64
+    /// mac:  <package>/externals/tap.python~.mxo/Contents/MacOS/tap.python~
+    /// win:  <package>/externals/tap.python~.mxe64
+    /// test: <package>/tests/tap.python_tilde_test (min-object-unittest.cmake's output folder),
+    ///       on every platform
     inline std::filesystem::path package_root() {
-        auto p = external_binary_path();
-#ifdef MAC_VERSION
-        return p.parent_path().parent_path().parent_path().parent_path().parent_path();
+        // the loader may report a relative path (e.g. a binary launched as ./name)
+        std::error_code ec;
+        auto            binary = std::filesystem::absolute(external_binary_path(), ec);
+        if (ec) {
+            binary = external_binary_path();
+        }
+#if defined(MIN_TEST)
+        return binary.parent_path().parent_path();
+#elif defined(MAC_VERSION)
+        return binary.parent_path().parent_path().parent_path().parent_path().parent_path();
 #else
-        return p.parent_path().parent_path();
+        return binary.parent_path().parent_path();
 #endif
     }
 

@@ -59,7 +59,13 @@ class python : public object<python>, public vector_operator<> {
 
         const auto package = runtime::package_root();
         m_scripts_dir      = package / "python";
-        const auto home    = package / "support";
+#ifdef TAP_PYTHON_HOME
+        // Linux development builds embed a system CPython instead of a support/ runtime
+        // (see this object's CMakeLists.txt)
+        const std::filesystem::path home{TAP_PYTHON_HOME};
+#else
+        const auto home = package / "support";
+#endif
 
         if (!std::filesystem::exists(home)) {
             cerr << "No Python runtime found at " << home.string()
