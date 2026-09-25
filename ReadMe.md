@@ -64,9 +64,10 @@ class default:
 Python sources live in the package's `python` folder. `[tap.python~ name]` imports `python/name.py` and instantiates the class `name` defined in it (the file, class, and argument must share the same name; with no argument, `default` is loaded).
 
 - **Attributes** — class-level annotated fields (e.g. via `attrs`) become Max attributes. `int` maps to a Max `long`, `float` to `float64`, anything else is treated as a symbol. Names starting with `_` are private and skipped.
-- **Messages** — public methods become Max messages. Argument type hints (`int`, `float`, `str`) drive the conversion from Max atoms. Methods named `int`, `float`, `symbol`, and `bang` map to those standard Max messages.
+- **Messages** — public methods become Max messages. Argument type hints (`int`, `float`, `str`) drive the conversion from Max atoms. Methods named `int`, `float`, `symbol`, and `bang` map to those standard Max messages. Names Max or the object handle themselves (`filechanged`, `dsp64`, `notify`, `assist`, `loadbang`, `dblclick`, `anything`, …) are not exposed; the console names any method skipped this way so you can rename it.
 - **Audio** — a method `process(self, x: float) -> float` is called once per sample with the input sample and must return the output sample. One signal inlet and one signal outlet, single-channel; wrap the object in `mc.` for multichannel. (Returning a tuple for multiple outputs is not supported yet.)
-- **Hot reload** — saving the `.py` file reloads it in place: attributes and messages are rebuilt and audio resumes with the new code. If the file has an error, the object prints the traceback to the Max console and outputs silence until the next successful reload.
+- **Hot reload** — saving the `.py` file reloads it in place: attributes and messages are rebuilt and audio resumes with the new code. Until the new code is ready the object keeps running the old one, so a successful reload swaps in without a gap in the audio. If the file has an error, the object prints the traceback to the Max console and outputs silence until the next successful reload.
+- **Errors** — an exception raised by your code (in `process()`, a message, an attribute setter, the constructor or at import) prints its traceback to the Max console; it never takes Max down. That includes `sys.exit()`, which is reported like any other exception rather than quitting Max.
 
 ### A note on performance
 

@@ -13,10 +13,17 @@
 // get_attribute() and call() on any non-audio thread; process() on the audio thread. Each takes
 // the GIL. A processor that is not loaded (import, class lookup or construction failed, or
 // process() raised) outputs silence and ignores attributes and messages until the next load().
+//
+// The GIL alone does not keep these apart: CPython hands it to a waiting thread every switch
+// interval (5 ms), including in the middle of a process() vector or of a reload. So load() builds
+// the new binding completely before swapping it in with no Python call in between, and every
+// caller holds its own references to what it uses for as long as it uses them. A reload that
+// succeeds never interrupts the audio; one that fails silences it.
 
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -45,11 +52,16 @@ namespace tap::python {
 
     class processor {
       public:
-        /// @param source_name the module and class name (`<name>.py` defining `class <name>`)
-        /// @param log         receives the processor's own diagnostics (may be called on the audio thread)
-        explicit processor(std::string source_name, log_function log = {})
+        /// @param source_name       the module and class name (`<name>.py` defining `class <name>`)
+        /// @param log               receives the processor's own diagnostics (may be called on the
+        ///                          audio thread)
+        /// @param reserved_messages method names the host handles itself; a Python method with one
+        ///                          of these names is not exposed as a message (with a diagnostic)
+        explicit processor(std::string source_name, log_function log = {},
+                           std::vector<std::string> reserved_messages = {})
             : m_source_name{std::move(source_name)}
-            , m_log{std::move(log)} {}
+            , m_log{std::move(log)}
+            , m_reserved_messages{std::move(reserved_messages)} {}
 
         ~processor() {
             if (!Py_IsInitialized()) {
@@ -66,14 +78,17 @@ namespace tap::python {
         const std::string& source_name() const noexcept { return m_source_name; }
 
         /// True while a class instance exists (attributes and messages are live).
-        bool loaded() const noexcept { return m_instance != nullptr; }
+        bool loaded() const noexcept { return m_instance.load() != nullptr; }
 
         /// True while process() is bound to the class's process() method.
-        bool has_process() const noexcept { return m_process_function != nullptr; }
+        bool has_process() const noexcept { return m_process_function.load() != nullptr; }
 
         /// (Re)import the module, instantiate the class, and rebuild the attribute and message
         /// descriptions. Imports on the first call and reloads the module afterwards. Returns true
         /// when the class was instantiated. Main thread only.
+        ///
+        /// Until the new class is ready, audio, attributes and messages keep using the previous
+        /// instance; on success it is replaced in one step, on failure the processor is unloaded.
         bool load() {
             if (!Py_IsInitialized()) {
                 return false;
@@ -81,59 +96,75 @@ namespace tap::python {
 
             gil_lock lock;
 
-            // detach the audio binding first: process() treats a null function as "output silence"
-            release_binding();
-
             if (m_module) {
                 PyObject* reloaded = PyImport_ReloadModule(m_module);
                 if (!reloaded) {
-                    PyErr_Print();
+                    report_exception();
                     log(log_level::error, "Failed to reload module " + m_source_name);
+                    release_binding();
                     return false;
                 }
-                Py_DECREF(m_module);
-                m_module = reloaded;
+                Py_SETREF(m_module, reloaded);
             }
             else {
                 PyObject* name = PyUnicode_DecodeFSDefault(m_source_name.c_str());
                 m_module       = name ? PyImport_Import(name) : nullptr;
                 Py_XDECREF(name);
                 if (!m_module) {
-                    PyErr_Print();
+                    report_exception();
                     log(log_level::error, "Failed to load module '" + m_source_name + "' (searched "
                                               + scripts_directory().string() + ")");
                     return false;
                 }
             }
 
-            PyObject* module_dict = PyModule_GetDict(m_module);                               // borrowed
-            PyObject* py_class    = PyDict_GetItemString(module_dict, m_source_name.c_str()); // borrowed
+            PyObject* py_class = PyObject_GetAttrString(m_module, m_source_name.c_str()); // strong
             if (!py_class) {
+                PyErr_Clear();
                 log(log_level::error, "No class named '" + m_source_name + "' in " + m_source_name + ".py");
+                release_binding();
                 return false;
             }
             if (!PyCallable_Check(py_class)) {
+                Py_DECREF(py_class);
                 log(log_level::error, "Cannot instantiate the Python class " + m_source_name);
+                release_binding();
                 return false;
             }
 
-            m_instance = PyObject_CallObject(py_class, nullptr);
-            if (!m_instance) {
-                PyErr_Print();
+            binding next;
+            next.instance = PyObject_CallNoArgs(py_class);
+            if (!next.instance) {
+                Py_DECREF(py_class);
+                report_exception();
                 log(log_level::error, "Failed to instantiate the Python class " + m_source_name);
+                release_binding();
                 return false;
             }
 
-            collect_attributes(py_class);
-            collect_messages();
+            collect_attributes(py_class, next);
+            Py_DECREF(py_class);
+            collect_messages(next);
+
+            // The swap: no Python call from here until the old binding is released, so no other
+            // thread can take the GIL and see a half-built state.
+            binding previous;
+            previous.instance         = m_instance.exchange(next.instance);
+            previous.process_function = m_process_function.exchange(next.process_function);
+            previous.attributes       = std::exchange(m_attributes, std::move(next.attributes));
+            previous.messages         = std::exchange(m_messages, std::move(next.messages));
+            next.instance             = nullptr;
+            next.process_function     = nullptr;
+
+            release(previous); // may run finalizers, which may let other threads in: now safe
             return true;
         }
 
         /// The class's annotated public fields, in declaration order. Main thread, after load().
         const std::vector<attribute_info>& attributes() const noexcept { return m_attributes; }
 
-        /// The class's public methods other than process() and the attributes, sorted by name.
-        /// Main thread, after load().
+        /// The class's public methods other than process(), the attributes and the reserved names,
+        /// sorted by name. Main thread, after load().
         std::vector<message_info> messages() const {
             std::vector<message_info> result;
             result.reserve(m_messages.size());
@@ -150,21 +181,22 @@ namespace tap::python {
                 return false;
             }
 
-            gil_lock lock;
+            gil_lock  lock;
+            PyObject* instance = acquire_instance();
+            if (!instance) {
+                return false;
+            }
 
-            if (!m_instance) {
-                return false;
-            }
+            bool      ok       = false;
             PyObject* py_value = to_python(v);
-            if (!py_value) {
-                PyErr_Print();
-                return false;
+            if (py_value) {
+                ok = PyObject_SetAttrString(instance, std::string{name}.c_str(), py_value) == 0;
+                Py_DECREF(py_value);
             }
-            const bool ok = PyObject_SetAttrString(m_instance, std::string{name}.c_str(), py_value) == 0;
             if (!ok) {
-                PyErr_Print(); // e.g. an attrs validator rejected the value
+                report_exception(); // e.g. an attrs validator rejected the value
             }
-            Py_DECREF(py_value);
+            Py_DECREF(instance);
             return ok;
         }
 
@@ -175,12 +207,13 @@ namespace tap::python {
                 return std::nullopt;
             }
 
-            gil_lock lock;
-
-            if (!m_instance) {
+            gil_lock  lock;
+            PyObject* instance = acquire_instance();
+            if (!instance) {
                 return std::nullopt;
             }
-            PyObject* py_value = PyObject_GetAttrString(m_instance, std::string{name}.c_str());
+            PyObject* py_value = PyObject_GetAttrString(instance, std::string{name}.c_str());
+            Py_DECREF(instance);
             if (!py_value) {
                 PyErr_Clear();
                 return std::nullopt;
@@ -218,50 +251,54 @@ namespace tap::python {
 
             gil_lock lock;
 
-            if (!m_instance) {
-                return false;
-            }
             const auto found = std::find_if(m_messages.begin(), m_messages.end(),
                                             [&](const bound_message& m) { return m.info.name == name; });
             if (found == m_messages.end()) {
                 return false;
             }
 
-            const auto& types = found->info.argument_types;
+            // Take our own copies and references of everything the call uses before anything that
+            // could run Python code (even an allocation can trigger a GC finalizer): that could let
+            // a reload on another thread replace the message list under us.
+            const std::vector<value_type> types    = found->info.argument_types;
+            PyObject*                     function = found->function;
+            Py_INCREF(function);
+
             if (args.size() != types.size()) {
+                Py_DECREF(function);
                 log(log_level::error, std::string{name} + ": expected " + std::to_string(types.size())
                                           + " argument(s), got " + std::to_string(args.size()));
                 return false;
             }
 
-            PyObject* py_args = PyTuple_New(static_cast<Py_ssize_t>(args.size() + 1));
-            if (!py_args) {
-                PyErr_Clear();
+            PyObject* instance = acquire_instance();
+            if (!instance) {
+                Py_DECREF(function);
                 return false;
             }
-            Py_INCREF(m_instance); // the tuple *steals* a reference
-            PyTuple_SetItem(py_args, 0, m_instance);
 
+            std::vector<PyObject*> call_args;
+            call_args.reserve(args.size() + 1);
+            call_args.push_back(instance);
+            bool converted = true;
             for (std::size_t i = 0; i < args.size(); ++i) {
                 PyObject* item = to_python(coerce(args[i], types[i]));
                 if (!item) {
-                    PyErr_Print();
-                    Py_DECREF(py_args);
-                    return false;
+                    converted = false;
+                    break;
                 }
-                PyTuple_SetItem(py_args, static_cast<Py_ssize_t>(i + 1), item); // steals the reference
+                call_args.push_back(item);
             }
 
-            // hold our own reference: the method may release the GIL, and a reload on another
-            // thread would release the binding's
-            PyObject* function = found->function;
-            Py_INCREF(function);
-            PyObject* result = PyObject_Call(function, py_args, nullptr);
+            PyObject* result =
+                converted ? PyObject_Vectorcall(function, call_args.data(), call_args.size(), nullptr) : nullptr;
+            for (PyObject* arg : call_args) {
+                Py_DECREF(arg); // including the instance
+            }
             Py_DECREF(function);
-            Py_DECREF(py_args);
 
             if (!result) {
-                PyErr_Print();
+                report_exception();
                 return false;
             }
             Py_DECREF(result);
@@ -270,30 +307,45 @@ namespace tap::python {
 
         /// The audio callback: calls the Python process() once per sample. `input` and `output`
         /// may alias. Outputs silence while not bound; if process() raises, prints the traceback,
-        /// silences the rest of the vector and unbinds until the next load().
+        /// silences the rest of the vector and unbinds until the next load(). A reload landing
+        /// mid-vector does not affect this vector: it finishes on the binding it started with.
         void process(const double* input, double* output, const std::size_t frame_count) {
-            if (!m_process_function) {
+            if (!has_process()) {
                 std::fill(output, output + frame_count, 0.0);
                 return;
             }
 
             gil_lock lock;
 
-            if (!m_process_function) { // re-check now that we hold the GIL
+            // the instance and function are swapped together, with no Python call between, so
+            // under the GIL they are always a matching pair
+            PyObject* function = m_process_function.load();
+            PyObject* instance = m_instance.load();
+            if (!function || !instance) {
                 std::fill(output, output + frame_count, 0.0);
                 return;
             }
+            Py_INCREF(function);
+            Py_INCREF(instance);
 
             for (std::size_t i = 0; i < frame_count; ++i) {
-                PyTuple_SetItem(m_process_args, 1, PyFloat_FromDouble(input[i])); // the tuple steals the float
-                PyObject* result = PyObject_CallObject(m_process_function, m_process_args);
+                PyObject* x = PyFloat_FromDouble(input[i]);
+                if (!x) {
+                    report_exception();
+                    std::fill(output + i, output + frame_count, 0.0);
+                    break;
+                }
+                PyObject* const call_args[2] = {instance, x};
+                PyObject*       result       = PyObject_Vectorcall(function, call_args, 2, nullptr);
+                Py_DECREF(x);
+
                 if (!result) {
-                    PyErr_Print();
+                    report_exception();
                     log(log_level::error,
                         "process() raised an exception — audio disabled until the source is fixed and reloaded");
-                    Py_CLEAR(m_process_function); // load() re-arms it
+                    unbind_process(function); // load() re-arms it
                     std::fill(output + i, output + frame_count, 0.0);
-                    return;
+                    break;
                 }
 
                 double y = PyFloat_AsDouble(result); // also handles ints and other number types
@@ -304,6 +356,9 @@ namespace tap::python {
                 output[i] = y;
                 Py_DECREF(result);
             }
+
+            Py_DECREF(instance);
+            Py_DECREF(function);
         }
 
       private:
@@ -312,12 +367,22 @@ namespace tap::python {
             PyObject*    function{}; // strong
         };
 
-        std::string                 m_source_name;
-        log_function                m_log;
-        PyObject*                   m_module{};           // strong
-        PyObject*                   m_instance{};         // strong
-        PyObject*                   m_process_function{}; // strong
-        PyObject*                   m_process_args{};     // strong; slot 0 holds a ref to m_instance
+        /// Everything load() builds, swapped in as a unit.
+        struct binding {
+            PyObject*                   instance{};         // strong
+            PyObject*                   process_function{}; // strong
+            std::vector<attribute_info> attributes;
+            std::vector<bound_message>  messages;
+        };
+
+        std::string              m_source_name;
+        log_function             m_log;
+        std::vector<std::string> m_reserved_messages;
+        PyObject*                m_module{}; // strong; main thread only
+        // Written only under the GIL; atomic so the audio thread's lock-free "is anything
+        // bound?" check (and loaded()) is well-defined.
+        std::atomic<PyObject*>      m_instance{};         // strong
+        std::atomic<PyObject*>      m_process_function{}; // strong
         std::vector<attribute_info> m_attributes;
         std::vector<bound_message>  m_messages;
 
@@ -325,6 +390,13 @@ namespace tap::python {
             if (m_log) {
                 m_log(level, text);
             }
+        }
+
+        /// A new reference to the current instance, or nullptr. Caller holds the GIL.
+        PyObject* acquire_instance() const {
+            PyObject* instance = m_instance.load();
+            Py_XINCREF(instance);
+            return instance;
         }
 
         /// A new reference for `v`, or nullptr with a Python error set. Caller holds the GIL.
@@ -338,24 +410,44 @@ namespace tap::python {
             return PyUnicode_DecodeFSDefault(std::get<std::string>(v).c_str());
         }
 
-        /// Drop the instance, process() binding and messages. Caller holds the GIL.
-        void release_binding() {
-            Py_CLEAR(m_process_function);
-            Py_CLEAR(m_process_args);
-            Py_CLEAR(m_instance);
-            m_attributes.clear();
-
-            // releasing a function can run arbitrary finalizers (which may release the GIL), so
-            // take the list out of the member before letting go of anything
-            auto old_messages = std::move(m_messages);
-            m_messages.clear();
-            for (auto& message : old_messages) {
+        /// Release a binding's references. Caller holds the GIL. Releasing can run arbitrary
+        /// finalizers, which may let other threads take the GIL, so the binding must already be
+        /// out of the members.
+        static void release(binding& b) {
+            Py_CLEAR(b.process_function);
+            Py_CLEAR(b.instance);
+            b.attributes.clear();
+            for (auto& message : b.messages) {
                 Py_CLEAR(message.function);
+            }
+            b.messages.clear();
+        }
+
+        /// Unload: take the binding out of the members, then release it. Caller holds the GIL.
+        void release_binding() {
+            binding previous;
+            previous.instance         = m_instance.exchange(nullptr);
+            previous.process_function = m_process_function.exchange(nullptr);
+            previous.attributes       = std::exchange(m_attributes, {});
+            previous.messages         = std::exchange(m_messages, {});
+            release(previous);
+        }
+
+        /// Unbind process() if it is still bound to `function` (a reload may have replaced it
+        /// while the failing vector ran). Caller holds the GIL.
+        void unbind_process(PyObject* function) {
+            PyObject* expected = function;
+            if (m_process_function.compare_exchange_strong(expected, nullptr)) {
+                Py_DECREF(function); // the member's reference; the caller still holds its own
             }
         }
 
+        bool is_reserved(const std::string& name) const {
+            return std::find(m_reserved_messages.begin(), m_reserved_messages.end(), name) != m_reserved_messages.end();
+        }
+
         /// Describe the class-level type hints as attributes. Caller holds the GIL.
-        void collect_attributes(PyObject* py_class) {
+        static void collect_attributes(PyObject* py_class, binding& b) {
             PyObject* hints = detail::get_type_hints(py_class);
             if (!hints) {
                 PyErr_Clear();
@@ -374,24 +466,24 @@ namespace tap::python {
                 if (key_cstr[0] == '_') {
                     continue;
                 }
-                m_attributes.push_back({key_cstr, value_type_from_hint(detail::hint_name(hint, "str"))});
+                b.attributes.push_back({key_cstr, value_type_from_hint(detail::hint_name(hint, "str"))});
             }
             Py_DECREF(hints);
         }
 
-        bool is_attribute(const std::string& name) const {
-            return std::any_of(m_attributes.begin(), m_attributes.end(),
-                               [&](const attribute_info& a) { return a.name == name; });
-        }
-
         /// Bind the instance's public methods as messages, and process() as the audio callback.
         /// Caller holds the GIL.
-        void collect_messages() {
-            PyObject* members = PyObject_Dir(m_instance);
+        void collect_messages(binding& b) const {
+            PyObject* members = PyObject_Dir(b.instance);
             if (!members) {
                 PyErr_Clear();
                 return;
             }
+
+            const auto is_attribute = [&](const std::string& name) {
+                return std::any_of(b.attributes.begin(), b.attributes.end(),
+                                   [&](const attribute_info& a) { return a.name == name; });
+            };
 
             const auto member_count = PyList_Size(members);
             for (Py_ssize_t i = 0; i < member_count; ++i) {
@@ -410,7 +502,7 @@ namespace tap::python {
                     continue;
                 }
 
-                PyObject* method = PyObject_GetAttrString(m_instance, member_name.c_str());
+                PyObject* method = PyObject_GetAttrString(b.instance, member_name.c_str());
                 if (!method) {
                     PyErr_Clear();
                     continue;
@@ -419,19 +511,26 @@ namespace tap::python {
                 if (PyMethod_Check(method)) {
                     PyObject* fn = PyMethod_Function(method); // borrowed
                     if (fn && PyFunction_Check(fn)) {
-                        PyObject* hints = detail::get_type_hints(method);
-                        if (!hints) {
-                            PyErr_Clear();
-                        }
-
-                        if (member_name == "process") {
-                            bind_process(fn, hints);
+                        if (member_name != "process" && is_reserved(member_name)) {
+                            log(log_level::error, member_name
+                                                      + "() is reserved by the host and is not exposed as a "
+                                                        "message; rename the method");
                         }
                         else {
-                            bind_message(member_name, fn, hints);
-                        }
+                            PyObject* hints = detail::get_type_hints(method);
+                            if (!hints) {
+                                PyErr_Clear();
+                            }
 
-                        Py_XDECREF(hints);
+                            if (member_name == "process") {
+                                bind_process(fn, hints, b);
+                            }
+                            else {
+                                bind_message(member_name, fn, hints, b);
+                            }
+
+                            Py_XDECREF(hints);
+                        }
                     }
                 }
                 Py_DECREF(method);
@@ -440,7 +539,7 @@ namespace tap::python {
         }
 
         /// Bind the class's process() method as the per-sample audio callback. Caller holds the GIL.
-        void bind_process(PyObject* fn, PyObject* hints) {
+        void bind_process(PyObject* fn, PyObject* hints, binding& b) const {
             int  in_count      = 0;
             bool returns_tuple = false;
 
@@ -473,23 +572,14 @@ namespace tap::python {
                 return;
             }
 
-            m_process_args = PyTuple_New(2);
-            if (!m_process_args) {
-                PyErr_Clear();
-                return;
-            }
-            Py_INCREF(m_instance); // the tuple *steals* a reference
-            PyTuple_SetItem(m_process_args, 0, m_instance);
-            PyTuple_SetItem(m_process_args, 1, PyFloat_FromDouble(0.0)); // placeholder; replaced every sample
-
             Py_INCREF(fn);
-            m_process_function = fn;
+            b.process_function = fn;
 
             log(log_level::info, "Audio process() bound: 1 input, 1 output");
         }
 
         /// Bind a public method as a message. Caller holds the GIL.
-        void bind_message(const std::string& name, PyObject* fn, PyObject* hints) {
+        static void bind_message(const std::string& name, PyObject* fn, PyObject* hints, binding& b) {
             bound_message message{{name, {}}, fn};
 
             if (hints) {
@@ -510,7 +600,7 @@ namespace tap::python {
             }
 
             Py_INCREF(fn);
-            m_messages.push_back(std::move(message));
+            b.messages.push_back(std::move(message));
         }
     };
 

@@ -62,11 +62,16 @@ CI (`build.yml`): `linux-core` (release, asan-ubsan, tsan), `linux-max-glue`, `m
   for numpy); all instances share it. After start-up the GIL is released and every entry point takes a
   `gil_lock`.
 - `processor::load()` and destruction run on Max's main thread; attribute and message calls on the main
-  or scheduler thread; `process()` on the audio thread. Holding the GIL does **not** serialize a reload
-  against the audio thread — CPython hands the GIL to a waiting thread every 5 ms, mid-`process()`.
-  Anything the audio loop reads must survive a reload landing between two samples (plan 1.2).
-- Never finalize, never call `PyErr_Print()` on a `SystemExit` without handling it (it exits the
-  process — plan 1.1), and never let a C++ exception cross a Max callback.
+  or scheduler thread; `process()` on the audio thread. Holding the GIL does **not** serialize them —
+  CPython hands the GIL to a waiting thread every switch interval (5 ms), mid-`process()` or mid-reload,
+  and even an allocation can run a GC finalizer that yields it. So `load()` builds the new binding
+  completely and swaps it in with no Python call in between, and every caller takes its own references
+  (and copies) of what it uses before running anything that could yield. Keep it that way.
+- `gil_lock` gives each thread one long-lived Python thread state (`detail::thread_state_keeper`);
+  don't call `PyGILState_Ensure` directly.
+- Report user exceptions with `tap::python::report_exception()`, **never `PyErr_Print()`**: for a
+  `SystemExit` it calls `Py_Exit()` and quits Max. Never finalize the interpreter, and never let a C++
+  exception cross a Max callback (the trampolines are wrapped in `guarded()`).
 
 ## Conventions
 

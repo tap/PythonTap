@@ -68,14 +68,18 @@ reproduced and pinned there first.
 
 ## Phase 1 — crash and safety fixes
 
-| # | Fix | Anchor | Pinned by |
-|---|---|---|---|
-| 1.1 | One `report_exception()` replacing all `PyErr_Print()` calls: `SystemExit` is reported, never honored (CPython's `PyErr_Print` calls `Py_Exit`), tracebacks formatted via `traceback`, no `sys.last_exc` retention | `tap.python_tilde.h:133,145,165,221,257,332` | `sys.exit()` in a method, in `process()`, at module top level → process survives |
-| 1.2 | Reload/perform race: the eval loop drops the GIL every 5 ms, so `update_source()` can clear `m_process_fn`/`m_process_args` mid-vector and the next `PyTuple_SetItem(nullptr, …)` segfaults. Take strong local refs per vector, call via `PyObject_Vectorcall` (no shared args tuple), build the new binding fully before swapping | `tap.python_tilde.h:115-128, 318-347` | Slow `process()` + reload in a loop never crashes |
-| 1.3 | Reserved message names (`filechanged`, `dsp64`, `notify`, `assist`, `anything`, `loadbang`, `dblclick`, …) are refused with a warning | `tap.python_tilde.h:419`, `_message.h` | A `filechanged` method is rejected; reload still works |
-| 1.4 | Long-lived Python thread state for the audio and scheduler threads instead of `PyGILState_Ensure`/`Release` creating and freeing one per vector | `_runtime.h:64-76` | `threading.local` survives across vectors |
-| 1.5 | NULL-check every conversion before `PyTuple_SetItem`; hold a strong ref to the class across `__init__`; `try/catch` in every C trampoline | `tap.python_tilde.h:153-170, 203-213`; `.cpp` | Unit tests |
-| 1.6 | Atomic `m_process_fn`/`m_instance` for the pre-GIL fast-path reads | `tap.python_tilde.h:177,228,274,313` | TSan on the Linux leg (if 0.3 lands) |
+Each fix landed against a core test that reproduced the bug first (`core/tests/test_safety.cpp`):
+before the fixes, `sys.exit(3)` in a message ended the test process with status 3, and reloading
+while audio ran segfaulted in 5 of 5 runs.
+
+| # | Fix | Pinned by |
+|---|---|---|
+| ✅ 1.1 | `report_exception()` (`runtime.h`) replaces every `PyErr_Print()`: it displays the exception via `PyErr_DisplayException` — a `SystemExit` is reported, never honored, and `sys.last_exc` is not retained | `sys.exit()` in a message, in `process()`, in an attribute setter, at module top level and in the constructor → the process survives and the traceback reaches the console |
+| ✅ 1.2 | The reload/perform race: `load()` builds the new binding (instance, process function, attributes, messages) completely, then swaps it in with no Python call in between; `process()` holds its own references for the whole vector and calls through `PyObject_Vectorcall` (no shared args tuple); `call()`/`set_attribute()`/`get_attribute()` hold their own references and copies before anything that could yield the GIL. A successful reload no longer silences the audio | 200 reloads against a slow `process()` with a 1 µs switch interval: no crash, no silent or partial vector (40/40 runs; ASan/UBSan and TSan clean) |
+| ✅ 1.3 | Reserved message names: the processor takes a host list and refuses those methods with a diagnostic; the external passes Max's (`filechanged`, `dsp64`, `notify`, `assist`, `anything`, …) | Methods named like reserved host messages are not exposed |
+| ✅ 1.4 | `gil_lock` gives each thread one Python thread state for its lifetime (`detail::thread_state_keeper`), instead of `PyGILState_Ensure`/`Release` creating and freeing one per vector | `threading.local` on the audio thread survives across vectors |
+| ✅ 1.5 | Conversions NULL-checked before use; a strong reference to the class across `__init__`; every C trampoline, the file-watcher handler and the perform routine catch C++ exceptions | Unit tests; review |
+| ✅ 1.6 | `m_instance`/`m_process_function` are `std::atomic<PyObject*>` (written only under the GIL), so the audio thread's lock-free check and `loaded()` are well-defined | TSan on the `linux-core` leg |
 
 ## Phase 2 — the real-time model
 
@@ -149,7 +153,7 @@ reproduced and pinned there first.
 - [ ] **5.4** Examples — `default.py` stops shadowing `float` in its own annotations;
   `allpass.py` uses `prepare(sr)` and an open α range (−1, 1); add a numpy block example;
   re-execute `allpass-doc.ipynb` (its outputs predate the current allpass and come from 3.8).
-- [ ] **5.5** `CHANGELOG.md` recording each contract change (D5).
+- [x] **5.5** `CHANGELOG.md` recording each contract change (D5) — started with Phase 1.
 
 ## Phase 6 — validation in a real Max
 

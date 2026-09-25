@@ -48,7 +48,12 @@ class python : public object<python>, public vector_operator<> {
     message<> m_filechanged{this, "filechanged",
                             MIN_FUNCTION {
                                 cout << "Source file update detected. Reloading." << endl;
-                                update_source();
+                                try {
+                                    update_source();
+                                }
+                                catch (const std::exception& e) {
+                                    cerr << "reload failed: " << e.what() << endl;
+                                }
                                 return {};
                             }};
 
@@ -88,14 +93,16 @@ class python : public object<python>, public vector_operator<> {
         }
 
         m_processor = std::make_unique<runtime::processor>(
-            m_python_source, [this](const runtime::log_level level, const std::string_view text) {
+            m_python_source,
+            [this](const runtime::log_level level, const std::string_view text) {
                 if (level == runtime::log_level::error) {
                     cerr << std::string{text} << endl;
                 }
                 else {
                     cout << std::string{text} << endl;
                 }
-            });
+            },
+            reserved_messages());
 
         update_source();
 
@@ -204,7 +211,12 @@ class python : public object<python>, public vector_operator<> {
             output.clear();
             return;
         }
-        m_processor->process(input.samples(0), output.samples(0), static_cast<std::size_t>(input.frame_count()));
+        try {
+            m_processor->process(input.samples(0), output.samples(0), static_cast<std::size_t>(input.frame_count()));
+        }
+        catch (...) { // never let an exception unwind into the audio driver
+            output.clear();
+        }
     }
 
   private:
@@ -214,6 +226,15 @@ class python : public object<python>, public vector_operator<> {
     std::unique_ptr<runtime::processor>                              m_processor;
     std::unordered_map<std::string, std::unique_ptr<python_message>> m_python_messages;
     std::unordered_map<std::string, std::unique_ptr<python_attr>>    m_python_attributes;
+
+    /// Messages the Max object handles itself, which a Python method must never replace: min's
+    /// own class methods, the messages Max sends every object, and this object's file watcher
+    /// (a Python method named filechanged would silently disable hot reload).
+    static std::vector<std::string> reserved_messages() {
+        return {"anything", "appendtodictionary", "assist",     "dblclick",  "dsp",      "dsp64",
+                "dspsetup", "filechanged",        "getvalueof", "inletinfo", "loadbang", "notify",
+                "preset",   "savestate",          "setvalueof", "signal"};
+    }
 
     /// Python's print() output and tracebacks, for every instance.
     static void console_line(const runtime::log_level level, const std::string_view text) {
