@@ -3,6 +3,9 @@ name: build
 # Builds the tap.python package on macOS and Windows.
 # The embedded Python runtime is installed by scripts/install-runtime.*
 # before configuring, since the externals link against it.
+#
+# The host-independent core (core/) is also built and tested on Linux against
+# CPython 3.13, plain and under sanitizers — no Max, min-api or runtime install.
 
 on:
   push:
@@ -11,6 +14,55 @@ on:
   workflow_dispatch:
 
 jobs:
+  linux-core:
+    name: linux-core (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: release
+            build_type: Release
+            sanitize: ""
+          - name: asan-ubsan
+            build_type: Debug
+            sanitize: "address,undefined"
+          - name: tsan
+            build_type: Debug
+            sanitize: "thread"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install the examples' dependencies into the embedded interpreter's prefix
+        run: python -m pip install attrs numpy
+
+      # The sanitizer runtimes cannot map their shadow memory with the runner
+      # kernel's default ASLR entropy ("unexpected memory mapping").
+      - name: Reduce ASLR entropy for the sanitizers
+        if: matrix.sanitize != ''
+        run: sudo sysctl vm.mmap_rnd_bits=28
+
+      - name: Configure
+        run: >
+          cmake -S core -B build-core
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DPython3_EXECUTABLE="$(which python)"
+          -DTAP_PYTHON_SANITIZE="${{ matrix.sanitize }}"
+
+      - name: Build
+        run: cmake --build build-core --parallel
+
+      - name: Test
+        env:
+          TAP_PYTHON_TEST_REQUIRE_EXAMPLES: "1"
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          TSAN_OPTIONS: halt_on_error=1
+        run: ctest --test-dir build-core --output-on-failure --parallel 4
+
   macos:
     runs-on: macos-latest
     steps:
