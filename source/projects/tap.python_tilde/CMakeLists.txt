@@ -23,10 +23,25 @@ set(SUPPORT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../support")
 if (APPLE)
     file(GLOB PYTHON_INCLUDE_DIR "${SUPPORT_DIR}/include/python3.*")
     file(GLOB PYTHON_LIB "${SUPPORT_DIR}/lib/libpython3.*.dylib")
-else ()
+elseif (WIN32)
     set(PYTHON_INCLUDE_DIR "${SUPPORT_DIR}/include")
     # python3[0-9]* excludes python3.lib, the limited-ABI stub — we use the full API
     file(GLOB PYTHON_LIB "${SUPPORT_DIR}/libs/python3[0-9]*.lib")
+else ()
+    # Max does not run on Linux, but the external and its mock-kernel unit test
+    # still build and run there — against the CPython 3.13 find_package() finds
+    # (point Python3_EXECUTABLE at one) instead of a support/ runtime. This is
+    # the fast feedback loop for the Max glue; macOS and Windows stay the targets.
+    find_package(Python3 3.13 EXACT REQUIRED COMPONENTS Interpreter Development.Embed)
+    set(PYTHON_INCLUDE_DIR "${Python3_INCLUDE_DIRS}")
+    set(PYTHON_LIB "${Python3_LIBRARIES}")
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -c "import sys; print(sys.base_prefix, end='')"
+        OUTPUT_VARIABLE TAP_PYTHON_HOME
+        COMMAND_ERROR_IS_FATAL ANY
+    )
+    # directory scope, so the unit-test target created below gets it too
+    add_compile_definitions(TAP_PYTHON_HOME="${TAP_PYTHON_HOME}")
 endif ()
 
 if (NOT PYTHON_LIB OR NOT EXISTS "${PYTHON_INCLUDE_DIR}")

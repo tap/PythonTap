@@ -49,14 +49,20 @@ reproduced and pinned there first.
   *Found on the way:* a newly created processor gets a module this process already imported,
   even if its file changed since (the first load goes through `sys.modules`) — pinned as an honest
   limit, fixed by file-based loading (3.5).
-- [ ] **0.3 Injectable package root for the Max test.** Under `MIN_TEST`, let the test set the
-  package root (e.g. `TAP_PYTHON_PACKAGE_ROOT`). Today `package_root()` walks five levels up from
-  the test binary on macOS and lands outside the repo, so the macOS job never starts Python.
-- [ ] **0.4 No either-way assertions.** When `support/` exists, `REQUIRE(Py_IsInitialized())`;
-  drop the silence branch in `tap.python_tilde_test.cpp:68-81`.
-- [ ] **0.5 Max-glue coverage** — `attr_set`/`attr_get` round-trip through atoms, the
-  int/float/symbol/bang trampolines, reserved-name refusal once 1.3 lands.
-- [ ] **0.6 `CLAUDE.md`** — runtime prerequisite, the class contract, GIL/thread rules, the
+- [x] **0.3 A package root the Max test can find.** Under `MIN_TEST`, `package_root()` is the
+  folder above the test binary (`<repo>/tests/`) on every platform; it also makes the loader's path
+  absolute (a binary launched as `./name` resolved to an empty root). Before this, it walked five
+  levels up from the test binary on macOS and landed outside the repo, so the macOS job never
+  started Python. *Also:* the external and its mock-kernel test now build and run on Linux against
+  a system CPython 3.13 (`linux-max-glue` in CI) — the spike this item used to be succeeded.
+- [x] **0.4 No either-way assertions.** Every build has a runtime (configure fails without one), so
+  the Max test now requires the interpreter to start and `python/default.py` to run.
+- [x] **0.5 Max-glue coverage** — `attr_set`/`attr_get` round-trips through float, long and symbol
+  atoms, multi-atom refusal, and the `float`/`int` messages and arity refusal through
+  `message_gimme` (the C trampolines that forward to it are not driven directly yet; their
+  per-type conversion is covered by the core coercion tests). Reserved-name refusal is tested
+  with 1.3.
+- [x] **0.6 `CLAUDE.md`** — runtime prerequisite, the class contract, GIL/thread rules, the
   core/wrapper split, TapHouse sync rules, and what must move together (maxref, help patcher,
   notebook, this plan).
 

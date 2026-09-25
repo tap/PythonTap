@@ -6,6 +6,8 @@ name: build
 #
 # The host-independent core (core/) is also built and tested on Linux against
 # CPython 3.13, plain and under sanitizers — no Max, min-api or runtime install.
+# The external and its mock-kernel unit test build on Linux too (Max does not
+# run there, but the glue does), embedding the same CPython 3.13.
 
 on:
   push:
@@ -62,6 +64,29 @@ jobs:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
           TSAN_OPTIONS: halt_on_error=1
         run: ctest --test-dir build-core --output-on-failure --parallel 4
+
+  linux-max-glue:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install the examples' dependencies into the embedded interpreter's prefix
+        run: python -m pip install attrs numpy
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE="$(which python)"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
 
   macos:
     runs-on: macos-latest

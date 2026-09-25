@@ -104,6 +104,14 @@ ctest --test-dir build-core --output-on-failure
 
 The example tests need `attrs` and `numpy` importable by that interpreter (or in a folder named by `TAP_PYTHON_TEST_SITE`); without them they are skipped. `-DTAP_PYTHON_SANITIZE=address,undefined` or `=thread` builds the battery under sanitizers, as CI does.
 
+The external and its mock-kernel unit test also build on Linux (Max does not run there, but its glue does), embedding the same CPython instead of a `support/` runtime:
+
+```sh
+cmake -S . -B build-linux -DPython3_EXECUTABLE=$(which python3.13)
+cmake --build build-linux
+ctest --test-dir build-linux --output-on-failure
+```
+
 ## License
 
 MIT — see [License.md](License.md), which also lists the third-party components (Min-API, CPython, attrs, NumPy) and where their licenses live.
