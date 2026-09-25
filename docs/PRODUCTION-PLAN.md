@@ -27,27 +27,33 @@ note the PR that closed them.
 | D3 | How users get the runtime | **Bundled in the release.** CI assembles a complete per-platform package (externals, `support/` with CPython + attrs + numpy, `python/`, help, docs, licenses). `scripts/install-runtime.*` stays for source builds. Signing/notarization steps are wired but **skip cleanly until credentials exist** (none yet). |
 | D4 | Python version policy | **Pin 3.13; upgrade deliberately.** One CPython minor per release; a move (e.g. to 3.14's deferred annotations) is its own PR with tests. No free-threaded or subinterpreter builds until numpy supports them. |
 | D5 | Compatibility before 1.0 | **Breaking changes to the class contract are allowed** where they buy correctness (reserved names, file-based loading, signature dispatch). Each is recorded in a `CHANGELOG.md`; the shipped examples are updated in the same PR. |
+| D6 | Architecture | **A host-independent core plus a thin Max wrapper**, the family's kernel/wrapper split (TapTools / TapTools-Max). Everything that talks to CPython — interpreter start-up, thread state, module loading, class introspection, value conversion, `process()` binding and reload, exception handling — lives in `core/` (`tap::python`, plain C++20 + CPython, no Max or min-api). The external maps the core's attribute and message descriptions onto `object_addattr`/`object_addmethod` and owns only Max concerns (package paths, the file watcher, atoms). Linux is the first test platform *for the core*: real audio/main threads and sanitizers in CI and in cloud sessions. A plugin front end (CLAP or VST3) is optional later work over the same core (Phase 7), not a test vehicle — the Max glue still needs its own tests. |
 
-## Phase 0 — a test foundation that can fail
+## Phase 0 — the core split and a test foundation that can fail
 
-Every later phase needs proof, and today the one unit test passes on either branch.
+Every later phase needs proof, and today the one unit test passes on either branch (below). The
+core split (D6) makes the CPython layer buildable and testable on Linux, so fixes can be
+reproduced and pinned there first.
 
-- [ ] **0.1 Injectable package root.** Under `MIN_TEST`, let the test set the package root and
-  scripts folder (e.g. `TAP_PYTHON_PACKAGE_ROOT`). Today `package_root()`
-  (`tap.python_tilde_runtime.h:52-59`) walks five levels up from the test binary on macOS and
-  lands outside the repo, so the macOS job never starts Python.
-- [ ] **0.2 No either-way assertions.** When `support/` exists, `REQUIRE(Py_IsInitialized())`;
+- [ ] **0.1 Extract the core (D6).** `core/include/tap/python/` — `runtime.h` (initialization,
+  `gil_lock`, the console module), `value.h` (the Max-atom value model and its coercion rules),
+  `processor.h` (load/reload, introspection, attribute/message dispatch, `process()`). The
+  extraction is behavior-preserving except where noted in its PR; the known bugs are fixed in
+  Phase 1 against tests that reproduce them.
+- [ ] **0.2 Linux core battery.** `core/tests/` (Catch2, the family's FetchContent pin) against
+  CPython 3.13 from `find_package(Python3)`: runtime start-up and the console, the coercion table,
+  load/reload/error paths, attribute and message dispatch, `process()`, a real audio thread racing
+  main-thread messages, and the shipped examples. A `linux-core` CI job, plus an ASan/UBSan job.
+- [ ] **0.3 Injectable package root for the Max test.** Under `MIN_TEST`, let the test set the
+  package root (e.g. `TAP_PYTHON_PACKAGE_ROOT`). Today `package_root()` walks five levels up from
+  the test binary on macOS and lands outside the repo, so the macOS job never starts Python.
+- [ ] **0.4 No either-way assertions.** When `support/` exists, `REQUIRE(Py_IsInitialized())`;
   drop the silence branch in `tap.python_tilde_test.cpp:68-81`.
-- [ ] **0.3 Linux test leg (spike).** Try building the mock-kernel tests against the system
-  `python3-dev` (the tidy job already uses it). If min-api's mock kernel builds on Linux, this
-  gives fast CI, ThreadSanitizer, and a local loop in cloud sessions; if not, record why.
-- [ ] **0.4 Coverage of the public surface.** `attr_set`/`attr_get` round-trip, `message_gimme`
-  (int/float/symbol/bang, wrong arity), reload from a temp scripts dir (syntax error → silence,
-  fix → audio resumes, `process` raises → silence until reload, non-number return, missing class).
-- [ ] **0.5 `pytest` for the Python side** — the examples and any conversion logic that can be
-  exercised outside Max.
-- [ ] **0.6 `CLAUDE.md`** — runtime prerequisite, the class contract, GIL/thread rules, TapHouse
-  sync rules, and what must move together (maxref, help patcher, notebook, this plan).
+- [ ] **0.5 Max-glue coverage** — `attr_set`/`attr_get` round-trip through atoms, the
+  int/float/symbol/bang trampolines, reserved-name refusal once 1.3 lands.
+- [ ] **0.6 `CLAUDE.md`** — runtime prerequisite, the class contract, GIL/thread rules, the
+  core/wrapper split, TapHouse sync rules, and what must move together (maxref, help patcher,
+  notebook, this plan).
 
 ## Phase 1 — crash and safety fixes
 
@@ -92,6 +98,9 @@ Every later phase needs proof, and today the one unit test passes on either bran
 - [ ] **3.5 File-based loading (D2)**; the source argument must be an identifier.
 - [ ] **3.6 One reload per module** shared by all instances of that file, debounced (today each
   instance's watcher re-executes the module).
+- [ ] **3.6a Bytecode staleness on fast saves.** Reload goes through the normal source loader,
+  whose `.pyc` check is mtime (1 s resolution) + size, so two same-size saves within a second can
+  reload stale bytecode. Disable bytecode writing for user scripts, or load them uncached (D2).
 - [ ] **3.7 Console streams** — a real `flush()`, plus `encoding`/`errors`/`isatty` for libraries
   that probe them (`_runtime.h:184-194`).
 - [ ] **3.8 Namespace** — move `python_attr`, `python_message` and the trampolines into
@@ -141,9 +150,15 @@ Every later phase needs proof, and today the one unit test passes on either bran
 - [ ] **6.3 Performance budget** — CPU per sample (per-sample path) and per vector (block path) at
   48/96 kHz, recorded in the ReadMe as measured numbers.
 
+## Phase 7 — plugin front ends (optional, post-1.0)
+
+- [ ] **7.1** A CLAP (MIT, simpler) or VST3 wrapper over the core. Needs its own answer to fixed
+  parameter lists — e.g. a fixed bank of N parameters the Python class declares — and to sharing
+  one interpreter with other plugins that embed Python in the same host process.
+
 ## Sequencing (one PR each)
 
-1. Phase 0 — tests that can fail.
+1. Phase 0.1–0.2 — the core split and the Linux battery; then 0.3–0.6.
 2. Phase 1 — crash/safety fixes.
 3. Phase 4.1–4.4 — build/installers/CI (independent; can run in parallel with 2).
 4. Phase 2.1–2.3 — RT hygiene, block path, `prepare()`.
