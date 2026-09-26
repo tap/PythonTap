@@ -127,20 +127,43 @@ namespace tap::python {
             return s_scripts_directory;
         }
 
-        /// The script loader, a Python function created once by initialize(): see load_script().
-        inline PyObject*& loader() {
-            static PyObject* s_loader = nullptr; // strong; lives as long as the interpreter
-            return s_loader;
+        /// The globals of the support module created once by initialize() (strong; lives as long as
+        /// the interpreter): the script loader and the introspection helpers below.
+        inline PyObject*& support_globals() {
+            static PyObject* s_globals = nullptr;
+            return s_globals;
         }
 
+        /// A support-module function by name (borrowed), or nullptr. Caller holds the GIL.
+        inline PyObject* support(const char* name) {
+            return support_globals() ? PyDict_GetItemString(support_globals(), name) : nullptr;
+        }
+
+        // The support module, in Python because that is where the introspection is simplest.
+        //
         // load(module_name, path) -> (module, executed). Compiles the file's source itself — never a
         // cached .pyc, whose staleness check (mtime at 1 s resolution + size) can miss a quick second
         // save — and executes it as a fresh module registered in sys.modules under module_name (typing
         // and attrs resolve annotations through sys.modules). Modules are cached by source: loading an
         // unchanged file returns the module already executed, so every instance of one file shares a
         // single execution per save. On failure the previous module stays registered.
-        inline constexpr const char* k_loader_source = R"(
-import sys, types
+        //
+        // hint_kind(hint) -> str. The name the host maps a type hint by: 'int', 'float', 'bool', 'str',
+        // 'ndarray', 'tuple', ... ('any' for no hint, 'ClassVar' for a class variable). Optional[X] and
+        // X | None are X; an unresolved hint written as a string is read by name.
+        //
+        // class_hints(cls) -> ([(name, kind)], error). The class's annotated fields, base classes
+        // first. If typing.get_type_hints fails (e.g. a name imported only under TYPE_CHECKING), falls
+        // back to the annotations as written and returns the exception, for the host to report.
+        //
+        // methods(instance) -> [(name, callable)]. The public methods — functions, classmethods,
+        // staticmethods — found without running descriptors, so a property getter never runs just
+        // because the class was loaded. Each callable is bound: call it with the arguments only.
+        //
+        // describe(callable) -> ([(name, kind, parameter_kind, has_default)], return_kind, error).
+        // parameter_kind is inspect.Parameter.kind as an int.
+        inline constexpr const char* k_support_source = R"(
+import inspect, re, sys, types, typing
 
 _cache = {}
 
@@ -165,38 +188,104 @@ def load(module_name, path):
         raise
     _cache[module_name] = (source, module)
     return module, True
+
+_OPTIONAL = re.compile(r'(?:typing\.)?Optional\[(.*)\]')
+
+def hint_kind(hint):
+    if hint is inspect.Parameter.empty:
+        return 'any'
+    if isinstance(hint, str):
+        text = hint.strip()
+        match = _OPTIONAL.fullmatch(text)
+        if match:
+            return hint_kind(match.group(1))
+        parts = [p.strip() for p in text.split('|') if p.strip() != 'None']
+        if len(parts) == 1 and parts[0] != text:
+            return hint_kind(parts[0])
+        return text.split('[')[0].split('.')[-1]
+    origin = typing.get_origin(hint)
+    if origin is typing.ClassVar:
+        return 'ClassVar'
+    if origin is typing.Union or origin is types.UnionType:
+        args = [a for a in typing.get_args(hint) if a is not type(None)]
+        return hint_kind(args[0]) if len(args) == 1 else 'str'
+    if origin is not None:
+        return getattr(origin, '__name__', 'str')
+    return getattr(hint, '__name__', 'str')
+
+def class_hints(cls):
+    error = None
+    try:
+        hints = typing.get_type_hints(cls)
+    except Exception as e:
+        error = e
+        hints = {}
+        for base in reversed(cls.__mro__):
+            if base is not object:
+                try:
+                    hints.update(inspect.get_annotations(base))
+                except Exception:
+                    pass
+    return [(name, hint_kind(hint)) for name, hint in hints.items()], error
+
+def methods(instance):
+    found = []
+    for name in dir(instance):
+        if name.startswith('_'):
+            continue
+        try:
+            raw = inspect.getattr_static(instance, name)
+        except AttributeError:
+            continue
+        if isinstance(raw, (types.FunctionType, classmethod, staticmethod)):
+            found.append((name, getattr(instance, name)))
+    return found
+
+def describe(fn):
+    error = None
+    try:
+        hints = typing.get_type_hints(fn)
+    except Exception as e:
+        error = e
+        try:
+            hints = inspect.get_annotations(getattr(fn, '__func__', fn))
+        except Exception:
+            hints = {}
+    parameters = [
+        (p.name, hint_kind(hints.get(p.name, inspect.Parameter.empty)), int(p.kind),
+         p.default is not inspect.Parameter.empty)
+        for p in inspect.signature(fn).parameters.values()
+    ]
+    return parameters, hint_kind(hints.get('return', inspect.Parameter.empty)), error
 )";
 
-        /// Create the loader function (initialize() calls this with the GIL held).
-        inline void create_loader() {
+        /// Create the support module (initialize() calls this with the GIL held).
+        inline void create_support() {
             PyObject* globals = PyDict_New();
             if (!globals) {
                 PyErr_Clear();
                 return;
             }
             PyDict_SetItemString(globals, "__builtins__", PyEval_GetBuiltins()); // does not steal
-            if (PyObject* name = PyUnicode_FromString("_tap_python_loader")) {
+            if (PyObject* name = PyUnicode_FromString("_tap_python_support")) {
                 PyDict_SetItemString(globals, "__name__", name);
                 Py_DECREF(name);
             }
-            PyObject* result = PyRun_String(k_loader_source, Py_file_input, globals, globals);
+            PyObject* result = PyRun_String(k_support_source, Py_file_input, globals, globals);
             if (result) {
                 Py_DECREF(result);
-                PyObject* load = PyDict_GetItemString(globals, "load"); // borrowed
-                Py_XINCREF(load);
-                loader() = load;
+                support_globals() = globals; // keeps the reference
+                return;
             }
-            else {
-                PyErr_Print(); // start-up only, never user code
-            }
+            PyErr_Print(); // start-up only, never user code
             Py_DECREF(globals);
         }
 
-        inline void console_post(const char* str, const log_level level) {
+        inline void console_post(const std::string_view text, const log_level level) {
             auto&                       state = console();
             std::lock_guard<std::mutex> lock{state.mutex};
             auto&                       buffer = (level == log_level::error) ? state.buffer_err : state.buffer_out;
-            buffer += str;
+            buffer.append(text);
             size_t pos;
             while ((pos = buffer.find('\n')) != std::string::npos) {
                 if (state.sink) {
@@ -206,27 +295,49 @@ def load(module_name, path):
             }
         }
 
+        /// Forward a pending partial line (text without its newline yet) as a line of its own.
+        inline void console_flush(const log_level level) {
+            auto&                       state = console();
+            std::lock_guard<std::mutex> lock{state.mutex};
+            auto&                       buffer = (level == log_level::error) ? state.buffer_err : state.buffer_out;
+            if (!buffer.empty()) {
+                if (state.sink) {
+                    state.sink(level, buffer);
+                }
+                buffer.clear();
+            }
+        }
+
+        inline log_level console_level(PyObject* args, const char*& str, Py_ssize_t& length, bool& ok) {
+            int error = 0;
+            ok        = PyArg_ParseTuple(args, "s#p", &str, &length, &error) != 0; // s#: embedded NULs allowed
+            return error ? log_level::error : log_level::info;
+        }
+
         inline PyObject* console_write(PyObject*, PyObject* args) {
             const char* str{};
-            if (!PyArg_ParseTuple(args, "s", &str)) {
+            Py_ssize_t  length{};
+            bool        ok{};
+            const auto  level = console_level(args, str, length, ok);
+            if (!ok) {
                 return nullptr;
             }
-            console_post(str, log_level::info);
+            console_post(std::string_view{str, static_cast<std::size_t>(length)}, level);
             Py_RETURN_NONE;
         }
 
-        inline PyObject* console_write_err(PyObject*, PyObject* args) {
-            const char* str{};
-            if (!PyArg_ParseTuple(args, "s", &str)) {
+        inline PyObject* console_flush_method(PyObject*, PyObject* args) {
+            int error = 0;
+            if (!PyArg_ParseTuple(args, "p", &error)) {
                 return nullptr;
             }
-            console_post(str, log_level::error);
+            console_flush(error ? log_level::error : log_level::info);
             Py_RETURN_NONE;
         }
 
         inline PyMethodDef s_console_methods[] = {
-            {"write", console_write, METH_VARARGS, "Write to the host console."},
-            {"write_err", console_write_err, METH_VARARGS, "Write to the host console as an error."},
+            {"write", console_write, METH_VARARGS, "write(text, is_error): write to the host console."},
+            {"flush", console_flush_method, METH_VARARGS, "flush(is_error): forward a pending partial line."},
             {nullptr, nullptr, 0, nullptr}};
 
         inline PyModuleDef s_console_moduledef = {
@@ -242,41 +353,6 @@ def load(module_name, path):
 #else
             return PyUnicode_DecodeFSDefault(path.string().c_str());
 #endif
-        }
-
-        /// typing.get_type_hints(obj) — a NEW reference to the hints dict, or nullptr with a
-        /// Python error set (the caller clears it). Caller holds the GIL.
-        inline PyObject* get_type_hints(PyObject* obj) {
-            PyObject* typing = PyImport_ImportModule("typing");
-            if (!typing) {
-                return nullptr;
-            }
-            PyObject* fn = PyObject_GetAttrString(typing, "get_type_hints");
-            Py_DECREF(typing);
-            if (!fn) {
-                return nullptr;
-            }
-            PyObject* result = PyObject_CallFunctionObjArgs(fn, obj, nullptr);
-            Py_DECREF(fn);
-            return result;
-        }
-
-        /// `__name__` of a type-hint object, or `fallback` when it has none (e.g. a typing generic).
-        /// Caller holds the GIL; never leaves an error set.
-        inline std::string hint_name(PyObject* hint, std::string fallback) {
-            PyObject* name = PyObject_GetAttrString(hint, "__name__");
-            if (!name) {
-                PyErr_Clear();
-                return fallback;
-            }
-            if (const char* s = PyUnicode_AsUTF8(name)) {
-                fallback = s;
-            }
-            else {
-                PyErr_Clear();
-            }
-            Py_DECREF(name);
-            return fallback;
         }
 
     } // namespace detail
@@ -305,12 +381,12 @@ def load(module_name, path):
     }
 
     /// Load `<scripts_dir>/<name>.py` by path as the module `_tap_python_<name>` (see
-    /// detail::k_loader_source). Returns a new reference to the module, or nullptr with a Python
+    /// detail::k_support_source). Returns a new reference to the module, or nullptr with a Python
     /// error set; `executed` tells whether the source was (re)executed or the cached module reused.
     /// Caller holds the GIL; `name` must be a Python identifier (checked by the caller).
     inline PyObject* load_script(const std::string& name, bool& executed) {
         executed       = false;
-        PyObject* load = detail::loader();
+        PyObject* load = detail::support("load");
         if (!load) {
             PyErr_SetString(PyExc_RuntimeError, "the tap.python script loader failed to start");
             return nullptr;
@@ -387,20 +463,31 @@ def load(module_name, path):
                 Py_XDECREF(dir);
             }
 
-            detail::create_loader();
+            detail::create_support();
 
             // Route print() and tracebacks to the host console.
-            PyRun_SimpleString("import sys, _maxconsole\n"
-                               "class _MaxConsoleStream:\n"
-                               "    def __init__(self, write):\n"
-                               "        self._write = write\n"
+            // sys.stdout/sys.stderr are text streams (io.TextIOBase) so that libraries which probe them
+            // — encoding, errors, isatty(), fileno() — find what they expect; flush() forwards a
+            // pending partial line (e.g. print(..., end='', flush=True)).
+            PyRun_SimpleString("import io, sys, _maxconsole\n"
+                               "class _MaxConsoleStream(io.TextIOBase):\n"
+                               "    encoding = 'utf-8'\n"
+                               "    errors = 'backslashreplace'\n"
+                               "    def __init__(self, is_error):\n"
+                               "        self._is_error = is_error\n"
+                               "    def writable(self):\n"
+                               "        return True\n"
+                               "    def isatty(self):\n"
+                               "        return False\n"
                                "    def write(self, s):\n"
-                               "        self._write(s)\n"
+                               "        if not isinstance(s, str):\n"
+                               "            raise TypeError(f'write() argument must be str, not {type(s).__name__}')\n"
+                               "        _maxconsole.write(s, self._is_error)\n"
                                "        return len(s)\n"
                                "    def flush(self):\n"
-                               "        pass\n"
-                               "sys.stdout = _MaxConsoleStream(_maxconsole.write)\n"
-                               "sys.stderr = _MaxConsoleStream(_maxconsole.write_err)\n");
+                               "        _maxconsole.flush(self._is_error)\n"
+                               "sys.stdout = _MaxConsoleStream(False)\n"
+                               "sys.stderr = _MaxConsoleStream(True)\n");
 
             PyEval_SaveThread(); // release the GIL; every entry point re-acquires via gil_lock
             s_status.ok = true;

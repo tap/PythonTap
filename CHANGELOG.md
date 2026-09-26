@@ -6,6 +6,27 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ## Unreleased
 
+### Changed — types and messages
+
+- **Messages follow the method's signature.** Parameters with defaults are optional, `*args`
+  accepts any number of arguments, and unannotated parameters receive the value as the atom carried
+  it. Previously the argument count had to equal the number of *annotated* parameters, so defaults
+  and `*args` did not work and an unannotated parameter made a method uncallable. A method with a
+  keyword-only parameter without a default is no longer exposed (it could never be called).
+- **`bool` fields and arguments** are Max on/off longs and arrive in Python as `bool` (they were
+  symbols, so `flag 1` stored `""`). **`Optional[X]` / `X | None`** count as `X` (they were symbols).
+  `ClassVar` annotations are no longer attributes.
+- **Classmethods and staticmethods** are called correctly (a classmethod received the instance as
+  `cls`). Describing a class no longer runs its property getters.
+- **Unresolvable type hints are reported** and read as written, instead of silently leaving the
+  class with no attributes.
+- **Attribute reads never invent a value**: `None`, or a value that does not convert, reads as the
+  type's empty value instead of `-1`; an `int` attribute holding a float truncates; a symbol
+  attribute holding a non-string reads through `str()`.
+- **`sys.stdout`/`sys.stderr`** are proper text streams (`encoding`, `isatty()`, `fileno()` raising
+  `io.UnsupportedOperation`); `flush()` forwards a partial line, and text containing NUL characters
+  is written instead of raising.
+
 ### Changed (breaking) — loading and reloading
 
 - **Class files are loaded by path**, as the private module `_tap_python_<name>`, instead of being

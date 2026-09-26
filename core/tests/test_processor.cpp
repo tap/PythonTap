@@ -137,8 +137,8 @@ SCENARIO("Attributes round-trip through the instance") {
 
     WHEN("an attribute holds a value that does not convert to the requested type") {
         REQUIRE(p.set_attribute("label", std::string{"text"}));
-        THEN("it reads as CPython's error sentinel (honest limit: Phase 3.2)") {
-            CHECK(std::get<double>(*p.get_attribute("label", value_type::real)) == -1.0);
+        THEN("it reads as nothing — never an error sentinel like -1") {
+            CHECK_FALSE(p.get_attribute("label", value_type::real).has_value());
         }
     }
 }

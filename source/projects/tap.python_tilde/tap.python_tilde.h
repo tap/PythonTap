@@ -202,9 +202,8 @@ class python : public object<python>, public vector_operator<> {
             return;
         }
 
-        // the Max attribute's type (fixed when it was created) decides the conversion
-        const auto type = found->second->value_type();
-        m_processor->set_attribute(name.c_str(), runtime::coerce(to_values(argc, argv).front(), type));
+        // the core converts to the field's hinted type (a bool field gets a bool)
+        m_processor->set_attribute(name.c_str(), to_values(argc, argv).front());
     }
 
     void attr_get(const symbol& name, long* argc, c74::max::t_atom** argv) {
@@ -227,7 +226,16 @@ class python : public object<python>, public vector_operator<> {
             return;
         }
 
-        const auto result = m_processor->get_attribute(name.c_str(), found->second->value_type());
+        // nothing to read (None, or a value that does not convert): the type's empty value
+        const auto type = found->second->value_type();
+        if (type == runtime::value_type::integer || type == runtime::value_type::boolean) {
+            c74::max::atom_setlong(*argv, 0);
+        }
+        else if (type == runtime::value_type::symbol) {
+            c74::max::atom_setsym(*argv, c74::max::gensym(""));
+        }
+
+        const auto result = m_processor->get_attribute(name.c_str(), type);
         if (!result) {
             return;
         }
@@ -258,12 +266,12 @@ class python : public object<python>, public vector_operator<> {
     }
 
   private:
-    string                                                           m_python_source{};
-    std::filesystem::path                                            m_scripts_dir{};
-    void*                                                            m_filewatcher{};
-    std::unique_ptr<runtime::processor>                              m_processor;
-    std::unordered_map<std::string, std::unique_ptr<python_message>> m_python_messages;
-    std::unordered_map<std::string, std::unique_ptr<python_attr>>    m_python_attributes;
+    string                                                                    m_python_source{};
+    std::filesystem::path                                                     m_scripts_dir{};
+    void*                                                                     m_filewatcher{};
+    std::unique_ptr<runtime::processor>                                       m_processor;
+    std::unordered_map<std::string, std::unique_ptr<runtime::python_message>> m_python_messages;
+    std::unordered_map<std::string, std::unique_ptr<runtime::python_attr>>    m_python_attributes;
 
     /// Messages the Max object handles itself, which a Python method must never replace: min's
     /// own class methods, the messages Max sends every object, and this object's file watcher
@@ -326,7 +334,7 @@ class python : public object<python>, public vector_operator<> {
         for (const auto& attribute : current) {
             if (m_python_attributes.find(attribute.name) == m_python_attributes.end()) {
                 m_python_attributes[attribute.name] =
-                    std::make_unique<python_attr>(maxobj(), attribute.name, attribute.type);
+                    std::make_unique<runtime::python_attr>(maxobj(), attribute.name, attribute.type);
             }
         }
     }
@@ -339,7 +347,7 @@ class python : public object<python>, public vector_operator<> {
         m_python_messages.clear();
 
         for (const auto& message : m_processor->messages()) { // never names an attribute
-            m_python_messages[message.name] = std::make_unique<python_message>(maxobj(), message.name);
+            m_python_messages[message.name] = std::make_unique<runtime::python_message>(maxobj(), message.name);
         }
     }
 };

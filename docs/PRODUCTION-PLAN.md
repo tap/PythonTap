@@ -108,16 +108,22 @@ while audio ran segfaulted in 5 of 5 runs.
 
 ## Phase 3 — the type bridge and class contract
 
-- [ ] **3.1 Signature-based dispatch** (`inspect.signature`): required/optional arity, defaults,
+- [x] **3.1 Signature-based dispatch** (`inspect.signature`): required/optional arity, defaults,
   `*args`, keyword-only parameters; unannotated parameters convert by incoming atom type. Today
-  arity is the count of *annotated* parameters (`tap.python_tilde.h:190, 522-540`).
-- [ ] **3.2 Types** — `bool` → long attribute; unwrap `Optional`/`Union` via
+  arity is the count of *annotated* parameters (`tap.python_tilde.h:190, 522-540`). *Done:* the
+  support module's `describe()` (inspect.signature + hints) gives positional types, the required
+  count and `*args`; messages call the bound method, so classmethods/staticmethods work; a required
+  keyword-only parameter keeps a method from being exposed; `methods()` uses
+  `inspect.getattr_static`, so describing a class runs no property getter.
+- [x] **3.2 Types** — `bool` → long attribute; unwrap `Optional`/`Union` via
   `typing.get_origin`/`get_args` (today they fall through to symbol and store `""`);
   `list[float]` → list attribute; 64-bit ints (`PyLong_FromLongLong`, `t_atom_long`) so Windows
-  doesn't truncate; getters never report `-1` as a value.
-- [ ] **3.3 Hint failures are reported**, with a per-field fallback via
+  doesn't truncate; getters never report `-1` as a value. *Done,* except `list[float]` attributes
+  (still symbols — a list attribute needs its own Max-side design); `ClassVar` is not a field.
+- [x] **3.3 Hint failures are reported**, with a per-field fallback via
   `inspect.get_annotations`, instead of silently producing no attributes
-  (`tap.python_tilde.h:366-368, 437-440`).
+  (`tap.python_tilde.h:366-368, 437-440`). *Done:* the exception is displayed and the annotations
+  are read as written (a string hint by name; `Optional[...]`/`| None` unwrapped).
 - [x] **3.4 Reload reconciles attributes** — delete removed fields, re-type changed ones, and
   carry the patcher's current values onto the new instance (`tap.python_tilde.h:392-395, 424`).
   *Done:* the core snapshots the attribute values before a load (kept across a failed one) and
@@ -136,10 +142,12 @@ while audio ran segfaulted in 5 of 5 runs.
   whose `.pyc` check is mtime (1 s resolution) + size, so two same-size saves within a second can
   reload stale bytecode. Disable bytecode writing for user scripts, or load them uncached (D2).
   *Done:* the loader compiles the source directly; no `.pyc` is read or written for class files.
-- [ ] **3.7 Console streams** — a real `flush()`, plus `encoding`/`errors`/`isatty` for libraries
-  that probe them (`_runtime.h:184-194`).
+- [x] **3.7 Console streams** — a real `flush()`, plus `encoding`/`errors`/`isatty` for libraries
+  that probe them (`_runtime.h:184-194`). *Done:* `io.TextIOBase` subclasses; `s#` so NULs pass.
 - [ ] **3.8 Namespace** — move `python_attr`, `python_message` and the trampolines into
   `tap::python`; correct TapHouse's README, which says PythonTap has no namespace of its own.
+  *The move is done (and the headers lost their file-scope `using namespace`); the TapHouse README
+  correction is a separate PR in tap/taphouse.*
 
 ## Phase 4 — build, supply chain, distribution
 

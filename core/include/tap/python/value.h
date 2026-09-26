@@ -18,20 +18,28 @@
 
 namespace tap::python {
 
-    /// The type a Python annotation maps to.
-    enum class value_type { integer, real, symbol };
+    /// The type a Python annotation maps to. `boolean` crosses to Max as 0/1 (a long) and to Python
+    /// as a bool; `any` (an unannotated parameter) passes the value as the atom carried it.
+    enum class value_type { integer, real, symbol, boolean, any };
 
     /// One argument or attribute value: an integer, a real number, or a symbol (string).
     using value = std::variant<std::int64_t, double, std::string>;
 
-    /// Map a type hint's `__name__` to a value type: `int` → integer, `float` → real, anything
-    /// else → symbol. (The documented class contract; richer mapping is Phase 3.2.)
+    /// Map a type hint's kind (see the support module's hint_kind: Optional[X] is already X) to a
+    /// value type: `int` → integer, `float` → real, `bool` → boolean, no hint → any, anything else →
+    /// symbol.
     constexpr value_type value_type_from_hint(const std::string_view hint_name) {
         if (hint_name == "int") {
             return value_type::integer;
         }
         if (hint_name == "float") {
             return value_type::real;
+        }
+        if (hint_name == "bool") {
+            return value_type::boolean;
+        }
+        if (hint_name == "any") {
+            return value_type::any;
         }
         return value_type::symbol;
     }
@@ -41,8 +49,14 @@ namespace tap::python {
     ///   saturates), symbols → 0
     /// - to real: integers and reals convert, symbols → 0.0
     /// - to symbol: symbols pass, numbers → the empty symbol
+    /// - to boolean: as to integer, then 0 or 1 (non-zero is true)
+    /// - to any: unchanged
     inline value coerce(const value& v, const value_type type) {
         switch (type) {
+        case value_type::boolean:
+            return std::int64_t{std::get<std::int64_t>(coerce(v, value_type::integer)) != 0 ? 1 : 0};
+        case value_type::any:
+            return v;
         case value_type::integer:
             if (const auto* i = std::get_if<std::int64_t>(&v)) {
                 return *i;
