@@ -62,8 +62,10 @@ namespace tap::python {
 
     /// A public method of the user's class, callable through call().
     struct message_info {
-        std::string             name;
-        std::vector<value_type> argument_types; ///< one per annotated parameter, in order
+        std::string               name;
+        std::vector<value_type>   argument_types; ///< one per positional parameter, in order
+        std::size_t               required{};     ///< how many of those have no default
+        std::optional<value_type> variadic;       ///< the type of *args, if the method takes it
     };
 
     class processor {
@@ -190,7 +192,7 @@ namespace tap::python {
                 if (next.block_mode) {
                     ensure_block_buffer(m_vector_size);
                 }
-                call_prepare(next.instance, next.prepare_function);
+                call_prepare(next.prepare_function);
             }
 
             // The swap: no Python call from here until the old binding is released, so no other
@@ -226,15 +228,10 @@ namespace tap::python {
             if (m_block_mode) {
                 ensure_block_buffer(vector_size);
             }
-            PyObject* instance = acquire_instance();
-            if (!instance) {
-                return;
-            }
-            PyObject* function = m_prepare_function;
+            PyObject* function = m_prepare_function; // bound to the current instance
             Py_XINCREF(function);
-            call_prepare(instance, function);
+            call_prepare(function);
             Py_XDECREF(function);
-            Py_DECREF(instance);
         }
 
         /// Print whatever the audio thread recorded since the last flush (see report_ready). Main
@@ -283,21 +280,31 @@ namespace tap::python {
             return result;
         }
 
-        /// Set the instance attribute `name` (errors, e.g. an attrs validator rejecting the value,
-        /// are printed to the console). Returns true on success.
+        /// Set the instance attribute `name`, converting `v` to the attribute's hinted type (errors,
+        /// e.g. an attrs validator rejecting the value, are printed to the console). Returns true on
+        /// success.
         bool set_attribute(const std::string_view name, const value& v) {
             if (!loaded()) {
                 return false;
             }
 
-            gil_lock  lock;
+            gil_lock lock;
+
+            // the attribute's hinted type decides the conversion (a bool field gets a bool)
+            value_type type  = value_type::any;
+            const auto found = std::find_if(m_attributes.begin(), m_attributes.end(),
+                                            [&](const attribute_info& a) { return a.name == name; });
+            if (found != m_attributes.end()) {
+                type = found->type;
+            }
+
             PyObject* instance = acquire_instance();
             if (!instance) {
                 return false;
             }
 
             bool      ok       = false;
-            PyObject* py_value = to_python(v);
+            PyObject* py_value = to_python(coerce(v, type), type);
             if (py_value) {
                 ok = PyObject_SetAttrString(instance, std::string{name}.c_str(), py_value) == 0;
                 Py_DECREF(py_value);
@@ -309,8 +316,10 @@ namespace tap::python {
             return ok;
         }
 
-        /// Read the instance attribute `name` as `type`. Empty when there is no instance or no such
-        /// attribute; a value that does not convert reads as CPython's error sentinel (-1).
+        /// Read the instance attribute `name` as `type`. Empty when there is no instance, no such
+        /// attribute, or a value that does not convert (None, or a string in a numeric attribute) —
+        /// never an error sentinel. Numbers convert between integer and real (truncating); any
+        /// object reads as a symbol through str().
         std::optional<value> get_attribute(const std::string_view name, const value_type type) {
             if (!loaded()) {
                 return std::nullopt;
@@ -328,31 +337,16 @@ namespace tap::python {
                 return std::nullopt;
             }
 
-            value result;
-            switch (type) {
-            case value_type::real:
-                result = PyFloat_AsDouble(py_value);
-                break;
-            case value_type::integer:
-                result = static_cast<std::int64_t>(PyLong_AsLongLong(py_value));
-                break;
-            case value_type::symbol: {
-                const char* str = PyUnicode_AsUTF8(py_value);
-                result          = std::string{str ? str : ""};
-                break;
-            }
-            }
-            if (PyErr_Occurred()) {
-                PyErr_Clear();
-            }
-
+            std::optional<value> result = from_python(py_value, type);
             Py_DECREF(py_value);
             return result;
         }
 
-        /// Call the method `name` with `args`, each coerced to its parameter's hinted type. The
-        /// argument count must match the number of annotated parameters. Exceptions are printed to
-        /// the console. Returns true when the method was called and returned normally.
+        /// Call the method `name` with `args`, each coerced to its parameter's hinted type (an
+        /// unannotated parameter takes the value as it is). The count must fit the method's
+        /// signature: its required positional parameters at least, all of them at most unless it
+        /// takes *args. Exceptions are printed to the console. Returns true when the method was
+        /// called and returned normally.
         bool call(const std::string_view name, const std::span<const value> args) {
             if (!loaded()) {
                 return false;
@@ -369,29 +363,34 @@ namespace tap::python {
             // Take our own copies and references of everything the call uses before anything that
             // could run Python code (even an allocation can trigger a GC finalizer): that could let
             // a reload on another thread replace the message list under us.
-            const std::vector<value_type> types    = found->info.argument_types;
-            PyObject*                     function = found->function;
+            const message_info info     = found->info;
+            PyObject*          function = found->function; // bound: call with the arguments only
             Py_INCREF(function);
 
-            if (args.size() != types.size()) {
+            const auto positional = info.argument_types.size();
+            if (args.size() < info.required || (!info.variadic && args.size() > positional)) {
                 Py_DECREF(function);
-                log(log_level::error, std::string{name} + ": expected " + std::to_string(types.size())
-                                          + " argument(s), got " + std::to_string(args.size()));
-                return false;
-            }
-
-            PyObject* instance = acquire_instance();
-            if (!instance) {
-                Py_DECREF(function);
+                std::string expected;
+                if (info.variadic) {
+                    expected = "at least " + std::to_string(info.required);
+                }
+                else if (info.required == positional) {
+                    expected = std::to_string(positional);
+                }
+                else {
+                    expected = std::to_string(info.required) + " to " + std::to_string(positional);
+                }
+                log(log_level::error,
+                    std::string{name} + ": expected " + expected + " argument(s), got " + std::to_string(args.size()));
                 return false;
             }
 
             std::vector<PyObject*> call_args;
-            call_args.reserve(args.size() + 1);
-            call_args.push_back(instance);
+            call_args.reserve(args.size());
             bool converted = true;
             for (std::size_t i = 0; i < args.size(); ++i) {
-                PyObject* item = to_python(coerce(args[i], types[i]));
+                const value_type type = i < positional ? info.argument_types[i] : *info.variadic;
+                PyObject*        item = to_python(coerce(args[i], type), type);
                 if (!item) {
                     converted = false;
                     break;
@@ -402,7 +401,7 @@ namespace tap::python {
             PyObject* result =
                 converted ? PyObject_Vectorcall(function, call_args.data(), call_args.size(), nullptr) : nullptr;
             for (PyObject* arg : call_args) {
-                Py_DECREF(arg); // including the instance
+                Py_DECREF(arg);
             }
             Py_DECREF(function);
 
@@ -519,15 +518,70 @@ namespace tap::python {
             return instance;
         }
 
-        /// A new reference for `v`, or nullptr with a Python error set. Caller holds the GIL.
-        static PyObject* to_python(const value& v) {
+        /// A new reference for `v` as `type` (a boolean becomes a bool), or nullptr with a Python
+        /// error set. Caller holds the GIL.
+        static PyObject* to_python(const value& v, const value_type type = value_type::any) {
             if (const auto* i = std::get_if<std::int64_t>(&v)) {
-                return PyLong_FromLongLong(*i);
+                return type == value_type::boolean ? PyBool_FromLong(*i != 0) : PyLong_FromLongLong(*i);
             }
             if (const auto* d = std::get_if<double>(&v)) {
                 return PyFloat_FromDouble(*d);
             }
             return PyUnicode_DecodeFSDefault(std::get<std::string>(v).c_str());
+        }
+
+        /// `object` as `type`, or empty if it does not convert (see get_attribute). Caller holds
+        /// the GIL; never leaves an error set.
+        static std::optional<value> from_python(PyObject* object, const value_type type) {
+            std::optional<value> result;
+            if (object == Py_None) {
+                return result;
+            }
+            switch (type) {
+            case value_type::boolean: {
+                const int truth = PyObject_IsTrue(object);
+                if (truth >= 0) {
+                    result = std::int64_t{truth};
+                }
+                break;
+            }
+            case value_type::integer:
+            case value_type::real: {
+                if (!PyNumber_Check(object)) {
+                    break;
+                }
+                const double d = PyFloat_AsDouble(object);
+                if (d == -1.0 && PyErr_Occurred()) {
+                    break;
+                }
+                if (type == value_type::real) {
+                    result = d;
+                }
+                else if (PyLong_Check(object)) {
+                    const long long i = PyLong_AsLongLong(object);
+                    result = (i == -1 && PyErr_Occurred()) ? coerce(d, value_type::integer) : value{std::int64_t{i}};
+                }
+                else {
+                    result = coerce(d, value_type::integer);
+                }
+                break;
+            }
+            case value_type::symbol:
+            case value_type::any: {
+                PyObject* text = PyUnicode_Check(object) ? Py_NewRef(object) : PyObject_Str(object);
+                if (text) {
+                    if (const char* utf8 = PyUnicode_AsUTF8(text)) {
+                        result = std::string{utf8};
+                    }
+                    Py_DECREF(text);
+                }
+                break;
+            }
+            }
+            if (PyErr_Occurred()) {
+                PyErr_Clear();
+            }
+            return result;
         }
 
         /// Release a binding's references. Caller holds the GIL. Releasing can run arbitrary
@@ -849,18 +903,18 @@ namespace tap::python {
             m_block_size = 0;
         }
 
-        /// Call `function` (the class's prepare(), if it has one) on `instance` with the current
-        /// audio settings; report an exception. Caller holds the GIL; main thread.
-        void call_prepare(PyObject* instance, PyObject* function) {
-            if (!function || !instance) {
+        /// Call `function` (the class's prepare(), bound to its instance, if it has one) with the
+        /// current audio settings; report an exception. Caller holds the GIL; main thread.
+        void call_prepare(PyObject* function) {
+            if (!function) {
                 return;
             }
             PyObject* sample_rate = PyFloat_FromDouble(m_sample_rate);
             PyObject* vector_size = PyLong_FromSize_t(m_vector_size);
             PyObject* result      = nullptr;
             if (sample_rate && vector_size) {
-                PyObject* const call_args[3] = {instance, sample_rate, vector_size};
-                result                       = PyObject_Vectorcall(function, call_args, 3, nullptr);
+                PyObject* const call_args[2] = {sample_rate, vector_size};
+                result                       = PyObject_Vectorcall(function, call_args, 2, nullptr);
             }
             Py_XDECREF(sample_rate);
             Py_XDECREF(vector_size);
@@ -876,37 +930,110 @@ namespace tap::python {
             return std::find(m_reserved_messages.begin(), m_reserved_messages.end(), name) != m_reserved_messages.end();
         }
 
-        /// Describe the class-level type hints as attributes. Caller holds the GIL.
-        static void collect_attributes(PyObject* py_class, binding& b) {
-            PyObject* hints = detail::get_type_hints(py_class);
-            if (!hints) {
-                PyErr_Clear();
-                return;
+        /// A support-module call with one argument; a new reference, or nullptr with an error set.
+        static PyObject* call_support(const char* function_name, PyObject* argument) {
+            PyObject* function = detail::support(function_name);
+            if (!function) {
+                PyErr_Format(PyExc_RuntimeError, "the tap.python support function %s is missing", function_name);
+                return nullptr;
             }
-
-            PyObject*  key;
-            PyObject*  hint;
-            Py_ssize_t pos = 0;
-            while (PyDict_Next(hints, &pos, &key, &hint)) { // key/hint are borrowed
-                const char* key_cstr = PyUnicode_AsUTF8(key);
-                if (!key_cstr) {
-                    PyErr_Clear();
-                    continue;
-                }
-                if (key_cstr[0] == '_') {
-                    continue;
-                }
-                b.attributes.push_back({key_cstr, value_type_from_hint(detail::hint_name(hint, "str"))});
-            }
-            Py_DECREF(hints);
+            return PyObject_CallOneArg(function, argument);
         }
 
-        /// Bind the instance's public methods as messages, and process() as the audio callback.
-        /// Caller holds the GIL.
-        void collect_messages(binding& b) const {
-            PyObject* members = PyObject_Dir(b.instance);
-            if (!members) {
+        /// Report a type-hint error the support module caught (a borrowed exception, or None).
+        void report_hint_error(PyObject* error, const std::string& what) const {
+            if (!error || error == Py_None) {
+                return;
+            }
+            PyErr_DisplayException(error);
+            log(log_level::error, "could not resolve the type hints of " + what + "; using the annotations as written");
+        }
+
+        static std::string utf8(PyObject* text) {
+            const char* s = text ? PyUnicode_AsUTF8(text) : nullptr;
+            if (!s) {
                 PyErr_Clear();
+                return {};
+            }
+            return s;
+        }
+
+        /// Describe the class's annotated public fields as attributes (ClassVars are not fields).
+        /// Caller holds the GIL.
+        void collect_attributes(PyObject* py_class, binding& b) const {
+            PyObject* result = call_support("class_hints", py_class);
+            if (!result) {
+                report_exception();
+                return;
+            }
+            PyObject* fields = PyTuple_GetItem(result, 0); // borrowed
+            report_hint_error(PyTuple_GetItem(result, 1), "class " + m_source_name);
+
+            const Py_ssize_t count = fields ? PyList_Size(fields) : 0;
+            for (Py_ssize_t i = 0; i < count; ++i) {
+                PyObject*         field = PyList_GetItem(fields, i); // borrowed (name, kind)
+                const std::string name  = utf8(PyTuple_GetItem(field, 0));
+                const std::string kind  = utf8(PyTuple_GetItem(field, 1));
+                if (name.empty() || name[0] == '_' || kind == "ClassVar") {
+                    continue;
+                }
+                b.attributes.push_back({name, value_type_from_hint(kind)});
+            }
+            Py_DECREF(result);
+        }
+
+        /// A method's parameters, as the support module's describe() reports them.
+        struct parameter {
+            std::string name;
+            std::string kind; // the hint kind
+            int         parameter_kind{};
+            bool        has_default{};
+        };
+
+        struct signature {
+            std::vector<parameter> parameters;
+            std::string            return_kind;
+        };
+
+        // inspect.Parameter.kind values
+        static constexpr int k_positional_only     = 0;
+        static constexpr int k_positional_or_named = 1;
+        static constexpr int k_var_positional      = 2;
+        static constexpr int k_keyword_only        = 3;
+
+        /// Describe a callable's signature; a hint error is reported. Empty if inspection failed
+        /// (reported too). Caller holds the GIL.
+        std::optional<signature> describe(PyObject* callable, const std::string& what) const {
+            PyObject* result = call_support("describe", callable);
+            if (!result) {
+                report_exception();
+                return std::nullopt;
+            }
+            signature sig;
+            PyObject* parameters = PyTuple_GetItem(result, 0); // borrowed
+            sig.return_kind      = utf8(PyTuple_GetItem(result, 1));
+            report_hint_error(PyTuple_GetItem(result, 2), what);
+
+            const Py_ssize_t count = parameters ? PyList_Size(parameters) : 0;
+            for (Py_ssize_t i = 0; i < count; ++i) {
+                PyObject* p = PyList_GetItem(parameters, i); // borrowed
+                sig.parameters.push_back({utf8(PyTuple_GetItem(p, 0)), utf8(PyTuple_GetItem(p, 1)),
+                                          static_cast<int>(PyLong_AsLong(PyTuple_GetItem(p, 2))),
+                                          PyObject_IsTrue(PyTuple_GetItem(p, 3)) == 1});
+            }
+            if (PyErr_Occurred()) {
+                PyErr_Clear();
+            }
+            Py_DECREF(result);
+            return sig;
+        }
+
+        /// Bind the instance's public methods as messages, process() as the audio callback and
+        /// prepare() as the settings hook. Caller holds the GIL.
+        void collect_messages(binding& b) const {
+            PyObject* methods = call_support("methods", b.instance);
+            if (!methods) {
+                report_exception();
                 return;
             }
 
@@ -915,89 +1042,57 @@ namespace tap::python {
                                    [&](const attribute_info& a) { return a.name == name; });
             };
 
-            const auto member_count = PyList_Size(members);
-            for (Py_ssize_t i = 0; i < member_count; ++i) {
-                PyObject*   member    = PyList_GetItem(members, i); // borrowed
-                const char* name_cstr = member ? PyUnicode_AsUTF8(member) : nullptr;
-                if (!name_cstr) {
-                    PyErr_Clear();
-                    continue;
-                }
-                if (name_cstr[0] == '_') {
+            const Py_ssize_t count = PyList_Size(methods);
+            for (Py_ssize_t i = 0; i < count; ++i) {
+                PyObject*         entry  = PyList_GetItem(methods, i); // borrowed (name, bound callable)
+                const std::string name   = utf8(PyTuple_GetItem(entry, 0));
+                PyObject*         method = PyTuple_GetItem(entry, 1); // borrowed
+                if (name.empty() || !method || is_attribute(name)) {
                     continue;
                 }
 
-                const std::string member_name{name_cstr};
-                if (is_attribute(member_name)) {
-                    continue;
+                if (name == "prepare") {
+                    Py_INCREF(method);
+                    b.prepare_function = method;
                 }
-
-                PyObject* method = PyObject_GetAttrString(b.instance, member_name.c_str());
-                if (!method) {
-                    PyErr_Clear();
-                    continue;
+                else if (name == "process") {
+                    bind_process(method, b);
                 }
-
-                if (PyMethod_Check(method)) {
-                    PyObject* fn = PyMethod_Function(method); // borrowed
-                    if (fn && PyFunction_Check(fn)) {
-                        if (member_name == "prepare") {
-                            Py_INCREF(fn);
-                            b.prepare_function = fn;
-                        }
-                        else if (member_name != "process" && is_reserved(member_name)) {
-                            log(log_level::error, member_name
-                                                      + "() is reserved by the host and is not exposed as a "
-                                                        "message; rename the method");
-                        }
-                        else {
-                            PyObject* hints = detail::get_type_hints(method);
-                            if (!hints) {
-                                PyErr_Clear();
-                            }
-
-                            if (member_name == "process") {
-                                bind_process(fn, hints, b);
-                            }
-                            else {
-                                bind_message(member_name, fn, hints, b);
-                            }
-
-                            Py_XDECREF(hints);
-                        }
-                    }
+                else if (is_reserved(name)) {
+                    log(log_level::error,
+                        name + "() is reserved by the host and is not exposed as a message; rename the method");
                 }
-                Py_DECREF(method);
+                else {
+                    bind_message(name, method, b);
+                }
             }
-            Py_DECREF(members);
+            Py_DECREF(methods);
         }
 
         /// Bind the class's process() method as the audio callback: per vector when its first
         /// parameter is hinted np.ndarray, per sample otherwise. Caller holds the GIL.
-        void bind_process(PyObject* fn, PyObject* hints, binding& b) const {
-            int  in_count      = 0;
-            bool returns_tuple = false;
-            bool block_input   = false;
+        void bind_process(PyObject* method, binding& b) const {
+            // the audio path calls the function with the instance explicitly (one less indirection
+            // per sample), so process() must be a plain instance method
+            PyObject* fn = PyMethod_Check(method) ? PyMethod_Function(method) : nullptr; // borrowed
+            if (!fn || !PyFunction_Check(fn) || PyMethod_Self(method) != b.instance) {
+                log(log_level::error, "process() must be a regular instance method (not a classmethod or "
+                                      "staticmethod); audio is not bound");
+                return;
+            }
 
-            if (hints) {
-                PyObject*  key;
-                PyObject*  hint;
-                Py_ssize_t pos = 0;
-                while (PyDict_Next(hints, &pos, &key, &hint)) { // borrowed
-                    const char* key_cstr = PyUnicode_AsUTF8(key);
-                    if (!key_cstr) {
-                        PyErr_Clear();
-                        continue;
+            const auto sig = describe(method, "process()");
+            if (!sig) {
+                return;
+            }
+            int  in_count    = 0;
+            bool block_input = false;
+            for (const auto& p : sig->parameters) {
+                if (p.parameter_kind == k_positional_only || p.parameter_kind == k_positional_or_named) {
+                    if (in_count == 0) {
+                        block_input = p.kind == "ndarray";
                     }
-                    if (std::string_view{key_cstr} == "return") {
-                        returns_tuple = detail::hint_name(hint, "") == "tuple";
-                    }
-                    else {
-                        if (in_count == 0) {
-                            block_input = detail::hint_name(hint, "") == "ndarray";
-                        }
-                        ++in_count;
-                    }
+                    ++in_count;
                 }
             }
 
@@ -1005,7 +1100,7 @@ namespace tap::python {
                 log(log_level::error, "process() declares " + std::to_string(in_count)
                                           + " inputs but only the first is supported (single-channel object)");
             }
-            if (returns_tuple) {
+            if (sig->return_kind == "tuple") {
                 log(log_level::error,
                     "process() returns a tuple — multichannel output is not supported yet; use a single float return");
                 return;
@@ -1019,29 +1114,43 @@ namespace tap::python {
                                              : "Audio process() bound: 1 input, 1 output, one call per sample");
         }
 
-        /// Bind a public method as a message. Caller holds the GIL.
-        static void bind_message(const std::string& name, PyObject* fn, PyObject* hints, binding& b) {
-            bound_message message{{name, {}}, fn};
+        /// Bind a public method as a message, described by its signature. A keyword-only parameter
+        /// without a default cannot be passed from the host, so such a method is not exposed.
+        /// Caller holds the GIL.
+        void bind_message(const std::string& name, PyObject* method, binding& b) const {
+            const auto sig = describe(method, name + "()");
+            if (!sig) {
+                return;
+            }
 
-            if (hints) {
-                PyObject*  key;
-                PyObject*  hint;
-                Py_ssize_t pos = 0;
-                while (PyDict_Next(hints, &pos, &key, &hint)) { // borrowed
-                    const char* key_cstr = PyUnicode_AsUTF8(key);
-                    if (!key_cstr) {
-                        PyErr_Clear();
-                        continue;
+            message_info info{name, {}, 0, std::nullopt};
+            for (const auto& p : sig->parameters) {
+                switch (p.parameter_kind) {
+                case k_positional_only:
+                case k_positional_or_named:
+                    info.argument_types.push_back(value_type_from_hint(p.kind));
+                    if (!p.has_default) {
+                        info.required = info.argument_types.size();
                     }
-                    if (std::string_view{key_cstr} == "return") {
-                        continue;
+                    break;
+                case k_var_positional:
+                    info.variadic = value_type_from_hint(p.kind);
+                    break;
+                case k_keyword_only:
+                    if (!p.has_default) {
+                        log(log_level::error, name + "() has a keyword-only parameter '" + p.name
+                                                  + "' without a default, which a message cannot pass; it is not "
+                                                    "exposed as a message");
+                        return;
                     }
-                    message.info.argument_types.push_back(value_type_from_hint(detail::hint_name(hint, "str")));
+                    break;
+                default: // **kwargs: nothing to pass
+                    break;
                 }
             }
 
-            Py_INCREF(fn);
-            b.messages.push_back(std::move(message));
+            Py_INCREF(method);
+            b.messages.push_back({std::move(info), method});
         }
     };
 

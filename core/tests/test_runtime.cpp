@@ -76,3 +76,30 @@ SCENARIO("stderr and tracebacks reach the console as errors") {
     CHECK_FALSE(run("raise KeyError('traceback marker')"));
     CHECK(console().contains("KeyError: 'traceback marker'", log_level::error));
 }
+
+SCENARIO("sys.stdout and sys.stderr are text streams libraries can probe") {
+    ensure_runtime();
+    console().clear();
+    CHECK(run("import io, sys\n"
+              "for s in (sys.stdout, sys.stderr):\n"
+              "    assert isinstance(s, io.TextIOBase)\n"
+              "    assert s.encoding == 'utf-8' and s.writable() and not s.isatty()\n"
+              "try:\n"
+              "    sys.stdout.fileno()\n"
+              "    raise AssertionError('fileno() should not exist')\n"
+              "except io.UnsupportedOperation:\n"
+              "    pass\n"));
+
+    WHEN("a partial line is flushed") {
+        REQUIRE(run("print('progress', end='', flush=True)"));
+        THEN("it arrives without waiting for a newline") {
+            CHECK(console().contains("progress", log_level::info));
+        }
+    }
+    WHEN("text contains a NUL character") {
+        REQUIRE(run("print('before\\x00after')"));
+        THEN("it is written rather than rejected") {
+            CHECK(console().contains("before", log_level::info));
+        }
+    }
+}

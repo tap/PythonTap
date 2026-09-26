@@ -17,7 +17,9 @@ SCENARIO("Type hints map to value types by name") {
     CHECK(value_type_from_hint("int") == value_type::integer);
     CHECK(value_type_from_hint("float") == value_type::real);
     CHECK(value_type_from_hint("str") == value_type::symbol);
-    CHECK(value_type_from_hint("bool") == value_type::symbol); // honest limit: Phase 3.2
+    CHECK(value_type_from_hint("bool") == value_type::boolean);
+    CHECK(value_type_from_hint("any") == value_type::any);
+    CHECK(value_type_from_hint("ndarray") == value_type::symbol);
     CHECK(value_type_from_hint("") == value_type::symbol);
 }
 
@@ -53,4 +55,18 @@ SCENARIO("Coercion to symbol follows atom_getsym") {
     CHECK(std::get<std::string>(coerce(std::string{"hello"}, value_type::symbol)) == "hello");
     CHECK(std::get<std::string>(coerce(std::int64_t{1}, value_type::symbol)).empty());
     CHECK(std::get<std::string>(coerce(0.5, value_type::symbol)).empty());
+}
+
+SCENARIO("Coercion to boolean is 0 or 1, by atom_getlong") {
+    CHECK(std::get<std::int64_t>(coerce(std::int64_t{5}, value_type::boolean)) == 1);
+    CHECK(std::get<std::int64_t>(coerce(std::int64_t{0}, value_type::boolean)) == 0);
+    CHECK(std::get<std::int64_t>(coerce(0.5, value_type::boolean)) == 0); // truncates first, as atom_getlong
+    CHECK(std::get<std::int64_t>(coerce(-2.0, value_type::boolean)) == 1);
+    CHECK(std::get<std::int64_t>(coerce(std::string{"true"}, value_type::boolean)) == 0);
+}
+
+SCENARIO("Coercion to any leaves the value as the atom carried it") {
+    CHECK(std::get<std::int64_t>(coerce(std::int64_t{5}, value_type::any)) == 5);
+    CHECK(std::get<double>(coerce(0.5, value_type::any)) == 0.5);
+    CHECK(std::get<std::string>(coerce(std::string{"x"}, value_type::any)) == "x");
 }
