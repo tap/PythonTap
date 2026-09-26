@@ -59,6 +59,13 @@ To add more Python packages to the bundled runtime:
 
 ### From a clone of this repository
 
+Max finds the package only in its `Packages` folder, so clone it there (or clone it anywhere and symlink it in, e.g. `ln -s ~/src/PythonTap ~/Documents/"Max 9"/Packages/PythonTap`), with its submodules:
+
+```sh
+cd ~/Documents/"Max 9"/Packages
+git clone --recursive https://github.com/tap/PythonTap.git
+```
+
 A clone has no runtime: install it into the package's `support` folder (from [python-build-standalone](https://github.com/astral-sh/python-build-standalone)), then build (see [Building from source](#building-from-source)):
 
 **macOS** — in Terminal, from the package root:
