@@ -7,12 +7,22 @@
 // defined there, and describes it to the host:
 // - the class's type-annotated public fields become attributes (attributes())
 // - its public methods become messages, their argument types taken from the hints (messages())
-// - a method `process(self, x: float) -> float` becomes the per-sample audio callback (process())
+// - a method `process()` becomes the audio callback (process()): `process(self, x: float) -> float`
+//   is called once per sample; `process(self, x: np.ndarray) -> np.ndarray` once per vector
+// - an optional `prepare(self, sample_rate: float, vector_size: int)` is told the audio settings
+//   (prepare()) before the instance first processes audio, and again whenever they change
 //
-// Threads: load() and the destructor run on the host's main thread; set_attribute(),
-// get_attribute() and call() on any non-audio thread; process() on the audio thread. Each takes
-// the GIL. A processor that is not loaded (import, class lookup or construction failed, or
-// process() raised) outputs silence and ignores attributes and messages until the next load().
+// Threads: load(), prepare(), flush_reports() and the destructor run on the host's main thread;
+// set_attribute(), get_attribute() and call() on any non-audio thread; process() on the audio
+// thread. Each takes the GIL. A processor that is not loaded (import, class lookup or construction
+// failed, or process() raised) outputs silence and ignores attributes and messages until the next
+// load().
+//
+// The audio thread never prints. What goes wrong there — process() raising, returning something
+// that is not a number, producing NaN or infinity, or a vector of the wrong length — is recorded
+// and the host's report_ready callback is called (it must be real-time safe: in Max, setting a
+// qelem); the host then calls flush_reports() on its main thread to print it. Each kind is reported
+// once per load. Non-finite output is replaced with 0.0.
 //
 // The GIL alone does not keep these apart: CPython hands it to a waiting thread every switch
 // interval (5 ms), including in the middle of a process() vector or of a reload. So load() builds
@@ -24,8 +34,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -57,11 +71,15 @@ namespace tap::python {
         ///                          audio thread)
         /// @param reserved_messages method names the host handles itself; a Python method with one
         ///                          of these names is not exposed as a message (with a diagnostic)
+        /// @param report_ready      called on the audio thread when something needs reporting; the
+        ///                          host must then call flush_reports() from its main thread. Must be
+        ///                          real-time safe (no locks, no allocation).
         explicit processor(std::string source_name, log_function log = {},
-                           std::vector<std::string> reserved_messages = {})
+                           std::vector<std::string> reserved_messages = {}, std::function<void()> report_ready = {})
             : m_source_name{std::move(source_name)}
             , m_log{std::move(log)}
-            , m_reserved_messages{std::move(reserved_messages)} {}
+            , m_reserved_messages{std::move(reserved_messages)}
+            , m_report_ready{std::move(report_ready)} {}
 
         ~processor() {
             if (!Py_IsInitialized()) {
@@ -69,7 +87,10 @@ namespace tap::python {
             }
             gil_lock lock;
             release_binding();
+            release_block_buffer();
             Py_CLEAR(m_module);
+            Py_XDECREF(m_pending_exception.exchange(nullptr));
+            Py_XDECREF(m_pending_non_numeric.exchange(nullptr));
         }
 
         processor(const processor&)            = delete;
@@ -146,24 +167,94 @@ namespace tap::python {
             Py_DECREF(py_class);
             collect_messages(next);
 
+            // Tell the new instance the audio settings before anything can run it.
+            if (m_prepared) {
+                if (next.block_mode) {
+                    ensure_block_buffer(m_vector_size);
+                }
+                call_prepare(next.instance, next.prepare_function);
+            }
+
             // The swap: no Python call from here until the old binding is released, so no other
             // thread can take the GIL and see a half-built state.
             binding previous;
             previous.instance         = m_instance.exchange(next.instance);
             previous.process_function = m_process_function.exchange(next.process_function);
+            previous.prepare_function = std::exchange(m_prepare_function, next.prepare_function);
+            previous.block_mode       = std::exchange(m_block_mode, next.block_mode);
             previous.attributes       = std::exchange(m_attributes, std::move(next.attributes));
             previous.messages         = std::exchange(m_messages, std::move(next.messages));
             next.instance             = nullptr;
             next.process_function     = nullptr;
+            next.prepare_function     = nullptr;
+            reset_warnings(); // each kind of audio-thread problem is reported once per load
 
             release(previous); // may run finalizers, which may let other threads in: now safe
             return true;
         }
 
+        /// Tell the processor the audio settings (sample rate in Hz, maximum vector size in samples)
+        /// before audio starts and whenever they change; calls the class's prepare(), if it has one,
+        /// now and after every later load(). Main thread only.
+        void prepare(const double sample_rate, const std::size_t vector_size) {
+            m_sample_rate = sample_rate;
+            m_vector_size = vector_size;
+            m_prepared    = true;
+            if (!Py_IsInitialized()) {
+                return;
+            }
+
+            gil_lock lock;
+            if (m_block_mode) {
+                ensure_block_buffer(vector_size);
+            }
+            PyObject* instance = acquire_instance();
+            if (!instance) {
+                return;
+            }
+            PyObject* function = m_prepare_function;
+            Py_XINCREF(function);
+            call_prepare(instance, function);
+            Py_XDECREF(function);
+            Py_DECREF(instance);
+        }
+
+        /// Print whatever the audio thread recorded since the last flush (see report_ready). Main
+        /// thread only; cheap when there is nothing to report.
+        void flush_reports() {
+            if (!Py_IsInitialized()) {
+                return;
+            }
+
+            gil_lock lock;
+            if (PyObject* exception = m_pending_exception.exchange(nullptr)) {
+                PyErr_DisplayException(exception);
+                Py_DECREF(exception);
+                log(log_level::error,
+                    "process() raised an exception — audio disabled until the source is fixed and reloaded");
+            }
+            if (PyObject* type = m_pending_non_numeric.exchange(nullptr)) {
+                log(log_level::error, std::string{"process() returned "}
+                                          + reinterpret_cast<PyTypeObject*>(type)->tp_name
+                                          + ", not a number — output as 0.0 (reported once per load)");
+                Py_DECREF(type);
+            }
+            if (m_pending_non_finite.exchange(false)) {
+                log(log_level::error,
+                    "process() produced a non-finite sample (NaN or infinity) — replaced with 0.0 (reported once per "
+                    "load)");
+            }
+            if (const auto returned = m_pending_bad_length.exchange(k_no_length); returned != k_no_length) {
+                log(log_level::error, "process() returned " + std::to_string(returned) + " sample(s) for a vector of "
+                                          + std::to_string(m_bad_length_expected.load())
+                                          + " — that vector is output as silence (reported once per load)");
+            }
+        }
+
         /// The class's annotated public fields, in declaration order. Main thread, after load().
         const std::vector<attribute_info>& attributes() const noexcept { return m_attributes; }
 
-        /// The class's public methods other than process(), the attributes and the reserved names,
+        /// The class's public methods other than process(), prepare(), the attributes and the reserved names,
         /// sorted by name. Main thread, after load().
         std::vector<message_info> messages() const {
             std::vector<message_info> result;
@@ -305,10 +396,11 @@ namespace tap::python {
             return true;
         }
 
-        /// The audio callback: calls the Python process() once per sample. `input` and `output`
-        /// may alias. Outputs silence while not bound; if process() raises, prints the traceback,
-        /// silences the rest of the vector and unbinds until the next load(). A reload landing
-        /// mid-vector does not affect this vector: it finishes on the binding it started with.
+        /// The audio callback. Calls the class's process() once per sample, or once per vector when
+        /// its input is hinted np.ndarray. `input` and `output` may alias. Outputs silence while
+        /// not bound; if process() raises, silences the rest of the vector, unbinds until the next
+        /// load() and records the exception for flush_reports(). A reload landing mid-vector does
+        /// not affect this vector: it finishes on the binding it started with.
         void process(const double* input, double* output, const std::size_t frame_count) {
             if (!has_process()) {
                 std::fill(output, output + frame_count, 0.0);
@@ -328,33 +420,11 @@ namespace tap::python {
             Py_INCREF(function);
             Py_INCREF(instance);
 
-            for (std::size_t i = 0; i < frame_count; ++i) {
-                PyObject* x = PyFloat_FromDouble(input[i]);
-                if (!x) {
-                    report_exception();
-                    std::fill(output + i, output + frame_count, 0.0);
-                    break;
-                }
-                PyObject* const call_args[2] = {instance, x};
-                PyObject*       result       = PyObject_Vectorcall(function, call_args, 2, nullptr);
-                Py_DECREF(x);
-
-                if (!result) {
-                    report_exception();
-                    log(log_level::error,
-                        "process() raised an exception — audio disabled until the source is fixed and reloaded");
-                    unbind_process(function); // load() re-arms it
-                    std::fill(output + i, output + frame_count, 0.0);
-                    break;
-                }
-
-                double y = PyFloat_AsDouble(result); // also handles ints and other number types
-                if (PyErr_Occurred()) {
-                    PyErr_Clear();
-                    y = 0.0;
-                }
-                output[i] = y;
-                Py_DECREF(result);
+            if (m_block_mode) {
+                process_block(function, instance, input, output, frame_count);
+            }
+            else {
+                process_samples(function, instance, input, output, frame_count);
             }
 
             Py_DECREF(instance);
@@ -371,9 +441,13 @@ namespace tap::python {
         struct binding {
             PyObject*                   instance{};         // strong
             PyObject*                   process_function{}; // strong
+            PyObject*                   prepare_function{}; // strong, or null
+            bool                        block_mode{};       // process() takes and returns np.ndarray
             std::vector<attribute_info> attributes;
             std::vector<bound_message>  messages;
         };
+
+        static constexpr std::int64_t k_no_length = -1;
 
         std::string              m_source_name;
         log_function             m_log;
@@ -385,6 +459,28 @@ namespace tap::python {
         std::atomic<PyObject*>      m_process_function{}; // strong
         std::vector<attribute_info> m_attributes;
         std::vector<bound_message>  m_messages;
+        // The rest of the binding and the block buffer: read and written only under the GIL.
+        PyObject*   m_prepare_function{}; // strong, or null
+        bool        m_block_mode{};
+        PyObject*   m_block_input{}; // strong: the np.ndarray process() receives, reused every vector
+        Py_buffer   m_block_view{};  // held while m_block_input is, so its memory cannot move
+        double*     m_block_data{};
+        std::size_t m_block_size{};
+        // The audio settings from prepare(); main thread only.
+        double      m_sample_rate{};
+        std::size_t m_vector_size{};
+        bool        m_prepared{};
+        // Reports recorded on the audio thread for flush_reports(), and whether each kind has
+        // already been recorded since the last load().
+        std::function<void()>     m_report_ready;
+        std::atomic<PyObject*>    m_pending_exception{};   // strong
+        std::atomic<PyObject*>    m_pending_non_numeric{}; // strong: the returned object's type
+        std::atomic<bool>         m_pending_non_finite{};
+        std::atomic<std::int64_t> m_pending_bad_length{k_no_length};
+        std::atomic<std::int64_t> m_bad_length_expected{};
+        std::atomic<bool>         m_warned_non_numeric{};
+        std::atomic<bool>         m_warned_non_finite{};
+        std::atomic<bool>         m_warned_bad_length{};
 
         void log(const log_level level, const std::string& text) const {
             if (m_log) {
@@ -415,6 +511,7 @@ namespace tap::python {
         /// out of the members.
         static void release(binding& b) {
             Py_CLEAR(b.process_function);
+            Py_CLEAR(b.prepare_function);
             Py_CLEAR(b.instance);
             b.attributes.clear();
             for (auto& message : b.messages) {
@@ -428,6 +525,8 @@ namespace tap::python {
             binding previous;
             previous.instance         = m_instance.exchange(nullptr);
             previous.process_function = m_process_function.exchange(nullptr);
+            previous.prepare_function = std::exchange(m_prepare_function, nullptr);
+            previous.block_mode       = std::exchange(m_block_mode, false);
             previous.attributes       = std::exchange(m_attributes, {});
             previous.messages         = std::exchange(m_messages, {});
             release(previous);
@@ -440,6 +539,258 @@ namespace tap::python {
             if (m_process_function.compare_exchange_strong(expected, nullptr)) {
                 Py_DECREF(function); // the member's reference; the caller still holds its own
             }
+        }
+
+        void reset_warnings() {
+            m_warned_non_numeric = false;
+            m_warned_non_finite  = false;
+            m_warned_bad_length  = false;
+        }
+
+        void notify_report() const {
+            if (m_report_ready) {
+                m_report_ready();
+            }
+        }
+
+        /// Record the pending exception (audio thread; caller holds the GIL). Only the first since
+        /// the last flush is kept — the rest of that vector is silenced, and process() unbound.
+        void record_exception() {
+            PyObject* exception = PyErr_GetRaisedException();
+            PyObject* expected  = nullptr;
+            if (exception && !m_pending_exception.compare_exchange_strong(expected, exception)) {
+                Py_DECREF(exception);
+            }
+            notify_report();
+        }
+
+        /// Record that process() returned `object`, which is not a number. Caller holds the GIL.
+        void record_non_numeric(PyObject* object) {
+            if (m_warned_non_numeric.exchange(true)) {
+                return;
+            }
+            PyObject* type = reinterpret_cast<PyObject*>(Py_TYPE(object));
+            Py_INCREF(type);
+            Py_XDECREF(m_pending_non_numeric.exchange(type));
+            notify_report();
+        }
+
+        /// Replace non-finite samples with 0.0, recording the first occurrence per load.
+        void sanitize(double* output, const std::size_t frame_count) {
+            bool found = false;
+            for (std::size_t i = 0; i < frame_count; ++i) {
+                if (!std::isfinite(output[i])) {
+                    output[i] = 0.0;
+                    found     = true;
+                }
+            }
+            if (found && !m_warned_non_finite.exchange(true)) {
+                m_pending_non_finite = true;
+                notify_report();
+            }
+        }
+
+        /// The per-sample path. Caller holds the GIL and references to `function` and `instance`.
+        void process_samples(PyObject* function, PyObject* instance, const double* input, double* output,
+                             const std::size_t frame_count) {
+            for (std::size_t i = 0; i < frame_count; ++i) {
+                PyObject* x = PyFloat_FromDouble(input[i]);
+                if (!x) {
+                    record_exception();
+                    std::fill(output + i, output + frame_count, 0.0);
+                    return;
+                }
+                PyObject* const call_args[2] = {instance, x};
+                PyObject*       result       = PyObject_Vectorcall(function, call_args, 2, nullptr);
+                Py_DECREF(x);
+
+                if (!result) {
+                    record_exception();
+                    unbind_process(function); // load() re-arms it
+                    std::fill(output + i, output + frame_count, 0.0);
+                    return;
+                }
+
+                double y = PyFloat_AsDouble(result); // also handles ints and other number types
+                if (y == -1.0 && PyErr_Occurred()) {
+                    PyErr_Clear();
+                    record_non_numeric(result);
+                    y = 0.0;
+                }
+                output[i] = y;
+                Py_DECREF(result);
+            }
+            sanitize(output, frame_count);
+        }
+
+        /// The block path: one call per vector with the reused input array. Caller holds the GIL
+        /// and references to `function` and `instance`.
+        void process_block(PyObject* function, PyObject* instance, const double* input, double* output,
+                           const std::size_t frame_count) {
+            // allocates only when the vector size differs from the one prepare() announced
+            if (!ensure_block_buffer(frame_count)) {
+                std::fill(output, output + frame_count, 0.0);
+                return;
+            }
+
+            // copy in and take our reference before calling, which may yield the GIL
+            std::memcpy(m_block_data, input, frame_count * sizeof(double));
+            PyObject* x = m_block_input;
+            Py_INCREF(x);
+            PyObject* const call_args[2] = {instance, x};
+            PyObject*       result       = PyObject_Vectorcall(function, call_args, 2, nullptr);
+            Py_DECREF(x);
+
+            if (!result) {
+                record_exception();
+                unbind_process(function);
+                std::fill(output, output + frame_count, 0.0);
+                return;
+            }
+            copy_block_result(result, output, frame_count);
+            Py_DECREF(result);
+            sanitize(output, frame_count);
+        }
+
+        static bool is_native_double(const Py_buffer& view) {
+            const std::string_view format{view.format ? view.format : "B"};
+            return view.itemsize == static_cast<Py_ssize_t>(sizeof(double))
+                   && (format == "d" || format == "@d" || format == "=d"
+                       || (format == "<d" && std::endian::native == std::endian::little));
+        }
+
+        /// Copy process()'s block result into `output`: directly from a contiguous float64 buffer,
+        /// otherwise through np.ascontiguousarray(result, dtype=float64). Caller holds the GIL.
+        void copy_block_result(PyObject* result, double* output, const std::size_t frame_count) {
+            const auto expected_bytes = static_cast<Py_ssize_t>(frame_count * sizeof(double));
+
+            Py_buffer view;
+            if (PyObject_GetBuffer(result, &view, PyBUF_C_CONTIGUOUS | PyBUF_FORMAT) == 0) {
+                if (is_native_double(view) && view.len == expected_bytes) {
+                    std::memcpy(output, view.buf, frame_count * sizeof(double));
+                    PyBuffer_Release(&view);
+                    return;
+                }
+                PyBuffer_Release(&view);
+            }
+            else {
+                PyErr_Clear();
+            }
+
+            // np.ascontiguousarray(None) is a 0-d NaN array, not an error: a process() that forgot
+            // its return statement would read as a length mismatch
+            if (result == Py_None) {
+                record_non_numeric(result);
+                std::fill(output, output + frame_count, 0.0);
+                return;
+            }
+
+            PyObject* converted = nullptr;
+            if (PyObject* numpy = PyImport_ImportModule("numpy")) {
+                converted = PyObject_CallMethod(numpy, "ascontiguousarray", "Os", result, "float64");
+                Py_DECREF(numpy);
+            }
+            if (!converted) {
+                PyErr_Clear();
+                record_non_numeric(result);
+                std::fill(output, output + frame_count, 0.0);
+                return;
+            }
+            if (PyObject_GetBuffer(converted, &view, PyBUF_C_CONTIGUOUS | PyBUF_FORMAT) != 0) {
+                PyErr_Clear();
+                Py_DECREF(converted);
+                record_non_numeric(result);
+                std::fill(output, output + frame_count, 0.0);
+                return;
+            }
+            if (view.len == expected_bytes) {
+                std::memcpy(output, view.buf, frame_count * sizeof(double));
+            }
+            else {
+                std::fill(output, output + frame_count, 0.0);
+                if (!m_warned_bad_length.exchange(true)) {
+                    m_bad_length_expected = static_cast<std::int64_t>(frame_count);
+                    m_pending_bad_length =
+                        static_cast<std::int64_t>(view.len / static_cast<Py_ssize_t>(sizeof(double)));
+                    notify_report();
+                }
+            }
+            PyBuffer_Release(&view);
+            Py_DECREF(converted);
+        }
+
+        /// Make sure the block input array holds `size` samples, building a new np.zeros(size) if
+        /// not. Caller holds the GIL. The new array is built completely, then swapped in with no
+        /// Python call in between (building it can yield the GIL). Returns false if numpy failed.
+        bool ensure_block_buffer(const std::size_t size) {
+            if (m_block_input && m_block_size == size) {
+                return true;
+            }
+
+            PyObject* array = nullptr;
+            if (PyObject* numpy = PyImport_ImportModule("numpy")) {
+                array = PyObject_CallMethod(numpy, "zeros", "n", static_cast<Py_ssize_t>(size));
+                Py_DECREF(numpy);
+            }
+            Py_buffer view;
+            if (!array || PyObject_GetBuffer(array, &view, PyBUF_WRITABLE | PyBUF_C_CONTIGUOUS | PyBUF_FORMAT) != 0) {
+                PyErr_Clear();
+                Py_XDECREF(array);
+                return false;
+            }
+            if (!is_native_double(view)) {
+                PyBuffer_Release(&view);
+                Py_DECREF(array);
+                return false;
+            }
+            if (m_block_input && m_block_size == size) { // another thread built one meanwhile
+                PyBuffer_Release(&view);
+                Py_DECREF(array);
+                return true;
+            }
+
+            PyObject* old_input = std::exchange(m_block_input, array);
+            Py_buffer old_view  = std::exchange(m_block_view, view);
+            m_block_data        = static_cast<double*>(view.buf);
+            m_block_size        = size;
+            if (old_input) {
+                PyBuffer_Release(&old_view);
+                Py_DECREF(old_input);
+            }
+            return true;
+        }
+
+        /// Caller holds the GIL.
+        void release_block_buffer() {
+            if (m_block_input) {
+                PyBuffer_Release(&m_block_view);
+                Py_CLEAR(m_block_input);
+            }
+            m_block_data = nullptr;
+            m_block_size = 0;
+        }
+
+        /// Call `function` (the class's prepare(), if it has one) on `instance` with the current
+        /// audio settings; report an exception. Caller holds the GIL; main thread.
+        void call_prepare(PyObject* instance, PyObject* function) {
+            if (!function || !instance) {
+                return;
+            }
+            PyObject* sample_rate = PyFloat_FromDouble(m_sample_rate);
+            PyObject* vector_size = PyLong_FromSize_t(m_vector_size);
+            PyObject* result      = nullptr;
+            if (sample_rate && vector_size) {
+                PyObject* const call_args[3] = {instance, sample_rate, vector_size};
+                result                       = PyObject_Vectorcall(function, call_args, 3, nullptr);
+            }
+            Py_XDECREF(sample_rate);
+            Py_XDECREF(vector_size);
+            if (!result) {
+                report_exception();
+                log(log_level::error, "prepare() raised an exception — the instance may not know the audio settings");
+                return;
+            }
+            Py_DECREF(result);
         }
 
         bool is_reserved(const std::string& name) const {
@@ -511,7 +862,11 @@ namespace tap::python {
                 if (PyMethod_Check(method)) {
                     PyObject* fn = PyMethod_Function(method); // borrowed
                     if (fn && PyFunction_Check(fn)) {
-                        if (member_name != "process" && is_reserved(member_name)) {
+                        if (member_name == "prepare") {
+                            Py_INCREF(fn);
+                            b.prepare_function = fn;
+                        }
+                        else if (member_name != "process" && is_reserved(member_name)) {
                             log(log_level::error, member_name
                                                       + "() is reserved by the host and is not exposed as a "
                                                         "message; rename the method");
@@ -538,10 +893,12 @@ namespace tap::python {
             Py_DECREF(members);
         }
 
-        /// Bind the class's process() method as the per-sample audio callback. Caller holds the GIL.
+        /// Bind the class's process() method as the audio callback: per vector when its first
+        /// parameter is hinted np.ndarray, per sample otherwise. Caller holds the GIL.
         void bind_process(PyObject* fn, PyObject* hints, binding& b) const {
             int  in_count      = 0;
             bool returns_tuple = false;
+            bool block_input   = false;
 
             if (hints) {
                 PyObject*  key;
@@ -557,6 +914,9 @@ namespace tap::python {
                         returns_tuple = detail::hint_name(hint, "") == "tuple";
                     }
                     else {
+                        if (in_count == 0) {
+                            block_input = detail::hint_name(hint, "") == "ndarray";
+                        }
                         ++in_count;
                     }
                 }
@@ -574,8 +934,10 @@ namespace tap::python {
 
             Py_INCREF(fn);
             b.process_function = fn;
+            b.block_mode       = block_input;
 
-            log(log_level::info, "Audio process() bound: 1 input, 1 output");
+            log(log_level::info, block_input ? "Audio process() bound: 1 input, 1 output, one call per vector (numpy)"
+                                             : "Audio process() bound: 1 input, 1 output, one call per sample");
         }
 
         /// Bind a public method as a message. Caller holds the GIL.

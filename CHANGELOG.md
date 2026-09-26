@@ -6,6 +6,23 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ## Unreleased
 
+### Added
+
+- **numpy block processing.** A `process(self, x: np.ndarray) -> np.ndarray` is called once per
+  signal vector with a (reused) numpy array, instead of once per sample. The result may be any
+  numeric dtype or a list; it is converted. New example: `python/numpy_gain.py`.
+- **`prepare(self, sample_rate: float, vector_size: int)`**, called with Max's audio settings before
+  audio starts, whenever they change, and on every reload before the new code runs.
+
+### Changed
+
+- `python/allpass.py` takes its sample rate from `prepare()`; its `fs` attribute is gone (it
+  assumed 48 kHz unless set by hand). `alpha` must now be strictly between -1 and 1 (±1 put the
+  filter's pole on the unit circle).
+- Problems in `process()` are printed from Max's main thread, not the audio thread. A non-numeric
+  result is now reported (once per load) instead of silently output as 0.0, and non-finite output
+  (NaN, infinity) is replaced with 0.0 and reported once per load.
+
 ### Installation
 
 - The runtime installers verify the CPython download against a SHA256 committed in
