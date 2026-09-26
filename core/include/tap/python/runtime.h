@@ -45,6 +45,28 @@ namespace tap::python {
 
     namespace detail {
 
+        // No CPython *data* symbols (Py_None, Py_True, PyExc_*, Py*_Type, and the macros that expand
+        // to them, such as Py_RETURN_NONE, PyFloat_Check or PyMethod_Check) anywhere in the core: the
+        // Windows external delay-loads python3xx.dll so that it can load, and say what is missing,
+        // without a runtime, and MSVC cannot delay-load a DLL whose data a module imports (LNK1194).
+        // Reach them through function calls instead, as below. CI checks the external's imports.
+
+        /// None, as a borrowed reference.
+        inline PyObject* none() {
+            return Py_GetConstantBorrowed(Py_CONSTANT_NONE);
+        }
+
+        /// Set a RuntimeError with `message`, looking the type up in builtins.
+        inline void set_runtime_error(const std::string& message) {
+            PyObject* builtins = PyImport_ImportModule("builtins");
+            PyObject* type     = builtins ? PyObject_GetAttrString(builtins, "RuntimeError") : nullptr;
+            Py_XDECREF(builtins);
+            if (type) {
+                PyErr_SetString(type, message.c_str());
+                Py_DECREF(type);
+            }
+        }
+
         /// The thread that called initialize(); its thread state belongs to the interpreter.
         inline std::thread::id& init_thread() {
             static std::thread::id s_init_thread;
@@ -323,7 +345,7 @@ def describe(fn):
                 return nullptr;
             }
             console_post(std::string_view{str, static_cast<std::size_t>(length)}, level);
-            Py_RETURN_NONE;
+            return Py_NewRef(none());
         }
 
         inline PyObject* console_flush_method(PyObject*, PyObject* args) {
@@ -332,7 +354,7 @@ def describe(fn):
                 return nullptr;
             }
             console_flush(error ? log_level::error : log_level::info);
-            Py_RETURN_NONE;
+            return Py_NewRef(none());
         }
 
         inline PyMethodDef s_console_methods[] = {
@@ -388,7 +410,7 @@ def describe(fn):
         executed       = false;
         PyObject* load = detail::support("load");
         if (!load) {
-            PyErr_SetString(PyExc_RuntimeError, "the tap.python script loader failed to start");
+            detail::set_runtime_error("the tap.python script loader failed to start");
             return nullptr;
         }
         const auto path   = detail::scripts_directory() / (name + ".py");

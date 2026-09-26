@@ -13,11 +13,13 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## Third-party software
 
-This package builds on, and at runtime uses, the following third-party software. None of it is contained in this repository; the build pulls in the Min-API as a git submodule and `scripts/install-runtime.*` installs the Python runtime and packages locally.
+This package builds on, and at runtime uses, the following third-party software. None of it is contained in this repository: the build pulls in the Min-API (with the Max SDK inside it) as a git submodule, and `scripts/install-runtime.*` installs the Python runtime and packages locally. A release package bundles all of it, and carries a copy of every one of these licenses in its `licenses/` folder (collected by `scripts/assemble-package.py` from exactly what the package contains, with an index in `licenses/README.md`).
 
-- **Min-API** (git submodule at `source/min-api`) — Copyright Cycling '74, MIT License. See `source/min-api/License.md`.
-- **CPython** (installed into `support/` by the install script, built by the [python-build-standalone](https://github.com/astral-sh/python-build-standalone) project) — PSF License Agreement. See `support/lib/python3.*/LICENSE.txt` after installation (`support/Lib/LICENSE.txt` on Windows), or https://docs.python.org/3/license.html. The runtime bundles OpenSSL and other components; python-build-standalone documents their licenses at https://gregoryszorc.com/docs/python-build-standalone/main/running.html#licensing.
-- **attrs** (installed by the install script) — MIT License.
-- **NumPy** (installed by the install script) — BSD 3-Clause License.
+- **Min-API** (git submodule at `source/min-api`, compiled into the external) — Copyright The Min-API Authors, MIT License. See `source/min-api/License.md`.
+- **Max SDK** (inside the Min-API, at `source/min-api/max-sdk-base`, compiled into the external) — Copyright Cycling '74, MIT-style license. See `source/min-api/max-sdk-base/LICENSE.md`.
+- **CPython** (the runtime in `support/`, built by the [python-build-standalone](https://github.com/astral-sh/python-build-standalone) project) — PSF License Agreement, plus the licenses of the components it bundles, all in its `LICENSE.txt` (`support/lib/python3.13/LICENSE.txt` on macOS, `support/LICENSE.txt` on Windows). python-build-standalone documents the licenses of the libraries it links in (OpenSSL, SQLite, and others) at https://gregoryszorc.com/docs/python-build-standalone/main/running.html#licensing.
+- **attrs** (installed in the runtime) — MIT License.
+- **NumPy** (installed in the runtime) — BSD 3-Clause License. Its wheels bundle OpenBLAS and LAPACK (BSD 3-Clause) and, where OpenBLAS needs it, the GCC runtime libraries (`libgfortran`, `libquadmath`: GPL 3 with the GCC Runtime Library Exception, and LGPL 2.1); their license texts ship inside the installed package, in `numpy-*.dist-info/licenses/`.
+- **pip** (part of the runtime) — MIT License, with the licenses of the libraries it vendors in its `dist-info/licenses/`.
 
-If you redistribute a built package that bundles the `support/` runtime (for example a release zip), you must include the corresponding license texts from the runtime you bundle.
+If you redistribute a package that bundles the `support/` runtime yourself, include those license texts too; `python3 scripts/assemble-package.py --licenses-only --output <folder>` collects them from the runtime you installed.

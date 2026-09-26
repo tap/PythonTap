@@ -165,3 +165,40 @@ SCENARIO("Hints that cannot be resolved are reported, and the annotations as wri
     REQUIRE(p.call("set_level", std::vector<value>{0.5}));
     CHECK(all_equal(render(p, 1.0), 0.5));
 }
+
+SCENARIO("process() binds only as a plain instance method") {
+    ensure_runtime();
+
+    GIVEN("a process() that is a classmethod or a staticmethod") {
+        write_script("process_classmethod", "class process_classmethod:\n"
+                                            "    @classmethod\n"
+                                            "    def process(cls, x: float) -> float:\n"
+                                            "        return x\n");
+        write_script("process_staticmethod", "class process_staticmethod:\n"
+                                             "    @staticmethod\n"
+                                             "    def process(x: float) -> float:\n"
+                                             "        return x\n");
+        for (const auto* name : {"process_classmethod", "process_staticmethod"}) {
+            log_capture log;
+            processor   p{name, log.sink()};
+            REQUIRE(p.load());
+            THEN(std::string{name} + " is loaded, but its audio is not bound, and the log says why") {
+                CHECK_FALSE(p.has_process());
+                CHECK(log.contains("must be a regular instance method", log_level::error));
+                CHECK(all_equal(render(p, 0.5), 0.0));
+            }
+        }
+    }
+
+    GIVEN("a plain instance method") {
+        write_script("process_plain", "class process_plain:\n"
+                                      "    def process(self, x: float) -> float:\n"
+                                      "        return x * 2.0\n");
+        processor p{"process_plain"};
+        REQUIRE(p.load());
+        THEN("it is bound and runs") {
+            CHECK(p.has_process());
+            CHECK(all_equal(render(p, 0.25), 0.5));
+        }
+    }
+}

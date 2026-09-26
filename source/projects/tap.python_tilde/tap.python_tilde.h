@@ -126,6 +126,11 @@ class python : public object<python>, public vector_operator<> {
             return;
         }
 
+        if (std::string error; !runtime::runtime_library_loadable(home, error)) {
+            cerr << error << endl;
+            return;
+        }
+
         const auto status = runtime::initialize({home, m_scripts_dir, console_line});
         if (!status.ok) {
             cerr << "failed to start Python from '" << home.string() << "': " << status.error
