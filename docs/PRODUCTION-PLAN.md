@@ -227,6 +227,41 @@ while audio ran segfaulted in 5 of 5 runs.
 
 ## Phase 6 — validation in a real Max
 
+**Runbook for a session on a Mac with Max 9.** Everything up to here was built and tested on Linux
+(core battery under sanitizers, the external against min's mock kernel) and in CI (macOS and
+Windows builds, link-shape checks); nothing has yet run inside Max. To pick this up:
+
+1. *Set up.* Clone into (or symlink into) `~/Documents/Max 9/Packages/PythonTap` with
+   `--recursive`, run `./scripts/install-runtime.sh` (native: fastest to build; add `--universal`
+   only to check a universal build), then `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release &&
+   cmake --build build && ctest --test-dir build`. The external lands in `externals/`. When Max
+   loads an external newer than `docs/tap.python~.maxref.xml`, min rewrites the page from the
+   object's metadata; the committed one was generated against the mock kernel, so if Max's
+   differs, commit Max's.
+2. *5.2 — the help patcher.* Open `help/tap.python~.maxhelp`: its new boxes were added by hand
+   (as JSON, in Max's layout), so check they sit sensibly and every message box works, then
+   re-save it in Max 9 and commit. Tabs for the numpy and allpass examples and `mc.` are welcome.
+3. *6.4 — loading without a runtime.* Quit Max, rename `support/` aside, start Max, create
+   `[tap.python~]`: expect one console line naming the missing runtime (not a load failure).
+   Rename it back: the object should work only after restarting Max (the weak binding is fixed at
+   load, by design). On Windows the next object created should pick it up without a restart.
+4. *Behavior the mock kernel cannot show* — check each by hand and note the result here:
+   - a `bool` field's attribute shows as on/off (a toggle in the inspector and in attrui);
+   - removing a field and saving, while an attrui displays that attribute, drops it cleanly;
+   - saving the file repeatedly while audio runs (`numpy_gain.py`, then `default.py`, which is
+     per sample) gives no dropout beyond the swap and no crash;
+   - `prepare(sample_rate, vector_size)` runs before the first `process()` and again when the
+     sample rate or vector size changes in Audio Status — `allpass.py` prints "Setting delay to
+     …" whenever its delay in samples changes, so a sample-rate change shows it;
+   - `sys.exit()` in a message only prints; an exception in `process()` prints once from the main
+     thread and silences until the next save.
+5. *6.1 — automate it.* The `max-test` harness is not in this repo yet: add it as TapTools-Max
+   does (the `runtime-tests/` folder: Cycling '74's max-test as a submodule, `*.maxtest.maxpat`
+   patchers, the OSC runner), then turn the checks above into patchers.
+6. *6.5 — the first release.* Tag a pre-1.0 version (`v0.9.0`), which runs `release.yml` for the
+   first time, including the `macos-15-intel` runner; install each draft zip into `Packages/`
+   (clearing quarantine per the ReadMe) and repeat step 4's quick checks.
+
 - [ ] **6.1 Runtime tests** with the `max-test` harness (as TapTools-Max does): load/unload,
   attributes/messages, reload under audio, 20 instances, `sys.exit()`/exception/NaN. Needs a
   licensed Max — a local on-Mac gate, not CI.
