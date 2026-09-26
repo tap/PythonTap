@@ -14,8 +14,8 @@ using namespace c74::min;
 
 /// A Max attribute dynamically added to a tap.python~ instance, mirroring an
 /// annotated attribute of the user's Python class. Instances are owned via
-/// unique_ptr in the object's attribute map and persist across module reloads
-/// (the underlying Max attribute object stays registered on the Max object).
+/// unique_ptr in the object's attribute map; one persists across reloads while the
+/// class keeps the field with the same type, and is removed otherwise.
 class python_attr {
   public:
     python_attr(c74::max::t_object* owner, const string& name, const tap::python::value_type type)
@@ -50,6 +50,15 @@ class python_attr {
 
     python_attr(const python_attr&)            = delete;
     python_attr& operator=(const python_attr&) = delete;
+
+    /// Detach the attribute from the Max object and free it (the class no longer has the field,
+    /// or its type changed). Not called at object destruction: Max frees instance attributes then.
+    void remove() {
+        if (m_attrobj) {
+            c74::max::object_deleteattr(m_owner, c74::max::gensym(m_name.c_str()));
+            m_attrobj = nullptr;
+        }
+    }
 
     /// The Max attribute type (long, float64 or symbol).
     symbol type() const { return m_type; }

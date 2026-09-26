@@ -32,6 +32,7 @@ add_executable(tap_python_core_tests
     test_examples.cpp
     test_safety.cpp
     test_realtime.cpp
+    test_loading.cpp
 )
 target_link_libraries(tap_python_core_tests PRIVATE tap::python_core Python3::Python Catch2::Catch2WithMain)
 

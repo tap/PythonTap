@@ -127,6 +127,71 @@ namespace tap::python {
             return s_scripts_directory;
         }
 
+        /// The script loader, a Python function created once by initialize(): see load_script().
+        inline PyObject*& loader() {
+            static PyObject* s_loader = nullptr; // strong; lives as long as the interpreter
+            return s_loader;
+        }
+
+        // load(module_name, path) -> (module, executed). Compiles the file's source itself — never a
+        // cached .pyc, whose staleness check (mtime at 1 s resolution + size) can miss a quick second
+        // save — and executes it as a fresh module registered in sys.modules under module_name (typing
+        // and attrs resolve annotations through sys.modules). Modules are cached by source: loading an
+        // unchanged file returns the module already executed, so every instance of one file shares a
+        // single execution per save. On failure the previous module stays registered.
+        inline constexpr const char* k_loader_source = R"(
+import sys, types
+
+_cache = {}
+
+def load(module_name, path):
+    with open(path, 'rb') as f:
+        source = f.read()
+    cached = _cache.get(module_name)
+    if cached is not None and cached[0] == source:
+        return cached[1], False
+    code = compile(source, path, 'exec', dont_inherit=True)
+    module = types.ModuleType(module_name)
+    module.__file__ = path
+    previous = sys.modules.get(module_name)
+    sys.modules[module_name] = module
+    try:
+        exec(code, module.__dict__)
+    except BaseException:
+        if previous is not None:
+            sys.modules[module_name] = previous
+        else:
+            sys.modules.pop(module_name, None)
+        raise
+    _cache[module_name] = (source, module)
+    return module, True
+)";
+
+        /// Create the loader function (initialize() calls this with the GIL held).
+        inline void create_loader() {
+            PyObject* globals = PyDict_New();
+            if (!globals) {
+                PyErr_Clear();
+                return;
+            }
+            PyDict_SetItemString(globals, "__builtins__", PyEval_GetBuiltins()); // does not steal
+            if (PyObject* name = PyUnicode_FromString("_tap_python_loader")) {
+                PyDict_SetItemString(globals, "__name__", name);
+                Py_DECREF(name);
+            }
+            PyObject* result = PyRun_String(k_loader_source, Py_file_input, globals, globals);
+            if (result) {
+                Py_DECREF(result);
+                PyObject* load = PyDict_GetItemString(globals, "load"); // borrowed
+                Py_XINCREF(load);
+                loader() = load;
+            }
+            else {
+                PyErr_Print(); // start-up only, never user code
+            }
+            Py_DECREF(globals);
+        }
+
         inline void console_post(const char* str, const log_level level) {
             auto&                       state = console();
             std::lock_guard<std::mutex> lock{state.mutex};
@@ -239,6 +304,36 @@ namespace tap::python {
         state.sink = std::move(sink);
     }
 
+    /// Load `<scripts_dir>/<name>.py` by path as the module `_tap_python_<name>` (see
+    /// detail::k_loader_source). Returns a new reference to the module, or nullptr with a Python
+    /// error set; `executed` tells whether the source was (re)executed or the cached module reused.
+    /// Caller holds the GIL; `name` must be a Python identifier (checked by the caller).
+    inline PyObject* load_script(const std::string& name, bool& executed) {
+        executed       = false;
+        PyObject* load = detail::loader();
+        if (!load) {
+            PyErr_SetString(PyExc_RuntimeError, "the tap.python script loader failed to start");
+            return nullptr;
+        }
+        const auto path   = detail::scripts_directory() / (name + ".py");
+        PyObject*  pyname = PyUnicode_FromString(("_tap_python_" + name).c_str());
+        PyObject*  pypath = detail::path_to_unicode(path);
+        PyObject*  result = (pyname && pypath) ? PyObject_CallFunctionObjArgs(load, pyname, pypath, nullptr) : nullptr;
+        Py_XDECREF(pyname);
+        Py_XDECREF(pypath);
+        if (!result) {
+            return nullptr;
+        }
+        PyObject* module = nullptr;
+        if (PyTuple_Check(result) && PyTuple_Size(result) == 2) {
+            module = PyTuple_GetItem(result, 0); // borrowed
+            Py_INCREF(module);
+            executed = PyObject_IsTrue(PyTuple_GetItem(result, 1)) == 1;
+        }
+        Py_DECREF(result);
+        return module;
+    }
+
     /// The user's script folder passed to initialize() (empty before initialization).
     inline const std::filesystem::path& scripts_directory() {
         return detail::scripts_directory();
@@ -280,15 +375,19 @@ namespace tap::python {
                 return;
             }
 
-            // Make the user's script folder importable.
+            // Make the user's script folder importable — at the END of sys.path, so a user's helper
+            // module can be imported but a user file named like a standard-library module (random.py,
+            // json.py) cannot shadow it. The class files themselves are loaded by path (load_script).
             {
                 PyObject* sys_path = PySys_GetObject("path"); // borrowed
                 PyObject* dir      = detail::path_to_unicode(options.scripts_dir);
                 if (sys_path && dir) {
-                    PyList_Insert(sys_path, 0, dir); // does not steal the reference
+                    PyList_Append(sys_path, dir); // does not steal the reference
                 }
                 Py_XDECREF(dir);
             }
+
+            detail::create_loader();
 
             // Route print() and tracebacks to the host console.
             PyRun_SimpleString("import sys, _maxconsole\n"

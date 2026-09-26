@@ -15,7 +15,8 @@ its phases, and the audit findings behind them. Tick its items (with the PR) as 
 
 - **`core/include/tap/python/`** — everything that talks to CPython, in namespace `tap::python`, plain
   C++20 + CPython with no Max or min-api: `runtime.h` (one process-wide interpreter, `gil_lock`,
-  routing `print()`/tracebacks to a host sink), `value.h` (the Max-atom value model and its coercion
+  routing `print()`/tracebacks to a host sink, and `load_script()` — class files are compiled from
+  source and executed by path as `_tap_python_<name>`, cached by source bytes, never imported), `value.h` (the Max-atom value model and its coercion
   rules, which reproduce `atom_getlong`/`atom_getfloat`/`atom_getsym`), `processor.h` (load/reload,
   class introspection, attribute and message dispatch, `prepare()`, and `process()` — per sample, or
   per vector when the input is hinted `np.ndarray` — plus `flush_reports()`). New CPython-facing

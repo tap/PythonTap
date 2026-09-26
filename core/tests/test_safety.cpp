@@ -69,7 +69,7 @@ SCENARIO("sys.exit() while the module is imported fails the load") {
     console().clear();
     CHECK_FALSE(p.load());
     CHECK(console().contains("SystemExit: from module top level", log_level::error));
-    CHECK(log.contains("Failed to load module 'exits_on_import'", log_level::error));
+    CHECK(log.contains("Failed to load " + (scripts_dir() / "exits_on_import.py").string(), log_level::error));
     CHECK(all_equal(render(p, 1.0), 0.0));
 }
 

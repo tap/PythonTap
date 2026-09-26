@@ -284,7 +284,8 @@ SCENARIO("prepare() tells the class the audio settings") {
     THEN("a reloaded instance is prepared before it processes a single vector") {
         REQUIRE(h.p.load());
         CHECK(all_equal(render(h.p, 0.0), 44100.0));
-        CHECK(get_int(h.p, "prepare_calls") == 1); // the new instance's own call
+        // the count carried over from the old instance (3.4), plus the new instance's own call
+        CHECK(get_int(h.p, "prepare_calls") == 2);
     }
     THEN("new settings reach the instance") {
         h.p.prepare(96000.0, 64);

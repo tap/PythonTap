@@ -118,14 +118,24 @@ while audio ran segfaulted in 5 of 5 runs.
 - [ ] **3.3 Hint failures are reported**, with a per-field fallback via
   `inspect.get_annotations`, instead of silently producing no attributes
   (`tap.python_tilde.h:366-368, 437-440`).
-- [ ] **3.4 Reload reconciles attributes** — delete removed fields, re-type changed ones, and
+- [x] **3.4 Reload reconciles attributes** — delete removed fields, re-type changed ones, and
   carry the patcher's current values onto the new instance (`tap.python_tilde.h:392-395, 424`).
-- [ ] **3.5 File-based loading (D2)**; the source argument must be an identifier.
-- [ ] **3.6 One reload per module** shared by all instances of that file, debounced (today each
-  instance's watcher re-executes the module).
-- [ ] **3.6a Bytecode staleness on fast saves.** Reload goes through the normal source loader,
+  *Done:* the core snapshots the attribute values before a load (kept across a failed one) and
+  sets them on the new instance before it is published — same name and type only; a value the new
+  class rejects is reported. The external removes Max attributes the class dropped
+  (`object_deleteattr`) and recreates retyped ones.
+- [x] **3.5 File-based loading (D2)**; the source argument must be an identifier. *Done:* a loader
+  created at start-up compiles `<scripts>/<name>.py` itself and executes it as a fresh
+  `_tap_python_<name>` module registered in `sys.modules` (typing/attrs resolve annotations there);
+  the scripts folder is appended to `sys.path`. Fixes the pinned "new processor reuses a stale
+  module" limit.
+- [x] **3.6 One reload per module** shared by all instances of that file, debounced (today each
+  instance's watcher re-executes the module). *Done:* the loader caches modules by source bytes, so
+  the first instance to load a save executes it and the rest reuse it — no timer needed.
+- [x] **3.6a Bytecode staleness on fast saves.** Reload goes through the normal source loader,
   whose `.pyc` check is mtime (1 s resolution) + size, so two same-size saves within a second can
   reload stale bytecode. Disable bytecode writing for user scripts, or load them uncached (D2).
+  *Done:* the loader compiles the source directly; no `.pyc` is read or written for class files.
 - [ ] **3.7 Console streams** — a real `flush()`, plus `encoding`/`errors`/`isatty` for libraries
   that probe them (`_runtime.h:184-194`).
 - [ ] **3.8 Namespace** — move `python_attr`, `python_message` and the trampolines into

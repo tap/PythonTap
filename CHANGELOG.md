@@ -6,6 +6,29 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ## Unreleased
 
+### Changed (breaking) — loading and reloading
+
+- **Class files are loaded by path**, as the private module `_tap_python_<name>`, instead of being
+  imported through `sys.path`. The argument must be a valid Python identifier (e.g. `../x` or
+  `two words` are refused), and it only ever names a file in the `python` folder:
+  `[tap.python~ os]` no longer imports the standard library's `os`. A class file may now be named
+  like a standard-library module without shadowing it.
+- **The `python` folder moved to the end of `sys.path`**, so helper modules there are still
+  importable but can no longer shadow the standard library or installed packages.
+- **Attribute values carry over a reload** (they used to reset to the class defaults), including
+  through a failed reload that you then fix. Attributes removed from the class are removed from the
+  Max object, and one whose type changed is recreated with the new type (previously both stayed, with
+  the old type).
+
+### Fixed — loading and reloading
+
+- A new object created after its file was edited ran the old code if another object had loaded that
+  file earlier in the session.
+- Two saves within the same second, of the same size, could reload stale compiled bytecode.
+- A reload kept module-level names that had been deleted from the file.
+- With several objects on one file, each save executed the module once per object; it now executes
+  once.
+
 ### Added
 
 - **numpy block processing.** A `process(self, x: np.ndarray) -> np.ndarray` is called once per

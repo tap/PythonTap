@@ -24,10 +24,15 @@ SCENARIO("The GIL is released after start-up, so any thread can take it") {
     CHECK(PyGILState_Check() == 1);
 }
 
-SCENARIO("The user's script folder is importable ahead of the standard library") {
+SCENARIO("The user's script folder is importable after the standard library") {
+    // D2: a helper module next to the class files can be imported, but a user file named like a
+    // standard-library module (random.py, json.py) cannot shadow it
     ensure_runtime();
-    CHECK(run("import sys\n"
-              "assert sys.path[0] == '" TAP_PYTHON_TEST_SCRIPTS_DIR "', sys.path[0]\n"));
+    CHECK(run("import os, sys, sysconfig\n"
+              "scripts = '" TAP_PYTHON_TEST_SCRIPTS_DIR "'\n"
+              "assert sys.path.count(scripts) == 1, sys.path\n"
+              "stdlib = sysconfig.get_path('stdlib')\n"
+              "assert sys.path.index(scripts) > sys.path.index(stdlib), sys.path\n"));
 }
 
 SCENARIO("print() reaches the console a line at a time") {

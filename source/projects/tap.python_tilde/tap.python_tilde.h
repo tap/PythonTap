@@ -13,6 +13,7 @@
 // C74_MIN_WITH_IMPLEMENTATION so the min wrapper's out-of-line statics get
 // emitted here. If c74_min_api.h sneaks in first (e.g. via our helper headers),
 // the include guards swallow those definitions and the external fails to link.
+#include <algorithm>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -139,7 +140,11 @@ class python : public object<python>, public vector_operator<> {
 
         update_source();
 
-        // watch the source file for changes (delivered as our 'filechanged' message)
+        // watch the source file for changes (delivered as our 'filechanged' message) — only a plain
+        // file name: the core refuses anything else (e.g. "../x"), and so must the watcher
+        if (m_python_source.find_first_of("/\\.:") != std::string::npos) {
+            return;
+        }
         const auto watched_file = m_scripts_dir / (m_python_source + ".py");
         char       filename[c74::max::MAX_PATH_CHARS]{};
         std::strncpy(filename, watched_file.string().c_str(), c74::max::MAX_PATH_CHARS - 1);
@@ -302,10 +307,23 @@ class python : public object<python>, public vector_operator<> {
         return values;
     }
 
-    /// Create Max attributes for the class's annotated fields. Attributes persist
-    /// across reloads; only ones we don't have yet are created.
+    /// Make the Max attributes match the class's annotated fields: remove the ones the class no
+    /// longer has, recreate the ones whose type changed, add the new ones. (The core has already
+    /// carried the values of those that stayed over to the new instance.)
     void create_attributes() {
-        for (const auto& attribute : m_processor->attributes()) {
+        const auto& current = m_processor->attributes();
+        for (auto it = m_python_attributes.begin(); it != m_python_attributes.end();) {
+            const auto found = std::find_if(current.begin(), current.end(),
+                                            [&](const runtime::attribute_info& a) { return a.name == it->first; });
+            if (found == current.end() || found->type != it->second->value_type()) {
+                it->second->remove();
+                it = m_python_attributes.erase(it);
+            }
+            else {
+                ++it;
+            }
+        }
+        for (const auto& attribute : current) {
             if (m_python_attributes.find(attribute.name) == m_python_attributes.end()) {
                 m_python_attributes[attribute.name] =
                     std::make_unique<python_attr>(maxobj(), attribute.name, attribute.type);
@@ -320,11 +338,7 @@ class python : public object<python>, public vector_operator<> {
         }
         m_python_messages.clear();
 
-        for (const auto& message : m_processor->messages()) {
-            // a name that was ever an attribute stays one (attributes are never removed)
-            if (m_python_attributes.find(message.name) != m_python_attributes.end()) {
-                continue;
-            }
+        for (const auto& message : m_processor->messages()) { // never names an attribute
             m_python_messages[message.name] = std::make_unique<python_message>(maxobj(), message.name);
         }
     }

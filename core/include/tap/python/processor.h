@@ -3,8 +3,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2022-2026 Timothy Place.
 //
-// Host-independent. A processor imports `<scripts_dir>/<name>.py`, instantiates the class `name`
-// defined there, and describes it to the host:
+// Host-independent. A processor loads `<scripts_dir>/<name>.py` by path (never through import, so
+// no other module can stand in for it), instantiates the class `name` defined there, and describes
+// it to the host:
 // - the class's type-annotated public fields become attributes (attributes())
 // - its public methods become messages, their argument types taken from the hints (messages())
 // - a method `process()` becomes the audio callback (process()): `process(self, x: float) -> float`
@@ -39,6 +40,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <span>
@@ -88,6 +90,7 @@ namespace tap::python {
             gil_lock lock;
             release_binding();
             release_block_buffer();
+            clear_carried();
             Py_CLEAR(m_module);
             Py_XDECREF(m_pending_exception.exchange(nullptr));
             Py_XDECREF(m_pending_non_numeric.exchange(nullptr));
@@ -104,12 +107,14 @@ namespace tap::python {
         /// True while process() is bound to the class's process() method.
         bool has_process() const noexcept { return m_process_function.load() != nullptr; }
 
-        /// (Re)import the module, instantiate the class, and rebuild the attribute and message
-        /// descriptions. Imports on the first call and reloads the module afterwards. Returns true
+        /// Load `<scripts_dir>/<name>.py` (executing it only if its source changed since any
+        /// processor last loaded it), instantiate the class, carry the previous instance's
+        /// attribute values over, and rebuild the attribute and message descriptions. Returns true
         /// when the class was instantiated. Main thread only.
         ///
         /// Until the new class is ready, audio, attributes and messages keep using the previous
-        /// instance; on success it is replaced in one step, on failure the processor is unloaded.
+        /// instance; on success it is replaced in one step, on failure the processor is unloaded
+        /// (its attribute values are kept for the next successful load).
         bool load() {
             if (!Py_IsInitialized()) {
                 return false;
@@ -117,27 +122,39 @@ namespace tap::python {
 
             gil_lock lock;
 
-            if (m_module) {
-                PyObject* reloaded = PyImport_ReloadModule(m_module);
-                if (!reloaded) {
-                    report_exception();
-                    log(log_level::error, "Failed to reload module " + m_source_name);
-                    release_binding();
-                    return false;
-                }
-                Py_SETREF(m_module, reloaded);
+            // 3.4: remember the current attribute values, to carry them onto the new instance. The
+            // snapshot outlives a failed load, so fixing the error brings the values back.
+            if (PyObject* current = acquire_instance()) {
+                capture_attributes(current);
+                Py_DECREF(current);
             }
-            else {
-                PyObject* name = PyUnicode_DecodeFSDefault(m_source_name.c_str());
-                m_module       = name ? PyImport_Import(name) : nullptr;
-                Py_XDECREF(name);
-                if (!m_module) {
-                    report_exception();
-                    log(log_level::error, "Failed to load module '" + m_source_name + "' (searched "
-                                              + scripts_directory().string() + ")");
-                    return false;
-                }
+
+            // D2: the source is <scripts_dir>/<name>.py, loaded by path — never an import that could
+            // resolve to another module (a standard-library name, something on sys.path)
+            const auto path = scripts_directory() / (m_source_name + ".py");
+            if (!is_identifier(m_source_name)) {
+                log(log_level::error, "'" + m_source_name
+                                          + "' is not a valid Python name: the source must be a .py file named like a "
+                                            "Python identifier, defining a class of the same name");
+                release_binding();
+                return false;
             }
+            std::error_code ec;
+            if (!std::filesystem::is_regular_file(path, ec)) {
+                log(log_level::error, "No file " + path.string());
+                release_binding();
+                return false;
+            }
+
+            bool      executed = false;
+            PyObject* module   = load_script(m_source_name, executed);
+            if (!module) {
+                report_exception();
+                log(log_level::error, "Failed to load " + path.string());
+                release_binding();
+                return false;
+            }
+            Py_XSETREF(m_module, module);
 
             PyObject* py_class = PyObject_GetAttrString(m_module, m_source_name.c_str()); // strong
             if (!py_class) {
@@ -165,6 +182,7 @@ namespace tap::python {
 
             collect_attributes(py_class, next);
             Py_DECREF(py_class);
+            carry_attributes(next);
             collect_messages(next);
 
             // Tell the new instance the audio settings before anything can run it.
@@ -466,6 +484,12 @@ namespace tap::python {
         Py_buffer   m_block_view{};  // held while m_block_input is, so its memory cannot move
         double*     m_block_data{};
         std::size_t m_block_size{};
+        // Attribute values captured from the previous instance, for the next one (main thread).
+        struct carried_value {
+            attribute_info info;
+            PyObject*      value{}; // strong
+        };
+        std::vector<carried_value> m_carried;
         // The audio settings from prepare(); main thread only.
         double      m_sample_rate{};
         std::size_t m_vector_size{};
@@ -538,6 +562,61 @@ namespace tap::python {
             PyObject* expected = function;
             if (m_process_function.compare_exchange_strong(expected, nullptr)) {
                 Py_DECREF(function); // the member's reference; the caller still holds its own
+            }
+        }
+
+        static bool is_identifier(const std::string& name) {
+            PyObject* text = PyUnicode_FromString(name.c_str());
+            if (!text) {
+                PyErr_Clear();
+                return false;
+            }
+            const bool ok = PyUnicode_IsIdentifier(text) == 1;
+            Py_DECREF(text);
+            return ok;
+        }
+
+        /// Caller holds the GIL.
+        void clear_carried() {
+            auto carried = std::exchange(m_carried, {});
+            for (auto& c : carried) {
+                Py_CLEAR(c.value);
+            }
+        }
+
+        /// Snapshot `instance`'s current attribute values. Caller holds the GIL; main thread.
+        void capture_attributes(PyObject* instance) {
+            clear_carried();
+            const auto attributes = m_attributes; // getattr runs Python code: work on a copy
+            for (const auto& attribute : attributes) {
+                PyObject* value = PyObject_GetAttrString(instance, attribute.name.c_str());
+                if (!value) {
+                    PyErr_Clear();
+                    continue;
+                }
+                m_carried.push_back({attribute, value});
+            }
+        }
+
+        /// Set the snapshot onto the new instance, for the attributes it still has with the same
+        /// type (a changed type starts from the new class default). Caller holds the GIL.
+        void carry_attributes(binding& b) {
+            auto carried = std::exchange(m_carried, {});
+            for (auto& c : carried) {
+                const auto found = std::find_if(b.attributes.begin(), b.attributes.end(),
+                                                [&](const attribute_info& a) { return a.name == c.info.name; });
+                if (found == b.attributes.end()) {
+                    // removed from the class
+                }
+                else if (found->type != c.info.type) {
+                    log(log_level::info,
+                        "attribute '" + c.info.name + "' changed type; it starts from the class default");
+                }
+                else if (PyObject_SetAttrString(b.instance, c.info.name.c_str(), c.value) != 0) {
+                    report_exception();
+                    log(log_level::error, "could not carry attribute '" + c.info.name + "' over the reload");
+                }
+                Py_CLEAR(c.value);
             }
         }
 
