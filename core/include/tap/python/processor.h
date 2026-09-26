@@ -534,7 +534,7 @@ namespace tap::python {
         /// the GIL; never leaves an error set.
         static std::optional<value> from_python(PyObject* object, const value_type type) {
             std::optional<value> result;
-            if (object == Py_None) {
+            if (object == detail::none()) {
                 return result;
             }
             switch (type) {
@@ -812,7 +812,7 @@ namespace tap::python {
 
             // np.ascontiguousarray(None) is a 0-d NaN array, not an error: a process() that forgot
             // its return statement would read as a length mismatch
-            if (result == Py_None) {
+            if (result == detail::none()) {
                 record_non_numeric(result);
                 std::fill(output, output + frame_count, 0.0);
                 return;
@@ -934,7 +934,8 @@ namespace tap::python {
         static PyObject* call_support(const char* function_name, PyObject* argument) {
             PyObject* function = detail::support(function_name);
             if (!function) {
-                PyErr_Format(PyExc_RuntimeError, "the tap.python support function %s is missing", function_name);
+                detail::set_runtime_error(std::string{"the tap.python support function "} + function_name
+                                          + " is missing");
                 return nullptr;
             }
             return PyObject_CallOneArg(function, argument);
@@ -942,7 +943,7 @@ namespace tap::python {
 
         /// Report a type-hint error the support module caught (a borrowed exception, or None).
         void report_hint_error(PyObject* error, const std::string& what) const {
-            if (!error || error == Py_None) {
+            if (!error || error == detail::none()) {
                 return;
             }
             PyErr_DisplayException(error);
@@ -1073,16 +1074,21 @@ namespace tap::python {
         /// parameter is hinted np.ndarray, per sample otherwise. Caller holds the GIL.
         void bind_process(PyObject* method, binding& b) const {
             // the audio path calls the function with the instance explicitly (one less indirection
-            // per sample), so process() must be a plain instance method
-            PyObject* fn = PyMethod_Check(method) ? PyMethod_Function(method) : nullptr; // borrowed
-            if (!fn || !PyFunction_Check(fn) || PyMethod_Self(method) != b.instance) {
-                log(log_level::error, "process() must be a regular instance method (not a classmethod or "
-                                      "staticmethod); audio is not bound");
-                return;
-            }
-
+            // per sample), so process() must be a plain instance method: bound, to this instance.
+            // (Read through attributes, not PyMethod_Check: see runtime.h on CPython data symbols.)
             const auto sig = describe(method, "process()");
             if (!sig) {
+                return;
+            }
+            PyObject* fn    = PyObject_GetAttrString(method, "__func__"); // new references
+            PyObject* owner = PyObject_GetAttrString(method, "__self__");
+            PyErr_Clear();
+            const bool plain = fn && owner == b.instance && PyCallable_Check(fn);
+            Py_XDECREF(owner);
+            if (!plain) {
+                Py_XDECREF(fn);
+                log(log_level::error, "process() must be a regular instance method (not a classmethod or "
+                                      "staticmethod); audio is not bound");
                 return;
             }
             int  in_count    = 0;
@@ -1103,11 +1109,11 @@ namespace tap::python {
             if (sig->return_kind == "tuple") {
                 log(log_level::error,
                     "process() returns a tuple — multichannel output is not supported yet; use a single float return");
+                Py_DECREF(fn);
                 return;
             }
 
-            Py_INCREF(fn);
-            b.process_function = fn;
+            b.process_function = fn; // takes the reference
             b.block_mode       = block_input;
 
             log(log_level::info, block_input ? "Audio process() bound: 1 input, 1 output, one call per vector (numpy)"

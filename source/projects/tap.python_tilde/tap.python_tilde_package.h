@@ -8,7 +8,12 @@
 
 #pragma once
 
+// CPython (named by the runtime check below) must precede the standard headers
+#include "tap/python/runtime.h"
+
+// standard library
 #include <filesystem>
+#include <string>
 
 #ifdef WIN_VERSION
 #include <windows.h>
@@ -54,6 +59,37 @@ namespace tap::python {
 #else
         return binary.parent_path().parent_path();
 #endif
+    }
+
+    /// Whether the CPython library the external was built against can be used, asked before the
+    /// first Python call. The external links it weakly on macOS and delay-loads it on Windows (see
+    /// this object's CMakeLists.txt), so that it loads without a runtime and can say what is
+    /// missing — instead of Max refusing to load it at all. On failure `error` says what to do.
+    inline bool runtime_library_loadable([[maybe_unused]] const std::filesystem::path& home,
+                                         [[maybe_unused]] std::string&                 error) {
+#if defined(WIN_VERSION) && defined(TAP_PYTHON_DLL)
+        // Load it from the package by full path (its own dependencies from its folder); the
+        // delay-load helper then finds the loaded module by name on the first Python call. A runtime
+        // installed while Max is running is picked up by the next object created.
+        const auto dll = home / TAP_PYTHON_DLL;
+        if (LoadLibraryExW(dll.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH) == nullptr) {
+            error = "could not load " + dll.string() + " (Windows error " + std::to_string(GetLastError())
+                    + ") — run scripts/install-runtime.ps1 from the package root to install the runtime";
+            return false;
+        }
+#elif defined(MAC_VERSION)
+        // A weakly linked library that was missing when the external loaded leaves our imports null,
+        // and dyld never binds them later, so test the binding itself rather than the file. (Read
+        // through a volatile, so the compiler cannot assume a function's address is non-null.)
+        auto* volatile entry = &Py_InitializeFromConfig;
+        if (entry == nullptr) {
+            error = "the Python runtime was not found in " + (home / "lib").string()
+                    + " when Max loaded tap.python~ — run scripts/install-runtime.sh from the package root, "
+                      "then restart Max";
+            return false;
+        }
+#endif
+        return true;
     }
 
 } // namespace tap::python

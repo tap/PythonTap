@@ -34,30 +34,46 @@ class default:
 ## Requirements
 
 - **Max 9** or later (macOS 11.0+ on Intel or Apple Silicon, Windows 10 22H2+ / Windows 11, 64-bit).
-- An internet connection for the one-time runtime install below.
 
 ## Installation
 
-1. Place this package in your `Documents/Max 9/Packages` folder.
-2. Install the embedded Python runtime (CPython 3.13, from [python-build-standalone](https://github.com/astral-sh/python-build-standalone)) into the package's `support` folder:
+Download the package for your platform from the [releases page](https://github.com/tap/PythonTap/releases) — the Python runtime (CPython 3.13 with `attrs` and `numpy`) is included:
 
-   **macOS** — in Terminal, from the package root:
-   ```sh
-   ./scripts/install-runtime.sh
-   ```
+- `PythonTap-<version>-macos-arm64.zip` — Apple Silicon Macs.
+- `PythonTap-<version>-macos-x86_64.zip` — Intel Macs, and Apple Silicon Macs running Max under Rosetta.
+- `PythonTap-<version>-windows-x64.zip` — Windows.
 
-   **Windows** — in PowerShell, from the package root:
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File scripts\install-runtime.ps1
-   ```
+Unzip it into your `Documents/Max 9/Packages` folder, restart Max, and open the `tap.python~` help patcher. Each zip has a `.sha256` beside it, and the release's `SHA256SUMS` lists them all. The package's `licenses/` folder holds the license of everything it ships.
 
-   The script verifies the download against the SHA256 committed in `scripts/runtime.lock`, and installs the Python packages used by the examples (`attrs`, `numpy`) at the versions and hashes pinned in `scripts/requirements.lock`. Re-running it replaces the runtime safely: the previous one is kept until the new one is complete and restored if anything fails — but packages you added yourself are not carried over. To add more packages:
-   ```sh
-   ./support/bin/python3 -m pip install <package>      # macOS
-   .\support\python.exe -m pip install <package>       # Windows
-   ```
+Releases are not code-signed yet. On a Mac, a downloaded unsigned external is quarantined and Max will not load it; clear the quarantine once after unzipping:
+```sh
+xattr -dr com.apple.quarantine ~/Documents/"Max 9"/Packages/PythonTap
+```
+On Windows, SmartScreen may warn about the download.
 
-3. Restart Max and open the `tap.python~` help patcher.
+To add more Python packages to the bundled runtime:
+```sh
+./support/bin/python3 -m pip install <package>      # macOS, from the package folder
+.\support\python.exe -m pip install <package>       # Windows
+```
+
+### From a clone of this repository
+
+A clone has no runtime: install it into the package's `support` folder (from [python-build-standalone](https://github.com/astral-sh/python-build-standalone)), then build (see [Building from source](#building-from-source)):
+
+**macOS** — in Terminal, from the package root:
+```sh
+./scripts/install-runtime.sh
+```
+
+**Windows** — in PowerShell, from the package root:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install-runtime.ps1
+```
+
+The script verifies the download against the SHA256 committed in `scripts/runtime.lock`, and installs the Python packages used by the examples (`attrs`, `numpy`) at the versions and hashes pinned in `scripts/requirements.lock`. Re-running it replaces the runtime safely: the previous one is kept until the new one is complete and restored if anything fails — but packages you added yourself are not carried over.
+
+Without a runtime the object still loads, and says in the Max console what is missing. On a Mac, restart Max after installing the runtime; on Windows the next `tap.python~` you create picks it up.
 
 ## Writing a class
 
@@ -99,6 +115,10 @@ The runtime and packages are pinned in `scripts/runtime.lock` and `scripts/requi
 ```
 
 On Windows, configure with `cmake -S . -B build -A x64`.
+
+### Making a release
+
+Push a tag `vMAJOR.MINOR.PATCH`: `.github/workflows/release.yml` builds and tests on each platform (both Mac architectures on their own runners), assembles the package with `scripts/assemble-package.py` (the platform's externals, help, docs, examples, the runtime, and `licenses/`), zips it with SHA256 checksums, and attaches everything to a **draft** release to review and publish. The package version comes from the tag (min reads it from git; the assembly checks they agree). Running the workflow by hand builds the zips as workflow artifacts without a release. It signs and notarizes the Mac packages and signs the Windows binaries when the signing secrets it lists are set, and skips signing, with a warning, when they are not.
 
 ### The core, and testing it on Linux
 

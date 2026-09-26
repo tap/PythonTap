@@ -6,6 +6,16 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ## Unreleased
 
+### Added — releases
+
+- **Release packages with the runtime bundled** (D3): `PythonTap-<version>-macos-arm64.zip`,
+  `-macos-x86_64.zip` and `-windows-x64.zip`, built by `release.yml` from a version tag into a draft
+  release, with SHA256 checksums. Each carries a `licenses/` folder with every third-party license it
+  ships. Not code-signed until signing credentials are configured.
+- **The object loads without a runtime** and says in the Max console what is missing and how to
+  install it, instead of Max failing to load the external. (libpython is weakly linked on macOS and
+  delay-loaded on Windows.)
+
 ### Changed — documentation and examples
 
 - **The reference page is generated from the object's own metadata** and now states the real

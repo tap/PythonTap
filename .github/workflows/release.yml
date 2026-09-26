@@ -1,0 +1,222 @@
+name: release
+
+# Builds the release packages (plan 4.5, D3): the Max package with the runtime bundled, per
+# platform, zipped with SHA256 checksums, and attached to a *draft* GitHub release for a tag
+# vMAJOR.MINOR.PATCH — publishing it stays a deliberate act. Run by hand (workflow_dispatch), it
+# builds and uploads the packages as workflow artifacts without making a release.
+#
+#   PythonTap-<version>-macos-arm64.zip   universal external + the Apple Silicon runtime
+#   PythonTap-<version>-macos-x86_64.zip  universal external + the Intel runtime (and for Max
+#                                         running under Rosetta)
+#   PythonTap-<version>-windows-x64.zip
+#
+# The runtime is per architecture (only libpython is made universal, for linking), so each macOS
+# package is built on a runner of its architecture, which also runs the tests there.
+#
+# Signing happens when the secrets exist and is skipped, saying so, when they do not:
+#   macOS    MACOS_CERTIFICATE_P12_BASE64, MACOS_CERTIFICATE_PASSWORD, MACOS_SIGNING_IDENTITY
+#            (Developer ID Application), and for notarization APPLE_ID, APPLE_TEAM_ID,
+#            APPLE_APP_PASSWORD (an app-specific password)
+#   Windows  WINDOWS_CERTIFICATE_PFX_BASE64, WINDOWS_CERTIFICATE_PASSWORD
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    name: macos (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-latest
+          - arch: x86_64
+            runner: macos-15-intel
+    env:
+      MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          submodules: recursive
+          fetch-depth: 0 # min takes the package version from the latest tag
+
+      - name: Check the signing scripts parse
+        run: bash -n scripts/release/sign-macos.sh
+
+      # A native runtime, as a user's install makes, plus a universal libpython to link against.
+      - name: Install the Python runtime
+        run: ./scripts/install-runtime.sh --universal
+
+      - name: Configure (universal arm64 + x86_64)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            echo "expected=--version ${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Assemble the package
+        run: support/bin/python3 scripts/assemble-package.py --platform macos --output dist ${{ steps.version.outputs.expected }}
+
+      - name: Sign
+        if: env.MACOS_CERTIFICATE_P12_BASE64 != '' && env.MACOS_SIGNING_IDENTITY != ''
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(uuidgen)"
+          echo "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/certificate.p12"
+          scripts/release/sign-macos.sh dist/PythonTap "$MACOS_SIGNING_IDENTITY"
+
+      - name: Signing skipped
+        if: env.MACOS_CERTIFICATE_P12_BASE64 == '' || env.MACOS_SIGNING_IDENTITY == ''
+        run: echo "::warning::No macOS signing secrets; this package is unsigned (Gatekeeper will block it until the user allows it)"
+
+      - name: Notarize
+        if: env.MACOS_CERTIFICATE_P12_BASE64 != '' && env.MACOS_SIGNING_IDENTITY != '' && env.APPLE_ID != ''
+        run: |
+          ditto -c -k --keepParent dist/PythonTap "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          for mxo in dist/PythonTap/externals/*.mxo; do xcrun stapler staple "$mxo"; done
+
+      - name: Zip
+        run: |
+          name="PythonTap-$(support/bin/python3 -c "import json; print(json.load(open('package-info.json'))['version'])")-macos-${{ matrix.arch }}.zip"
+          (cd dist && ditto -c -k --sequesterRsrc --keepParent PythonTap "$name")
+          (cd dist && shasum -a 256 "$name" > "$name.sha256")
+          ls -la dist
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: package-macos-${{ matrix.arch }}
+          path: dist/*.zip*
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    env:
+      WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          submodules: recursive
+          fetch-depth: 0 # min takes the package version from the latest tag
+
+      - name: Check the signing script parses
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD\scripts\release\sign-windows.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) { $errors | ForEach-Object { Write-Error $_.ToString() }; exit 1 }
+
+      - name: Install the Python runtime
+        run: powershell -ExecutionPolicy Bypass -File scripts\install-runtime.ps1
+
+      - name: Configure
+        run: cmake -S . -B build -A x64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: |
+          $env:PATH = "$PWD\support;$env:PATH"   # so the test binary finds python3xx.dll
+          ctest --test-dir build --output-on-failure -C Release
+
+      - name: Assemble the package
+        shell: pwsh
+        run: |
+          $version = @()
+          if ($env:GITHUB_REF_TYPE -eq "tag") { $version = @("--version", $env:GITHUB_REF_NAME.TrimStart("v")) }
+          & support\python.exe scripts\assemble-package.py --platform windows --output dist @version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Sign
+        if: env.WINDOWS_CERTIFICATE_PFX_BASE64 != ''
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "certificate.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX_BASE64))
+          try {
+            & scripts\release\sign-windows.ps1 -Package dist\PythonTap -Certificate $pfx -Password $env:WINDOWS_CERTIFICATE_PASSWORD
+          }
+          finally { Remove-Item $pfx }
+
+      - name: Signing skipped
+        if: env.WINDOWS_CERTIFICATE_PFX_BASE64 == ''
+        run: echo "::warning::No Windows signing secrets; this package is unsigned (SmartScreen may warn)"
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          $version = (Get-Content package-info.json | ConvertFrom-Json).version
+          $name = "PythonTap-$version-windows-x64.zip"
+          Compress-Archive -Path dist\PythonTap -DestinationPath "dist\$name"
+          $hash = (Get-FileHash "dist\$name" -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path "dist\$name.sha256" -Value "$hash  $name" -NoNewline
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: package-windows-x64
+          path: dist/*.zip*
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the draft release; nothing else in this workflow can write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: package-*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd dist
+          cat *.sha256 > SHA256SUMS
+          sha256sum -c SHA256SUMS
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.zip dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "PythonTap ${GITHUB_REF_NAME#v}" \
+            --notes "See CHANGELOG.md for what changed. Unzip into Documents/Max 9/Packages; the Python runtime is included. On a Mac, choose arm64 for Apple Silicon or x86_64 for Intel (or for Max running under Rosetta)."

@@ -35,7 +35,7 @@ add_executable(tap_python_core_tests
     test_loading.cpp
     test_types.cpp
 )
-target_link_libraries(tap_python_core_tests PRIVATE tap::python_core Python3::Python Catch2::Catch2WithMain)
+target_link_libraries(tap_python_core_tests PRIVATE tap::python Python3::Python Catch2::Catch2WithMain)
 
 set(_scripts_dir "${CMAKE_CURRENT_BINARY_DIR}/scripts")
 target_compile_definitions(tap_python_core_tests PRIVATE

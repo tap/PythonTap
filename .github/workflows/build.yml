@@ -98,6 +98,22 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      # The Windows external delay-loads python3xx.dll (plan 4.2), which MSVC allows only while
+      # the external imports no CPython data symbols. The same headers make the same references
+      # here, so a regression fails this step by name rather than the Windows link.
+      - name: Verify the external imports no CPython data symbols
+        run: |
+          libpython=$(python -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR') + '/' + sysconfig.get_config_var('LDLIBRARY'))")
+          scripts/check-data-imports.sh externals/tap.python~.mxl_x86_64 "$libpython"
+
+      # The release packaging's license collection (plan 4.6), against this interpreter's own
+      # install, which is laid out like the macOS runtime and has the locked packages in it.
+      - name: Collect the licenses a package would ship
+        run: |
+          python scripts/assemble-package.py --licenses-only \
+            --support "$(python -c 'import sys; print(sys.base_prefix)')" --output build/licenses-check
+          cat build/licenses-check/licenses/README.md
+
   macos:
     runs-on: macos-latest
     steps:
@@ -153,6 +169,13 @@ jobs:
             echo "ERROR: an absolute build-machine path is embedded as an rpath"; exit 1
           fi
 
+      # Weakly linked, so the external loads without a runtime and says what is missing (plan 4.2).
+      - name: Verify libpython is weakly linked
+        run: |
+          bin="externals/tap.python~.mxo/Contents/MacOS/tap.python~"
+          otool -l "$bin" | grep -A2 "cmd LC_LOAD_WEAK_DYLIB" | tee /dev/stderr | grep -q "@rpath/libpython" \
+            || { echo "ERROR: libpython is not weakly linked"; exit 1; }
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: tap-python-macos
@@ -189,6 +212,17 @@ jobs:
 
       - name: List externals
         run: dir externals
+
+      # Delay-loaded, so the external loads without a runtime and says what is missing (plan 4.2).
+      - name: Verify python3xx.dll is delay-loaded
+        shell: pwsh
+        run: |
+          $dumpbin = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -find "VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1
+          $deps = & $dumpbin /dependents "externals\tap.python~.mxe64" | Out-String
+          Write-Output $deps
+          if ($deps -notmatch "(?s)delay load dependencies:.*python3\d+\.dll") {
+            Write-Error "python3xx.dll is not delay-loaded"; exit 1
+          }
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

@@ -22,7 +22,7 @@ its phases, and the audit findings behind them. Tick its items (with the PR) as 
   rules, which reproduce `atom_getlong`/`atom_getfloat`/`atom_getsym`), `processor.h` (load/reload,
   class introspection, attribute and message dispatch, `prepare()`, and `process()` — per sample, or
   per vector when the input is hinted `np.ndarray` — plus `flush_reports()`). New CPython-facing
-  behavior goes here, never in the wrapper.
+  behavior goes here, never in the wrapper. CMake target `tap::python` (`core/CMakeLists.txt`).
 - **`core/tests/`** — the core's Catch2 battery against CPython 3.13, with Python fixtures in
   `core/tests/python/` and the shipped examples copied alongside. Runs on Linux, including under
   ASan/UBSan and TSan.
@@ -35,7 +35,12 @@ its phases, and the audit findings behind them. Tick its items (with the PR) as 
   numpy into `support/` (gitignored), verified against `scripts/runtime.lock` (per-platform archive
   SHA256s) and `scripts/requirements.lock` (pip `--require-hashes`, wheels only). Never hand-edit the
   locks: `scripts/update-locks.py` regenerates them (moving a pin is deliberate — D4). CI installs from
-  the same locks, and caches `support/` keyed on them. The macOS/Windows build links against it.
+  the same locks, and caches `support/` keyed on them. The macOS/Windows build links against it —
+  weakly on macOS, delay-loaded on Windows, so the external loads without it and says so.
+- **`scripts/assemble-package.py`** — builds the release package (platform externals, help, docs,
+  examples, runtime, and `licenses/`: every third-party license that ships, collected from the
+  actual contents); **`scripts/release/`** — the macOS/Windows signing scripts `release.yml` runs
+  when its secrets exist.
 
 ## Build & test
 
@@ -64,7 +69,9 @@ CI (`build.yml`): `linux-core` (release, asan-ubsan, tsan), `linux-max-glue`, `m
 `lipo`/`otool` checks, including no absolute rpath), `windows`. `style.yml`: TapHouse drift check,
 clang-format, clang-tidy (a clang-tidy failure or crash fails the gate, not just a finding). Workflows
 run with `contents: read`, pin third-party actions by commit SHA (tag noted beside it), and cancel
-superseded runs.
+superseded runs. `release.yml`: on a `vX.Y.Z` tag, builds, tests, packages (macOS per architecture,
+on runners of that architecture — the runtime is per arch, only libpython is universal), signs when
+the secrets exist, and attaches zips + SHA256s to a draft release.
 
 ## Threads and the GIL (load-bearing)
 
@@ -82,6 +89,12 @@ superseded runs.
 - **Nothing prints on the audio thread.** Problems in `process()` are recorded (exception object,
   flags) and the host's `report_ready` callback fires — the external sets a `queue<>` — and
   `flush_reports()` prints them on the main thread. Anything new on the audio path follows suit.
+- **No CPython data symbols in the core or the wrapper** — `Py_None`, `Py_True`/`Py_False`,
+  `PyExc_*`, `Py*_Type`, and the macros that expand to them (`Py_RETURN_NONE`, `PyFloat_Check`,
+  `PyMethod_Check`, …). The Windows external delay-loads python3xx.dll, which MSVC refuses (LNK1194)
+  if the module imports CPython data. Use the function forms (`detail::none()`,
+  `detail::set_runtime_error()`, `Py_GetConstantBorrowed`, attribute lookups); CI's
+  `scripts/check-data-imports.sh` fails the Linux build, by symbol name, on any regression.
 - Report user exceptions with `tap::python::report_exception()`, **never `PyErr_Print()`**: for a
   `SystemExit` it calls `Py_Exit()` and quits Max. Never finalize the interpreter, and never let a C++
   exception cross a Max callback (the trampolines are wrapped in `guarded()`).

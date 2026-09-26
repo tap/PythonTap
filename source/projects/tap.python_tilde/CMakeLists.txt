@@ -84,7 +84,22 @@ add_library(
     ${SOURCE_FILES}
 )
 
-target_link_libraries(${PROJECT_NAME} PUBLIC "${PYTHON_LIB}")
+# The external must load even without a runtime, so it can say what is missing (plan 4.2) instead
+# of Max failing to load it: libpython is linked weakly on macOS, and delay-loaded on Windows —
+# which MSVC allows only because the core imports no CPython data symbols (see runtime.h; CI checks
+# with scripts/check-data-imports.sh). runtime_library_loadable() checks before the first call.
+if (APPLE)
+    target_link_libraries(${PROJECT_NAME} PUBLIC "-Wl,-weak_library,${PYTHON_LIB}")
+elseif (WIN32)
+    get_filename_component(PYTHON_DLL_NAME "${PYTHON_LIB}" NAME_WE)
+    set(PYTHON_DLL_NAME "${PYTHON_DLL_NAME}.dll")
+    target_link_libraries(${PROJECT_NAME} PUBLIC "${PYTHON_LIB}" delayimp)
+    target_link_options(${PROJECT_NAME} PRIVATE "/DELAYLOAD:${PYTHON_DLL_NAME}")
+    # directory scope, so the unit-test target created below gets it too
+    add_compile_definitions(TAP_PYTHON_DLL="${PYTHON_DLL_NAME}")
+else ()
+    target_link_libraries(${PROJECT_NAME} PUBLIC "${PYTHON_LIB}")
+endif ()
 
 if (APPLE)
     target_link_options(${PROJECT_NAME} PRIVATE "-Wl,-rpath,@loader_path/../../../../support/lib")
