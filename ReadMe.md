@@ -10,11 +10,11 @@ Write Max objects in Python.
 
 `tap.python~` embeds a CPython interpreter inside a Max external and runs a Python class as an audio object:
 
-- The class's **`process()` method** is called on the audio signal.
-- The class's **type-annotated attributes** become Max attributes (`gain 0.5` in the object box, `getgain`, attrui — it all works).
-- The class's **public methods** become Max messages, with arguments converted according to their type hints.
-- The source file is **watched and hot-reloaded** every time you save it, so you can live-code DSP with Max running.
-- Python's `print()` output and tracebacks land in the **Max console**.
+- The class's **`process()` method** is called on the audio signal — once per signal vector with numpy arrays, or once per sample with floats.
+- The class's **type-annotated attributes** become Max attributes (`@gain 0.5` in the object box, `gain 0.5`, `getgain`, attrui — it all works).
+- The class's **public methods** become Max messages, called according to their signatures, with arguments converted according to their type hints.
+- The source file is **watched and hot-reloaded** every time you save it, keeping attribute values, so you can live-code DSP with Max running.
+- Python's `print()` output and tracebacks land in the **Max console** — and nothing your code does, `sys.exit()` included, can take Max down.
 
 ```python
 from attrs import define, field

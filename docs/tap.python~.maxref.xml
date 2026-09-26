@@ -6,8 +6,8 @@
 
 <c74object name='tap.python~' category='programming'>
 
-	<digest>Run python code</digest>
-	<description>Run python code. </description>
+	<digest>Process audio with a Python class</digest>
+	<description>Process audio with a Python class. The argument names a file in the package's python folder, which must define a class of the same name. The class's type-annotated public fields become attributes (int, float, bool and str; Optional allowed), and its public methods become messages called according to their signatures, with methods named int, float, symbol and bang answering those standard messages. Its process() method runs on the signal: once per signal vector when annotated with numpy arrays, or once per sample when annotated with float. An optional prepare(sample_rate, vector_size) method receives the audio settings before audio starts and whenever they change. The file is watched and reloaded when saved, keeping attribute values; errors are printed to the Max console and never take Max down. </description>
 
 
 	<!--METADATA-->
@@ -23,8 +23,8 @@
 	<objarglist>
 
 		<objarg name='source' optional='1' type='symbol'>
-			<digest>Python source file</digest>
-			<description>Python source file. </description>
+			<digest>Python class file</digest>
+			<description>Python class file. The name of a .py file in the package's python folder, without the extension, which must define a class of the same name; it must be a valid Python identifier. Without an argument, python/default.py is loaded. </description>
 		</objarg>
 
 	</objarglist>
@@ -34,14 +34,9 @@
 
 	<methodlist>
 
-		<method name='anything'>
-			<digest>Execute python function</digest>
-			<description>Execute python function. </description>
-		</method>
-
 		<method name='filechanged'>
-			<digest></digest>
-			<description></description>
+			<digest>Reload the Python file</digest>
+			<description>Reload the Python file. The object's file watcher sends it when the file is saved; send it yourself to force a reload. </description>
 		</method>
 
 	</methodlist>
@@ -51,19 +46,14 @@
 
 	<attributelist>
 
-		<attribute name='greeting' get='1' set='1' type='symbol' size='1' >
-			<digest>Greeting to be posted</digest>
-			<description>Greeting to be posted. The greeting will be posted to the Max console when a bang is received. </description>
-		</attribute>
-
 	</attributelist>
 
 
 	<!--RELATED-->
 
 	<seealsolist>
-		<seealso name='python' />
-		<seealso name='mxj~' />
+		<seealso name='js' />
+		<seealso name='node.script' />
 	</seealsolist>
 
 
