@@ -184,16 +184,27 @@ while audio ran segfaulted in 5 of 5 runs.
 
 ## Phase 5 — documentation and examples
 
-- [ ] **5.1** Rewrite `docs/tap.python~.maxref.xml` against the real contract (it documents a
-  nonexistent `greeting` attribute and a stale digest/see-also).
+- [x] **5.1** Rewrite `docs/tap.python~.maxref.xml` against the real contract. *Done — at the
+  source:* min regenerates the page from the object's metadata whenever the external is newer than
+  it (so a hand edit is lost on the next build), so the contract now lives in `MIN_DESCRIPTION`
+  and the argument and `filechanged` descriptions, and the committed page is the one min's own
+  `doc_generate` writes from them (run against the mock kernel on Linux). The Python-defined
+  attributes and messages depend on each user's class, so the page describes them generically.
 - [ ] **5.2** Rebuild `help/tap.python~.maxhelp` in Max 9 — basics, messages, allpass, hot
-  reload, errors, `mc.` usage.
-- [ ] **5.3** `ReadMe.md` — `@gain` not `gain`; exactly what reload keeps and resets; the threading
-  and performance model; the block path.
-- [ ] **5.4** Examples — *done with Phase 2:* `allpass.py` takes its sample rate from `prepare()` and
-  its α range is open (−1, 1); `numpy_gain.py` is the block example. *Remaining:* `default.py`
-  stops shadowing `float` in its own annotations; re-execute `allpass-doc.ipynb` (its outputs
-  predate the current allpass — it still sets the removed `fs` — and come from 3.8).
+  reload, errors, `mc.` usage. *Partly done by hand:* the patcher gained a title, the class
+  contract, message boxes for `greet`/`float`/`int`/`filechanged`, and pointers to the
+  `numpy_gain` and `allpass` examples (JSON checked: ids unique, every line connects). *Still
+  wanted, in Max:* open, check the layout, re-save in Max 9, and consider tabs for the numpy and
+  allpass examples and `mc.` usage.
+- [x] **5.3** `ReadMe.md` — `@gain` not `gain`; exactly what reload keeps and resets; the threading
+  and performance model; the block path. *Done* across Phases 1–3 and this pass.
+- [x] **5.4** Examples — `allpass.py` takes its sample rate from `prepare()` and its α range is
+  open (Phase 2); `numpy_gain.py` is the block example; `default.py` puts its `int`/`float`
+  methods last (after `def float`, `float` in the class body is the method) with a comment saying
+  why; `allpass-doc.ipynb` is rewritten as an executed document of the example — what the object
+  exposes, `prepare()` then per-sample `process()`, unity energy and a flat magnitude response,
+  the delay following the sample rate, α rejected at 1 — on CPython 3.13 with the locked attrs and
+  numpy.
 - [x] **5.5** `CHANGELOG.md` recording each contract change (D5) — started with Phase 1.
 
 ## Phase 6 — validation in a real Max

@@ -10,7 +10,7 @@
 		}
 ,
 		"classnamespace" : "box",
-		"rect" : [ 100.0, 100.0, 605.0, 577.0 ],
+		"rect" : [ 100.0, 100.0, 780.0, 600.0 ],
 		"bglocked" : 0,
 		"openinpresentation" : 0,
 		"default_fontsize" : 13.0,
@@ -226,6 +226,145 @@
 				}
 
 			}
+, 			{
+				"box" : 				{
+					"fontsize" : 24.0,
+					"id" : "obj-30",
+					"linecount" : 1,
+					"maxclass" : "comment",
+					"numinlets" : 1,
+					"numoutlets" : 0,
+					"patching_rect" : [ 20.0, 10.0, 240.0, 33.0 ],
+					"text" : "tap.python~"
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"fontsize" : 13.0,
+					"id" : "obj-31",
+					"linecount" : 3,
+					"maxclass" : "comment",
+					"numinlets" : 1,
+					"numoutlets" : 0,
+					"patching_rect" : [ 20.0, 50.0, 235.0, 62.0 ],
+					"text" : "Process audio with a Python class. [tap.python~ name] loads python/name.py from this package and runs the class name defined in it."
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"fontsize" : 13.0,
+					"id" : "obj-38",
+					"linecount" : 2,
+					"maxclass" : "comment",
+					"numinlets" : 1,
+					"numoutlets" : 0,
+					"patching_rect" : [ 20.0, 115.0, 235.0, 47.0 ],
+					"text" : "With no argument it loads python/default.py: open it to follow along."
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"fontsize" : 13.0,
+					"id" : "obj-39",
+					"linecount" : 5,
+					"maxclass" : "comment",
+					"numinlets" : 1,
+					"numoutlets" : 0,
+					"patching_rect" : [ 20.0, 165.0, 235.0, 108.0 ],
+					"text" : "Its annotated fields become attributes (gain, below), its public methods become messages (greet, float, int), process() runs on the signal, and prepare() is told the sample rate and vector size."
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"fontsize" : 13.0,
+					"id" : "obj-40",
+					"linecount" : 3,
+					"maxclass" : "comment",
+					"numinlets" : 1,
+					"numoutlets" : 0,
+					"patching_rect" : [ 20.0, 277.0, 235.0, 62.0 ],
+					"text" : "Save the .py file and the object reloads, keeping its attribute values. Errors print to the Max console."
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"id" : "obj-32",
+					"maxclass" : "message",
+					"numinlets" : 2,
+					"numoutlets" : 1,
+					"outlettype" : [ "" ],
+					"patching_rect" : [ 20.0, 360.0, 70.0, 24.0 ],
+					"text" : "greet max"
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"id" : "obj-33",
+					"maxclass" : "message",
+					"numinlets" : 2,
+					"numoutlets" : 1,
+					"outlettype" : [ "" ],
+					"patching_rect" : [ 100.0, 360.0, 60.0, 24.0 ],
+					"text" : "float 0.5"
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"id" : "obj-34",
+					"maxclass" : "message",
+					"numinlets" : 2,
+					"numoutlets" : 1,
+					"outlettype" : [ "" ],
+					"patching_rect" : [ 170.0, 360.0, 45.0, 24.0 ],
+					"text" : "int 2"
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"id" : "obj-35",
+					"maxclass" : "message",
+					"numinlets" : 2,
+					"numoutlets" : 1,
+					"outlettype" : [ "" ],
+					"patching_rect" : [ 20.0, 395.0, 80.0, 24.0 ],
+					"text" : "filechanged"
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"fontsize" : 13.0,
+					"id" : "obj-36",
+					"linecount" : 2,
+					"maxclass" : "comment",
+					"numinlets" : 1,
+					"numoutlets" : 0,
+					"patching_rect" : [ 105.0, 395.0, 150.0, 33.0 ],
+					"text" : "forces a reload; saving the file does it for you"
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"fontsize" : 13.0,
+					"id" : "obj-37",
+					"linecount" : 6,
+					"maxclass" : "comment",
+					"numinlets" : 1,
+					"numoutlets" : 0,
+					"patching_rect" : [ 20.0, 450.0, 235.0, 122.0 ],
+					"text" : "More examples in the python folder: [tap.python~ numpy_gain] processes a whole signal vector per call with numpy, the form to use when it has to run in real time; [tap.python~ allpass] is an allpass filter that sizes its delay line in prepare()."
+				}
+
+			}
  ],
 		"lines" : [ 			{
 				"patchline" : 				{
@@ -299,6 +438,34 @@
 				}
 
 			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-1", 0 ],
+					"source" : [ "obj-32", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-1", 0 ],
+					"source" : [ "obj-33", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-1", 0 ],
+					"source" : [ "obj-34", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-1", 0 ],
+					"source" : [ "obj-35", 0 ]
+				}
+
+			}
  ],
 		"parameters" : 		{
 			"obj-22" : [ "live.numbox", "live.numbox", 0 ],
@@ -316,7 +483,7 @@
 		}
 ,
 		"dependency_cache" : [ 			{
-				"name" : "python~.mxo",
+				"name" : "tap.python~.mxo",
 				"type" : "iLaX"
 			}
  ],

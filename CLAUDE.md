@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 **PythonTap** — the `tap.python~` Max package: a Max external that embeds CPython 3.13 and runs a
-user's Python class as an audio object. `[tap.python~ name]` imports `python/name.py`, instantiates
+user's Python class as an audio object. `[tap.python~ name]` loads `python/name.py`, instantiates
 `class name`, turns its annotated public fields into Max attributes and its public methods into Max
 messages, calls its `process()` on the signal, and hot-reloads on save. `ReadMe.md` is the user-facing
 contract; **`docs/PRODUCTION-PLAN.md` is the authoritative roadmap** — its settled decisions (D1–D6),
@@ -98,7 +98,10 @@ superseded runs.
   tests through its compile database.
 - **C++20** everywhere; the root `CMakeLists.txt` forces it on every object and `_test` target (Min pins
   C++17), as TapTools-Max does.
-- **Keep in sync when behavior changes:** `ReadMe.md`, `docs/tap.python~.maxref.xml`,
-  `help/tap.python~.maxhelp`, the examples and their notebook, and the plan.
+- **Keep in sync when behavior changes:** `ReadMe.md`, the object's min metadata
+  (`MIN_DESCRIPTION`, argument and message descriptions — min regenerates
+  `docs/tap.python~.maxref.xml` from them whenever the external is newer, so never hand-edit the
+  page; commit the regenerated one), `help/tap.python~.maxhelp`, the examples and their notebook
+  (committed executed), and the plan.
 - **Implement from documentation and published sources only** — the CPython C-API docs, the Max SDK
   docs — never by reverse-engineering another product.

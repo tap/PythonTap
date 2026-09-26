@@ -6,6 +6,22 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ## Unreleased
 
+### Changed — documentation and examples
+
+- **The reference page is generated from the object's own metadata** and now states the real
+  contract (the argument, attributes from annotated fields, signature-called messages, the two
+  `process()` forms, `prepare()`, hot reload, errors). Edit the descriptions in
+  `tap.python_tilde.h`, not the XML: min regenerates the page whenever the external is newer.
+- **`default.py`'s `int` message is annotated `int` and works as a number.** Its hint was written
+  `float` after `def float`, so in the class body it named the method, not the type, and the
+  argument arrived as a symbol. Its `int` and `float` methods now come last, with a comment saying
+  why.
+- **`allpass-doc.ipynb`** is rewritten as an executed document of the `allpass` example: what the
+  object exposes, running it with `prepare()` as the object does, its unity energy and flat
+  magnitude response, the delay following the sample rate, and the rejected coefficient.
+- **The help patcher** explains the class contract and gains message boxes for the example's
+  messages and for `filechanged`.
+
 ### Changed — types and messages
 
 - **Messages follow the method's signature.** Parameters with defaults are optional, `*args`
