@@ -38,7 +38,10 @@ namespace c74 {
             static int s_qelem;
             return &s_qelem;
         }
-        void qelem_set(void*) {}
+        void      qelem_set(void*) {}
+        t_max_err object_deleteattr(void*, t_symbol*) {
+            return MAX_ERR_NONE;
+        }
         void qelem_free(void*) {}
         }
     } // namespace max

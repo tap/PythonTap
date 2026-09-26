@@ -212,16 +212,13 @@ SCENARIO("Messages call the bound methods with coerced arguments") {
     }
 }
 
-SCENARIO("A module that cannot be imported leaves the processor unloaded") {
+SCENARIO("A source file that does not exist leaves the processor unloaded") {
     ensure_runtime();
     log_capture log;
     processor   p{"does_not_exist", log.sink()};
 
-    console().clear();
     CHECK_FALSE(p.load());
-    CHECK(log.contains("Failed to load module 'does_not_exist' (searched " + scripts_dir().string() + ")",
-                       log_level::error));
-    CHECK(console().contains("ModuleNotFoundError", log_level::error));
+    CHECK(log.contains("No file " + (scripts_dir() / "does_not_exist.py").string(), log_level::error));
     CHECK(all_equal(render(p, 1.0), 0.0));
 }
 
@@ -323,9 +320,7 @@ SCENARIO("process() declaring more than one input is bound with a warning, and t
 }
 
 // The reload scenarios are linear (no sibling sections): Catch2 re-runs a scenario once per
-// section, and the module stays cached in sys.modules across those runs (see the last scenario).
-// Consecutive versions differ in size: the source loader's .pyc staleness check is mtime + size,
-// and two writes can land within one mtime tick (Phase 3.6a).
+// section, and each re-run would start from the file the previous one left behind.
 
 SCENARIO("load() reloads the module from disk") {
     ensure_runtime();
@@ -347,8 +342,9 @@ SCENARIO("load() reloads the module from disk") {
                                    "        pass\n");
     REQUIRE(p.load());
 
-    // the new class runs, from a fresh instance with its defaults (the 5.0 set above is gone)
-    CHECK(all_equal(render(p, 1.0), -3.0));
+    // the new class runs, with the value set from outside carried over (3.4) rather than the new
+    // default of 3.0
+    CHECK(all_equal(render(p, 1.0), -5.0));
     // the attributes and messages describe the new class
     REQUIRE(p.attributes().size() == 2);
     CHECK(p.attributes()[1].name == "width");
@@ -368,7 +364,7 @@ SCENARIO("A reload that fails goes silent until the source is fixed") {
     write_script("reload_breaks", "class reload_breaks:\n    def process(self, x: float) -> float\n");
     console().clear();
     CHECK_FALSE(p.load());
-    CHECK(log.contains("Failed to reload module reload_breaks", log_level::error));
+    CHECK(log.contains("Failed to load " + (scripts_dir() / "reload_breaks.py").string(), log_level::error));
     CHECK(console().contains("SyntaxError", log_level::error));
     CHECK_FALSE(p.loaded());
     CHECK(all_equal(render(p, 1.0), 0.0));
@@ -380,10 +376,9 @@ SCENARIO("A reload that fails goes silent until the source is fixed") {
     CHECK(all_equal(render(p, 1.0), 4.0));
 }
 
-SCENARIO("A new processor reuses a module this process already imported, even if its file changed") {
-    // Honest limit (fixed by file-based loading, Phase 3.5): the first load() goes through
-    // PyImport_Import, which returns the sys.modules entry. In Max: delete every instance of a
-    // script, edit it, create a new instance — it runs the old code until the next save.
+SCENARIO("A new processor after an edit runs the edited file") {
+    // Fixed by file-based loading (3.5); it used to get the module already in sys.modules: in Max,
+    // delete every instance of a script, edit it, create a new instance — and run the old code.
     ensure_runtime();
     write_script("cached_module", "class cached_module:\n"
                                   "    def process(self, x: float) -> float:\n"
@@ -398,5 +393,5 @@ SCENARIO("A new processor reuses a module this process already imported, even if
                                   "        return x * 10.0  # edited\n");
     processor second{"cached_module"};
     REQUIRE(second.load());
-    CHECK(all_equal(render(second, 1.0), 1.0)); // the stale code
+    CHECK(all_equal(render(second, 1.0), 10.0));
 }
