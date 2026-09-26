@@ -83,13 +83,23 @@ while audio ran segfaulted in 5 of 5 runs.
 
 ## Phase 2 — the real-time model
 
-- [ ] **2.1 Nothing prints or allocates on the audio thread.** Errors raise an atomic flag and a
-  `qelem`/`defer` reports them once from the main thread; non-finite output is zeroed and counted;
-  a non-numeric return is reported once (today it silently becomes 0.0 every sample).
-- [ ] **2.2 Block path (D1a).** Preallocated in/out numpy arrays wrapping the signal vectors,
-  one call per vector; the per-sample path stays, documented as slow.
-- [ ] **2.3 `prepare(self, sr, vs)` hook** from `dspsetup`, so classes know the sample rate and
-  vector size (the allpass example assumes 48 kHz today).
+- [x] **2.1 Nothing prints on the audio thread.** process() raising, a non-numeric or non-finite
+  result, and a block of the wrong length are recorded on the audio thread (the exception object
+  and flags, no allocation or printing) and the host's `report_ready` callback fires — in Max a
+  `queue<>` (qelem) — so `flush_reports()` prints them from the main thread, each kind once per
+  load. Non-finite output is zeroed. *Honest limit:* the per-sample path still allocates a Python
+  float per sample (CPython's free list); the block path allocates nothing per sample on our side
+  (what the user's numpy code allocates is theirs).
+- [x] **2.2 Block path (D1a).** A first parameter hinted `np.ndarray` binds process() per vector:
+  a processor-owned `np.zeros(vs)` input array, reused (its buffer held, so its memory cannot
+  move), sized at `prepare()` and resized only if a vector arrives in another size; the result is
+  read through the buffer protocol, or `np.ascontiguousarray(…, float64)` for other dtypes and
+  lists; a wrong length or `None` is reported and silenced. Rebuilding the buffer while audio runs
+  is swap-safe (200 `prepare()` calls against a running block path: no corrupt vector, TSan
+  clean).
+- [x] **2.3 `prepare(self, sample_rate, vector_size)`**, from min's `dspsetup`; also called on each
+  newly loaded instance before it is published, so no vector ever runs on an unprepared instance.
+  `allpass.py` uses it (and its α range is now open, per 5.4).
 - [ ] **2.4 Multiple inlets/outlets** — `process` arguments define signal inlets and a tuple
   return defines outlets, fixed at construction.
 - [ ] **2.5 Worker mode (D1)** — `@mode worker`: Python on a worker thread, lock-free FIFO,
@@ -162,9 +172,10 @@ while audio ran segfaulted in 5 of 5 runs.
   reload, errors, `mc.` usage.
 - [ ] **5.3** `ReadMe.md` — `@gain` not `gain`; exactly what reload keeps and resets; the threading
   and performance model; the block path.
-- [ ] **5.4** Examples — `default.py` stops shadowing `float` in its own annotations;
-  `allpass.py` uses `prepare(sr)` and an open α range (−1, 1); add a numpy block example;
-  re-execute `allpass-doc.ipynb` (its outputs predate the current allpass and come from 3.8).
+- [ ] **5.4** Examples — *done with Phase 2:* `allpass.py` takes its sample rate from `prepare()` and
+  its α range is open (−1, 1); `numpy_gain.py` is the block example. *Remaining:* `default.py`
+  stops shadowing `float` in its own annotations; re-execute `allpass-doc.ipynb` (its outputs
+  predate the current allpass — it still sets the removed `fs` — and come from 3.8).
 - [x] **5.5** `CHANGELOG.md` recording each contract change (D5) — started with Phase 1.
 
 ## Phase 6 — validation in a real Max

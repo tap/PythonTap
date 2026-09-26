@@ -86,8 +86,9 @@ SCENARIO("allpass.py is an allpass: an impulse's energy is preserved") {
     processor p{"allpass"};
     REQUIRE(p.load());
 
-    // default: 1 ms at fs 48000 → a 48-sample delay, alpha 0.5
-    constexpr std::size_t k_length = 48 * 400;
+    // prepare() sets the sample rate: 1 ms at 96 kHz is a 96-sample delay (alpha 0.5)
+    p.prepare(96000.0, 64);
+    constexpr std::size_t k_length = 96 * 400;
     std::vector<double>   in(k_length, 0.0);
     std::vector<double>   out(k_length);
     in[0] = 1.0;
@@ -98,5 +99,29 @@ SCENARIO("allpass.py is an allpass: an impulse's energy is preserved") {
         energy += s * s;
     }
     CHECK(std::abs(energy - 1.0) < 1e-9);
-    CHECK(out[0] == 0.5); // alpha * x[0]
+    CHECK(out[0] == 0.5);   // alpha * x[0]
+    CHECK(out[95] == 0.0);  // nothing until the delay
+    CHECK(out[96] == 0.75); // x[0] - alpha * y[0]
+
+    THEN("alpha must stay strictly inside the unit circle") {
+        console().clear();
+        CHECK_FALSE(p.set_attribute("alpha", 1.0));
+        CHECK(console().contains("alpha must be strictly between -1.0 and 1.0", log_level::error));
+    }
+}
+
+SCENARIO("numpy_gain.py processes a vector per call") {
+    ensure_runtime();
+    if (!importable("attrs") || !importable("numpy")) {
+        SKIP("attrs and numpy are not importable by the embedded interpreter");
+    }
+
+    log_capture log;
+    processor   p{"numpy_gain", log.sink()};
+    REQUIRE(p.load());
+    p.prepare(48000.0, 64);
+    CHECK(log.contains("one call per vector (numpy)", log_level::info));
+    CHECK(all_equal(render(p, 0.5, 64), 0.5));
+    REQUIRE(p.set_attribute("gain", 0.5));
+    CHECK(all_equal(render(p, 0.5, 64), 0.25));
 }

@@ -33,7 +33,13 @@ namespace c74 {
         void* filewatcher_new(t_object*, const short, const char*) {
             return nullptr;
         }
-        void filewatcher_start(void*) {}
+        void  filewatcher_start(void*) {}
+        void* qelem_new(void*, method) {
+            static int s_qelem;
+            return &s_qelem;
+        }
+        void qelem_set(void*) {}
+        void qelem_free(void*) {}
         }
     } // namespace max
 } // namespace c74

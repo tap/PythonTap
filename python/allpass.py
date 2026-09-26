@@ -4,12 +4,16 @@ from attrs import define, field
 
 @define
 class allpass:
-    """First-order allpass filter with a delay line, for use with tap.python~."""
+    """Schroeder allpass filter over a delay line, for use with tap.python~.
+
+    y[n] = alpha * x[n] + x[n - D] - alpha * y[n - D], with D the delay in samples:
+    unity gain at every frequency, with a frequency-dependent phase shift.
+    """
 
     delay:  float   = field(default = 1.0)      # delay time in ms
-    alpha:  float   = field(default = 0.5)      # allpass coefficient
-    fs:     int     = field(default = 48000)    # sampling frequency
+    alpha:  float   = field(default = 0.5)      # allpass coefficient, strictly between -1 and 1
 
+    _fs:                float       = field(init = False, default = 48000.0)  # set by prepare()
     _delay_in_samples:  int         = field(init = False, default = 1)
     _x:                 np.ndarray  = field(init = False, factory = lambda: np.zeros(1))
     _y:                 np.ndarray  = field(init = False, factory = lambda: np.zeros(1))
@@ -25,29 +29,28 @@ class allpass:
         if value < 0.0:
             raise ValueError("delay must be non-negative")
         if hasattr(self, "_delay_in_samples"):
-            self._update_delay(value, self.fs)
+            self._update_delay(value, self._fs)
 
     @alpha.validator
     def _check_alpha(self, attribute, value):
-        if value < -1.0 or value > 1.0:
-            raise ValueError("alpha must be in the range [-1.0, 1.0]")
-
-    @fs.validator
-    def _fs_changed(self, attribute, value):
-        if value <= 0:
-            raise ValueError("fs must be positive")
-        if hasattr(self, "_delay_in_samples"):
-            self._update_delay(self.delay, value)
+        # |alpha| = 1 puts the feedback pole on the unit circle: the filter no longer decays
+        if not -1.0 < value < 1.0:
+            raise ValueError("alpha must be strictly between -1.0 and 1.0")
 
     def __attrs_post_init__(self):
-        self._update_delay(self.delay, self.fs)
+        self._update_delay(self.delay, self._fs)
         self.clear()
+
+    def prepare(self, sample_rate: float, vector_size: int) -> None:
+        """Called by tap.python~ with Max's audio settings, before audio and whenever they change."""
+        self._fs = sample_rate
+        self._update_delay(self.delay, sample_rate)
 
     def _update_delay(self, delay_in_ms, sampling_frequency):
         new_delay_in_samples = max(1, int((delay_in_ms / 1000.0) * sampling_frequency))
         if new_delay_in_samples != self._delay_in_samples:
             self._delay_in_samples = new_delay_in_samples
-            print(f"Setting delay to {delay_in_ms} ms ({new_delay_in_samples} samples @ fs={sampling_frequency})")
+            print(f"Setting delay to {delay_in_ms} ms ({new_delay_in_samples} samples @ {sampling_frequency:g} Hz)")
             self.clear()
 
     def clear(self) -> None:

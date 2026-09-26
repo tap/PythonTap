@@ -57,6 +57,39 @@ class python : public object<python>, public vector_operator<> {
                                 return {};
                             }};
 
+    // What went wrong on the audio thread (an exception in process(), a non-numeric or non-finite
+    // result) is reported from here, on Max's main thread: the core calls report_ready on the audio
+    // thread, which only sets this qelem.
+    queue<> m_reports{this,
+                      MIN_FUNCTION {
+                          if (m_processor) {
+                              try {
+                                  m_processor->flush_reports();
+                              }
+                              catch (const std::exception& e) {
+                                  cerr << "reporting failed: " << e.what() << endl;
+                              }
+                          }
+                          return {};
+                      }};
+
+    // Called by min when the signal chain compiles, with the sample rate and the maximum vector size:
+    // passed on to the class's prepare(), if it has one. (min finds it by the member name "dspsetup";
+    // its m_dspsetup alternative is detected but then called as dspsetup, so it does not compile.)
+    message<> dspsetup{this, "dspsetup",
+                       MIN_FUNCTION {
+                           if (m_processor) {
+                               try {
+                                   m_processor->prepare(static_cast<double>(args[0]),
+                                                        static_cast<std::size_t>(static_cast<long>(args[1])));
+                               }
+                               catch (const std::exception& e) {
+                                   cerr << "prepare failed: " << e.what() << endl;
+                               }
+                           }
+                           return {};
+                       }};
+
     python(const atoms& args = {}) {
         if (maxobj() == NULL) {
             return; // this occurs during dummy construction
@@ -102,7 +135,7 @@ class python : public object<python>, public vector_operator<> {
                     cout << std::string{text} << endl;
                 }
             },
-            reserved_messages());
+            reserved_messages(), [this] { m_reports.set(); });
 
         update_source();
 

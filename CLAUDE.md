@@ -17,7 +17,8 @@ its phases, and the audit findings behind them. Tick its items (with the PR) as 
   C++20 + CPython with no Max or min-api: `runtime.h` (one process-wide interpreter, `gil_lock`,
   routing `print()`/tracebacks to a host sink), `value.h` (the Max-atom value model and its coercion
   rules, which reproduce `atom_getlong`/`atom_getfloat`/`atom_getsym`), `processor.h` (load/reload,
-  class introspection, attribute and message dispatch, the per-sample `process()`). New CPython-facing
+  class introspection, attribute and message dispatch, `prepare()`, and `process()` — per sample, or
+  per vector when the input is hinted `np.ndarray` — plus `flush_reports()`). New CPython-facing
   behavior goes here, never in the wrapper.
 - **`core/tests/`** — the core's Catch2 battery against CPython 3.13, with Python fixtures in
   `core/tests/python/` and the shipped examples copied alongside. Runs on Linux, including under
@@ -75,6 +76,9 @@ superseded runs.
   (and copies) of what it uses before running anything that could yield. Keep it that way.
 - `gil_lock` gives each thread one long-lived Python thread state (`detail::thread_state_keeper`);
   don't call `PyGILState_Ensure` directly.
+- **Nothing prints on the audio thread.** Problems in `process()` are recorded (exception object,
+  flags) and the host's `report_ready` callback fires — the external sets a `queue<>` — and
+  `flush_reports()` prints them on the main thread. Anything new on the audio path follows suit.
 - Report user exceptions with `tap::python::report_exception()`, **never `PyErr_Print()`**: for a
   `SystemExit` it calls `Py_Exit()` and quits Max. Never finalize the interpreter, and never let a C++
   exception cross a Max callback (the trampolines are wrapped in `guarded()`).

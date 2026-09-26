@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2022-2026 Timothy Place.
 
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -259,9 +260,11 @@ SCENARIO("A class without process() is loaded but silent") {
 
 SCENARIO("process() raising silences the rest of the vector and unbinds until the next load") {
     ensure_runtime();
-    log_capture log;
-    processor   p{"raises_in_process", log.sink()};
+    log_capture      log;
+    std::atomic<int> notified{0};
+    processor        p{"raises_in_process", log.sink(), {}, [&] { ++notified; }};
     REQUIRE(p.load());
+    log.clear(); // drop load()'s own "process() bound" line
 
     console().clear();
     const auto out = render(p, 0.5, 8);
@@ -269,9 +272,18 @@ SCENARIO("process() raising silences the rest of the vector and unbinds until th
     THEN("the samples before the exception pass, the rest are silent") {
         CHECK(out == std::vector<double>{0.5, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
     }
-    THEN("the traceback and a diagnostic reach the console once") {
+    THEN("nothing is printed on the audio thread; the host is told a report is waiting") {
+        CHECK(console().lines().empty());
+        CHECK(log.lines().empty());
+        CHECK(notified.load() == 1);
+    }
+    THEN("flushing the reports prints the traceback and a diagnostic, once") {
+        p.flush_reports();
         CHECK(console().contains("ValueError: process() failed on purpose", log_level::error));
         CHECK(log.contains("process() raised an exception", log_level::error));
+        log.clear();
+        p.flush_reports();
+        CHECK(log.lines().empty());
     }
     THEN("later vectors are silent without calling Python again") {
         CHECK_FALSE(p.has_process());
@@ -283,15 +295,6 @@ SCENARIO("process() raising silences the rest of the vector and unbinds until th
         CHECK(p.has_process());
         CHECK(all_equal(render(p, 0.5, 2), 0.5));
     }
-}
-
-SCENARIO("A non-numeric return from process() becomes 0.0 for that sample") {
-    ensure_runtime();
-    processor p{"non_number"};
-    REQUIRE(p.load());
-
-    CHECK(all_equal(render(p, 1.0), 0.0));
-    CHECK(p.has_process()); // honest limit: reported once, not silently zeroed, is Phase 2.1
 }
 
 SCENARIO("process() declaring a tuple return is not bound") {

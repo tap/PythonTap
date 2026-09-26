@@ -44,9 +44,10 @@ SCENARIO("sys.exit() in process() is reported and silences the processor") {
 
     console().clear();
     CHECK(all_equal(render(p, 1.0), 0.0));
+    CHECK_FALSE(p.has_process());
+    p.flush_reports(); // reported from the host's main thread, never the audio thread (2.1)
     CHECK(console().contains("SystemExit: from process()", log_level::error));
     CHECK(log.contains("process() raised an exception", log_level::error));
-    CHECK_FALSE(p.has_process());
 }
 
 SCENARIO("sys.exit() in an attribute setter is reported, not honored") {
