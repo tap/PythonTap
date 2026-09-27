@@ -6,6 +6,15 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ## Unreleased
 
+### Fixed
+
+- **Saving the class file no longer crashes Max.** Max's file watcher calls the object's
+  `filechanged` method with C arguments (a file name and a folder), and the object registered that
+  message in a form that reads its first argument as a Max symbol — so every save while the object
+  existed crashed Max. The watcher now belongs to a small helper object that passes each save on
+  as an ordinary `filechanged` message; sending `filechanged` from a patcher works as before.
+  (Found by the first runtime test in Max; the unit tests' mock kernel has no file watcher.)
+
 ### Added — releases
 
 - **Release packages with the runtime bundled** (D3): `PythonTap-<version>-macos-arm64.zip`,

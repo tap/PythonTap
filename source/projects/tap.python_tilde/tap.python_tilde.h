@@ -23,6 +23,7 @@
 #include "c74_min.h"
 #include "tap.python_tilde_attribute.h"
 #include "tap.python_tilde_cglue.h"
+#include "tap.python_tilde_filewatch.h"
 #include "tap.python_tilde_message.h"
 #include "tap.python_tilde_package.h"
 
@@ -56,8 +57,8 @@ class python : public object<python>, public vector_operator<> {
         "extension, which must define a class of the same name; it must be a valid Python "
         "identifier. Without an argument, python/default.py is loaded."};
 
-    // Max's filewatcher (created in the constructor) sends this message any
-    // time our python source file is modified.
+    // Sent on every save of the class file (by the watch the constructor starts — see
+    // tap.python_tilde_filewatch.h), and by a patcher to force a reload.
     message<> m_filechanged{this, "filechanged",
                             "Reload the Python file. The object's file watcher sends it when the file is saved; "
                             "send it yourself to force a reload.",
@@ -170,10 +171,8 @@ class python : public object<python>, public vector_operator<> {
         short              path_id{};
         c74::max::t_fourcc filetype{};
         if (c74::max::locatefile_extended(filename, &path_id, &filetype, nullptr, 0) == 0) {
-            m_filewatcher = c74::max::filewatcher_new(maxobj(), path_id, filename);
-            if (m_filewatcher) {
-                c74::max::filewatcher_start(m_filewatcher);
-            }
+            // not maxobj() itself: see tap.python_tilde_filewatch.h
+            m_file_watch = std::make_unique<runtime::file_watch>(maxobj(), path_id, filename);
         }
         else {
             cerr << "Unable to watch " << watched_file.string() << " for changes." << endl;
@@ -181,9 +180,7 @@ class python : public object<python>, public vector_operator<> {
     }
 
     ~python() {
-        if (m_filewatcher) {
-            c74::max::object_free(m_filewatcher);
-        }
+        m_file_watch.reset();
         m_processor.reset(); // releases the Python objects under the GIL
     }
 
@@ -287,7 +284,7 @@ class python : public object<python>, public vector_operator<> {
   private:
     string                                                                    m_python_source{};
     std::filesystem::path                                                     m_scripts_dir{};
-    void*                                                                     m_filewatcher{};
+    std::unique_ptr<runtime::file_watch>                                      m_file_watch;
     std::unique_ptr<runtime::processor>                                       m_processor;
     std::unordered_map<std::string, std::unique_ptr<runtime::python_message>> m_python_messages;
     std::unordered_map<std::string, std::unique_ptr<runtime::python_attr>>    m_python_attributes;
