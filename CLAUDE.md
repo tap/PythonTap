@@ -106,6 +106,11 @@ the secrets exist, and attaches zips + SHA256s to a draft release.
   if the module imports CPython data. Use the function forms (`detail::none()`,
   `detail::set_runtime_error()`, `Py_GetConstantBorrowed`, attribute lookups); CI's
   `scripts/check-data-imports.sh` fails the Linux build, by symbol name, on any regression.
+- Max calls some methods directly with C arguments (`A_CANT`): the file watcher's `filechanged`
+  is one. min registers a `message<>` whose name it does not special-case with its `A_GIMME` wrapper,
+  which such a call crashes — so
+  the watcher is owned by a nobox helper with the SDK's signature (`tap.python_tilde_filewatch.h`).
+  Check the SDK's calling convention before exposing a Max-called method as a `message<>`.
 - Report user exceptions with `tap::python::report_exception()`, **never `PyErr_Print()`**: for a
   `SystemExit` it calls `Py_Exit()` and quits Max. Never finalize the interpreter, and never let a C++
   exception cross a Max callback (the trampolines are wrapped in `guarded()`).

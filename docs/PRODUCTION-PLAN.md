@@ -227,9 +227,11 @@ while audio ran segfaulted in 5 of 5 runs.
 
 ## Phase 6 — validation in a real Max
 
-**Runbook for a session on a Mac with Max 9.** Everything up to here was built and tested on Linux
-(core battery under sanitizers, the external against min's mock kernel) and in CI (macOS and
-Windows builds, link-shape checks); nothing has yet run inside Max. To pick this up:
+**Runbook for a session on a Mac with Max 9.** Up to Phase 5 everything was built and tested on
+Linux (core battery under sanitizers, the external against min's mock kernel) and in CI (macOS and
+Windows builds, link-shape checks). The first Mac session (2026-09-27, Max 9.0.8, Intel) set up the
+package, added the runtime tests (6.1) and ran them green; they found a crash on every save of a
+class file, now fixed. To continue:
 
 1. *Set up.* Clone into (or symlink into) `~/Documents/Max 9/Packages/PythonTap` with
    `--recursive`, run `./scripts/install-runtime.sh` (native: fastest to build; add `--universal`
@@ -237,44 +239,61 @@ Windows builds, link-shape checks); nothing has yet run inside Max. To pick this
    cmake --build build && ctest --test-dir build`. The external lands in `externals/`. When Max
    loads an external newer than `docs/tap.python~.maxref.xml`, min rewrites the page from the
    object's metadata; the committed one was generated against the mock kernel, so if Max's
-   differs, commit Max's.
+   differs, commit Max's. (A symlinked package works for externals, but Max loads a package's
+   *extensions* only from a real folder — why `run.py` installs the harness as a copy.)
 2. *5.2 — the help patcher.* Open `help/tap.python~.maxhelp`: its new boxes were added by hand
    (as JSON, in Max's layout), so check they sit sensibly and every message box works, then
    re-save it in Max 9 and commit. Tabs for the numpy and allpass examples and `mc.` are welcome.
-3. *6.4 — loading without a runtime.* Quit Max, rename `support/` aside, start Max, create
-   `[tap.python~]`: expect one console line naming the missing runtime (not a load failure).
-   Rename it back: the object should work only after restarting Max (the weak binding is fixed at
-   load, by design). On Windows the next object created should pick it up without a restart.
-4. *Behavior the mock kernel cannot show* — check each by hand and note the result here:
+3. *Run the runtime tests:* quit Max, `python3 runtime-tests/run.py` (see
+   `runtime-tests/README.md`). It covers 6.1 and the macOS half of 6.4 below.
+4. *Behavior the tests cannot show* — check by hand and note the result here:
    - a `bool` field's attribute shows as on/off (a toggle in the inspector and in attrui);
-   - removing a field and saving, while an attrui displays that attribute, drops it cleanly;
-   - saving the file repeatedly while audio runs (`numpy_gain.py`, then `default.py`, which is
-     per sample) gives no dropout beyond the swap and no crash;
-   - `prepare(sample_rate, vector_size)` runs before the first `process()` and again when the
-     sample rate or vector size changes in Audio Status — `allpass.py` prints "Setting delay to
-     …" whenever its delay in samples changes, so a sample-rate change shows it;
-   - `sys.exit()` in a message only prints; an exception in `process()` prints once from the main
-     thread and silences until the next save.
-5. *6.1 — automate it.* The `max-test` harness is not in this repo yet: add it as TapTools-Max
-   does (the `runtime-tests/` folder: Cycling '74's max-test as a submodule, `*.maxtest.maxpat`
-   patchers, the OSC runner), then turn the checks above into patchers.
+   - removing a field while an attrui displays it *looks* right (the tests check that nothing
+     breaks and the object keeps working);
+   - saving the file repeatedly while audio runs gives no audible dropout beyond the swap (the tests
+     check every sample the object outputs, not whether the audio device underruns while a reload
+     holds the GIL — plan 2.6);
+   - changing the sample rate in Audio Status calls `prepare()` again (the tests change it through
+     `poly~`'s `up`, which does not touch the device).
+5. *6.4 on Windows:* with `support/` renamed aside, create `[tap.python~]`: one console line naming
+   the missing runtime; rename it back and create another: it should work without a restart.
 6. *6.5 — the first release.* Tag a pre-1.0 version (`v0.9.0`), which runs `release.yml` for the
    first time, including the `macos-15-intel` runner; install each draft zip into `Packages/`
    (clearing quarantine per the ReadMe) and repeat step 4's quick checks.
 
-- [ ] **6.1 Runtime tests** with the `max-test` harness (as TapTools-Max does): load/unload,
-  attributes/messages, reload under audio, 20 instances, `sys.exit()`/exception/NaN. Needs a
-  licensed Max — a local on-Mac gate, not CI.
+- [x] **6.1 Runtime tests** with the `max-test` harness — `runtime-tests/`: Cycling '74's max-test as
+  a submodule, the test patchers generated by `make_patchers.py` from scripts of steps, fixtures in
+  `runtime-tests/python/`, and `run.py`, which installs the harness, launches Max, drives it over
+  OSC and reports from the harness's database (a local gate on a Mac, not CI). Nine patchers, 75
+  assertions: loading (no argument, numpy, `@`-arguments, `int`/`float`), every attribute kind set
+  and read through `getattr`, messages by signature (and a bad call reported), reload by message
+  and by saving through the file watcher (values kept, a field removed under an attrui, a broken
+  file silencing and its fix restoring audio and values), reload every 50 ms for 3 s on both
+  paths with every sample checked, 20 instances on each path plus `poly~` churn between 20 voices
+  and 1, `sys.exit()`/NaN/exception each reported once, and `prepare()` before the first
+  `process()` and again on a sample-rate and a vector-size change. *Found:* every save of a class
+  file crashed Max — min registered `filechanged` with its A_GIMME wrapper, which Max's file
+  watcher calls with C arguments; the watcher now belongs to a nobox helper that forwards the save
+  as a typed message (`tap.python_tilde_filewatch.h`). *Also found* 6.6.
 - [ ] **6.2 Stress/soak** — an hour of audio with a reload every second; many instances of one
   module; a sample-rate change mid-run.
 - [ ] **6.3 Performance budget** — CPU per sample (per-sample path) and per vector (block path) at
   48/96 kHz, recorded in the ReadMe as measured numbers.
 - [ ] **6.4 Loading without a runtime** (4.2) — with `support/` moved aside the external loads and
   says what is missing, on macOS and Windows; installing the runtime then works after a Max restart
-  (macOS) or for the next object (Windows).
+  (macOS) or for the next object (Windows). *macOS: done* — `run.py`'s without-runtime session
+  checks both halves, including that a runtime put back while Max runs still asks for a restart.
+  *Windows: by hand* (runbook step 5).
 - [ ] **6.5 The first release** (4.5) — tag a pre-1.0 version, check the draft's three zips install
   and run from `Packages/` on Apple Silicon, Intel (or Rosetta) and Windows; later, with
   credentials, that signed and notarized packages load without the quarantine step.
+- [ ] **6.6 Text files default to ASCII** — found by 6.1: the interpreter is configured with
+  `PyConfig_InitIsolatedConfig`, whose pre-configuration leaves the locale unconfigured and UTF-8
+  mode off, so in Max `open()` and `Path.read_text()` without `encoding=` decode as ASCII, whatever
+  `LANG` says (as in any host that leaves the C locale in place); a class reading a UTF-8 file
+  fails with `UnicodeDecodeError`. Proposed:
+  pre-initialize with UTF-8 mode on (PEP 686 makes it the default from Python 3.15), pinned first by
+  a core test — a contract change for the CHANGELOG.
 
 ## Phase 7 — plugin front ends (optional, post-1.0)
 
