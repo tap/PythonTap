@@ -43,7 +43,8 @@ DOCUMENTS = ["ReadMe.md", "License.md", "CHANGELOG.md", "icon.png", "package-inf
 FOLDERS = ["help", "docs", "python"]
 
 # Never shipped from the copied folders.
-IGNORED = shutil.ignore_patterns("__pycache__", "*.pyc", ".ipynb_checkpoints", ".DS_Store")
+# maxtest_*.py: the runtime tests' fixtures, copied into python/ while runtime-tests/run.py runs
+IGNORED = shutil.ignore_patterns("__pycache__", "*.pyc", ".ipynb_checkpoints", ".DS_Store", "maxtest_*")
 
 
 class AssemblyError(Exception):

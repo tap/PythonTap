@@ -147,6 +147,16 @@ cmake --build build-linux
 ctest --test-dir build-linux --output-on-failure
 ```
 
+### Runtime tests in Max
+
+What only a real Max shows — the file watcher, attributes read through `getattr`, audio through the signal chain, `poly~`, the console, loading without a runtime — is tested by patchers that Max runs, with Cycling '74's max-test harness. On a Mac with Max 9, with the external built, the runtime installed and the package in `Packages`, quit Max and run:
+
+```sh
+python3 runtime-tests/run.py    # launches Max, runs every test patcher, quits it (~2 minutes)
+```
+
+It installs the harness into `Packages` as `max-test` (and leaves it there). See [runtime-tests/README.md](runtime-tests/README.md) for what it does and how to write a test.
+
 ## License
 
 MIT — see [License.md](License.md), which also lists the third-party components (Min-API, CPython, attrs, NumPy) and where their licenses live.

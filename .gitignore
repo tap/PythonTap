@@ -26,3 +26,8 @@ support.previous/
 # Unit-test build output (mock kernel + test executable land here, as in the
 # other *-Max packages)
 /tests/
+
+# Runtime tests in Max (runtime-tests/run.py): the fixtures it copies into python/ for a run,
+# and Max's output
+/python/maxtest_*.py
+/runtime-tests/logs/
