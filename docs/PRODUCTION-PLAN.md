@@ -208,12 +208,12 @@ while audio ran segfaulted in 5 of 5 runs.
   and the argument and `filechanged` descriptions, and the committed page is the one min's own
   `doc_generate` writes from them (run against the mock kernel on Linux). The Python-defined
   attributes and messages depend on each user's class, so the page describes them generically.
-- [ ] **5.2** Rebuild `help/tap.python~.maxhelp` in Max 9 — basics, messages, allpass, hot
-  reload, errors, `mc.` usage. *Partly done by hand:* the patcher gained a title, the class
-  contract, message boxes for `greet`/`float`/`int`/`filechanged`, and pointers to the
-  `numpy_gain` and `allpass` examples (JSON checked: ids unique, every line connects). *Still
-  wanted, in Max:* open, check the layout, re-save in Max 9, and consider tabs for the numpy and
-  allpass examples and `mc.` usage.
+- [x] **5.2** Rebuild `help/tap.python~.maxhelp` in Max 9 — basics, messages, allpass, hot
+  reload, errors, `mc.` usage. *Done by hand:* the patcher gained a title, the class contract,
+  message boxes for `greet`/`float`/`int`/`filechanged`, and pointers to the `numpy_gain` and
+  `allpass` examples (JSON checked: ids unique, every line connects). *Checked in Max 9
+  (2026-09-29):* the layout sits right and every message box works; kept as committed rather than
+  re-saved. Tabs for the numpy and allpass examples and `mc.` usage would still be welcome.
 - [x] **5.3** `ReadMe.md` — `@gain` not `gain`; exactly what reload keeps and resets; the threading
   and performance model; the block path. *Done* across Phases 1–3 and this pass.
 - [x] **5.4** Examples — `allpass.py` takes its sample rate from `prepare()` and its α range is
@@ -231,7 +231,8 @@ while audio ran segfaulted in 5 of 5 runs.
 Linux (core battery under sanitizers, the external against min's mock kernel) and in CI (macOS and
 Windows builds, link-shape checks). The first Mac session (2026-09-27, Max 9.0.8, Intel) set up the
 package, added the runtime tests (6.1) and ran them green; they found a crash on every save of a
-class file, now fixed. To continue:
+class file, now fixed. A second session (2026-09-29) made the hand checks of steps 2 and 4: all
+passed. To continue:
 
 1. *Set up.* Clone into (or symlink into) `~/Documents/Max 9/Packages/PythonTap` with
    `--recursive`, run `./scripts/install-runtime.sh` (native: fastest to build; add `--universal`
@@ -244,6 +245,7 @@ class file, now fixed. To continue:
 2. *5.2 — the help patcher.* Open `help/tap.python~.maxhelp`: its new boxes were added by hand
    (as JSON, in Max's layout), so check they sit sensibly and every message box works, then
    re-save it in Max 9 and commit. Tabs for the numpy and allpass examples and `mc.` are welcome.
+   *Done 2026-09-29:* the layout and every message box check out; kept as committed (5.2).
 3. *Run the runtime tests:* quit Max, `python3 runtime-tests/run.py` (see
    `runtime-tests/README.md`). It covers 6.1 and the macOS half of 6.4 below.
 4. *Behavior the tests cannot show* — check by hand and note the result here:
@@ -255,6 +257,10 @@ class file, now fixed. To continue:
      holds the GIL — plan 2.6);
    - changing the sample rate in Audio Status calls `prepare()` again (the tests change it through
      `poly~`'s `up`, which does not touch the device).
+
+   *Checked 2026-09-29, Max 9 on macOS: all four as described* — the toggle shows, the attrui
+   removal looks right, no audible dropout while saving under audio, and `prepare()` runs again on
+   a sample-rate change in Audio Status. Repeat them on the release packages (step 6).
 5. *6.4 on Windows:* with `support/` renamed aside, create `[tap.python~]`: one console line naming
    the missing runtime; rename it back and create another: it should work without a restart.
 6. *6.5 — the first release.* Tag a pre-1.0 version (`v0.9.0`), which runs `release.yml` for the
