@@ -111,6 +111,17 @@ endif ()
 include(${C74_MIN_API_DIR}/script/min-posttarget.cmake)
 # (C++20 is forced on this target and its test by the root CMakeLists.txt.)
 
+if (APPLE)
+    # The bundle identifier: max-sdk-base leaves it as Xcode's ${PRODUCT_NAME:rfc1034identifier},
+    # which only Xcode expands, so every other generator shipped it literally. Expand it here from
+    # the project name with the same rule — anything but letters, digits, '.' and '-' becomes '-':
+    # com.74objects.tap.python-tilde — for the Info.plist (configured from this variable when the
+    # build is generated) and for Xcode alike.
+    string(REGEX REPLACE "[^A-Za-z0-9.-]" "-" BUNDLE_IDENTIFIER "${PROJECT_NAME}")
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+                          XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${AUTHOR_DOMAIN}.${BUNDLE_IDENTIFIER}")
+endif ()
+
 
 #############################################################
 # UNIT TEST
