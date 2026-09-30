@@ -357,6 +357,12 @@ def check_prerequisites(max_app: Path, packages: Path) -> None:
     if not EXTERNAL.exists():
         raise RunError("the external is not built — cmake -S . -B build && cmake --build build"
                        if PACKAGE == ROOT else f"no external in {PACKAGE}")
+    binary = EXTERNAL / "Contents" / "MacOS" / "tap.python~"
+    sources = [f for folder in ("core/include", "source/projects") for f in (ROOT / folder).rglob("*") if f.is_file()]
+    newest = max(sources, key=lambda f: f.stat().st_mtime)
+    built_here = EXTERNAL.resolve().is_relative_to(ROOT)  # not an installed release's
+    if built_here and binary.exists() and newest.stat().st_mtime > binary.stat().st_mtime:  # after switching branches
+        raise RunError(f"the external is older than {newest.relative_to(ROOT)} — cmake --build build")
     if not SUPPORT.exists():
         raise RunError(f"no runtime in {SUPPORT} — run scripts/install-runtime.sh")
     if not packages.is_dir():

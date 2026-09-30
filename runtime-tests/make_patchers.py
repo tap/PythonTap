@@ -561,7 +561,8 @@ def announce_once() -> Test:
     t = Test("tap.python~.announce-once.maxtest.maxpat",
              "What is true of a class is said once per run of its file, however many objects share it "
              "(plan 6.7): five instances of a class with a reserved method name, reporting it once on "
-             "load, once more after the file changes, and not at all when an unchanged file reloads.",
+             "load, once more after the file changes, and not at all when an unchanged file reloads; "
+             "and a save that breaks the file is reported once, not by each (plan 6.10).",
              audio=False)
     host = t.host()  # loaded by the first step, so that what the objects print is caught
     editor = t.python("maxtest_editor", column=1)
@@ -573,6 +574,11 @@ def announce_once() -> Test:
     t.step(t.errors_are("said-once-more-after-a-change", "== 2", pattern))
     t.step(t.send("filechanged", host))
     t.step(t.errors_are("unchanged-reload-says-nothing", "== 2", pattern), wait=WATCH)
+    # 6.10: a save that breaks the file is reported once, not by each of the five
+    t.count_errors("Failed.to.load")
+    t.step(t.send("corrupt maxtest_reserved", editor))  # the file watcher reloads them all
+    t.step(t.errors_are("broken-save-reported-once-for-five-objects", "== 1", "Failed.to.load"), wait=WATCH)
+    t.step(t.send("restore maxtest_reserved", editor))
     return t
 
 
