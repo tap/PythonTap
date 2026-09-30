@@ -144,11 +144,12 @@ while audio ran segfaulted in 5 of 5 runs.
   *Done:* the loader compiles the source directly; no `.pyc` is read or written for class files.
 - [x] **3.7 Console streams** — a real `flush()`, plus `encoding`/`errors`/`isatty` for libraries
   that probe them (`_runtime.h:184-194`). *Done:* `io.TextIOBase` subclasses; `s#` so NULs pass.
-- [ ] **3.8 Namespace** — move `python_attr`, `python_message` and the trampolines into
+- [x] **3.8 Namespace** — move `python_attr`, `python_message` and the trampolines into
   `tap::python`; correct TapHouse's README, which says PythonTap has no namespace of its own.
   *The move is done (and the headers lost their file-scope `using namespace`), and the core also
   exports the conventional `tap::python` CMake alias (keeping `tap::python_core`); the TapHouse
   README correction — adding PythonTap to its namespace table — is a separate PR in tap/taphouse.*
+  *Done there too:* TapHouse's README lists `tap::python` (tap/taphouse `349b1a4`).
 
 ## Phase 4 — build, supply chain, distribution
 
@@ -338,6 +339,20 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
   nothing, and the external's own reload line is gone. Errors particular to an instance are
   unchanged. Pinned by a core test (two processors, a change, an unchanged reload) and a runtime
   test (five objects in Max: the class's diagnostic once per run of the file).
+- [ ] **6.8 The reference page from Max** — runbook step 1 expects min to rewrite
+  `docs/tap.python~.maxref.xml` when Max loads an external newer than it; in the Mac sessions it
+  did not. Max's standard output had "file not found" and "failed to get date modified" lines at
+  start-up — probably min's `doc_update` failing to resolve a path, not yet shown to come from this
+  object. Find out why, and whether the committed page (generated against the mock kernel) is the
+  one Max would write.
+- [ ] **6.9 The help patcher and `numpy_allpass.py`** — the help patcher points to the `numpy_gain`
+  and `allpass` examples but not to `numpy_allpass`, the one that shows what the block path is for;
+  add it in Max (and re-save), perhaps with the measured comparison.
+- [ ] **6.10 One traceback per broken save** — a file that fails to load is not cached, so every
+  object sharing it runs it and prints the traceback: 25 objects, 25 tracebacks. 6.7 left this
+  alone, because the obvious fix — remember the failing source and stay quiet — would also hide
+  the error from an object created later (a patch reopened with the file still broken). Needs a
+  rule that reports once per save without that.
 
 ## Phase 7 — plugin front ends (optional, post-1.0)
 
