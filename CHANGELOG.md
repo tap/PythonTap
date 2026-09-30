@@ -6,6 +6,15 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ## Unreleased
 
+### Changed — reloads and the audio thread
+
+- **A reload no longer holds up the audio for its whole length.** The interpreter now hands itself
+  to a waiting thread after 0.5 ms instead of CPython's 5 ms, so the audio thread waits at most
+  about that long at a time while another thread — a reload, above all, which takes a few
+  milliseconds — runs Python. Measured at 96 kHz with 512-sample buffers and a save every 100 ms,
+  CPython's default made a buffer late in most runs (the worst took 45 ms); at 0.5 ms none was.
+  (Plan 2.6.)
+
 ### Changed — the console on reload
 
 - **One line per save, however many objects share the file.** Every object used to post two lines

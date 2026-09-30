@@ -27,7 +27,9 @@ its phases, and the audit findings behind them. Tick its items (with the PR) as 
   `core/tests/python/` and the shipped examples copied alongside. Runs on Linux, including under
   ASan/UBSan and TSan.
 - **`core/bench/`** — `tap_python_bench` times `processor::process()` as Max's audio thread calls it
-  (plan 6.3), fastest of five runs. `scripts/update-perf-docs.py` builds it (Release), runs it, and
+  (plan 6.3); `tap_python_reload_bench` times the audio buffers while the class reloads, with the
+  audio thread scheduled as Core Audio's are (plan 2.6: why the runtime sets a 0.5 ms switch
+  interval). `scripts/update-perf-docs.py` builds it (Release), runs it, and
   rewrites the ReadMe's generated performance tables — with `--max`, Max's CPU meter too, through
   `runtime-tests/run.py --session perf`. Never hand-edit those tables; measure on an idle machine.
 - **`source/projects/tap.python_tilde/`** — the Min external: package paths, the file watcher, atom

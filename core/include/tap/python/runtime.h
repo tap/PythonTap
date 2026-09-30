@@ -35,6 +35,11 @@ namespace tap::python {
         std::filesystem::path home;        ///< the CPython installation (PyConfig.home)
         std::filesystem::path scripts_dir; ///< the user's script folder, made importable
         log_function          console;     ///< where Python's stdout (info) and stderr (error) go
+        /// How long a thread holding the GIL keeps it from a thread waiting for it, in seconds
+        /// (sys.setswitchinterval). CPython's 5 ms lets a reload on the main thread keep the audio
+        /// thread waiting past an I/O buffer's deadline; 0.5 ms does not (plan 2.6: measured by
+        /// core/bench's tap_python_reload_bench) and is under one 64-sample vector at 96 kHz.
+        double switch_interval = 0.0005;
     };
 
     /// The outcome of initialize(): ok, or the reason the interpreter could not start.
@@ -497,6 +502,15 @@ def describe(fn):
             }
 
             detail::create_support();
+
+            // 2.6: hand the GIL to a waiting thread — the audio thread, above all — sooner
+            if (PyObject* set_interval = PySys_GetObject("setswitchinterval")) { // borrowed
+                PyObject* seconds = PyFloat_FromDouble(options.switch_interval);
+                PyObject* result  = seconds ? PyObject_CallOneArg(set_interval, seconds) : nullptr;
+                Py_XDECREF(result);
+                Py_XDECREF(seconds);
+            }
+            PyErr_Clear();
 
             // Route print() and tracebacks to the host console.
             // sys.stdout/sys.stderr are text streams (io.TextIOBase) so that libraries which probe them
