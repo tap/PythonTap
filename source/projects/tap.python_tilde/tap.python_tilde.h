@@ -45,13 +45,15 @@ class python : public object<python>, public vector_operator<> {
                     "(a tuple of values for more than one). An optional prepare(sample_rate, vector_size) "
                     "method receives the audio settings "
                     "before audio starts and whenever they change. The file is watched and reloaded when saved, "
-                    "keeping attribute values; errors are printed to the Max console and never take Max down."};
+                    "keeping attribute values; a save that changes process()'s inputs or outputs changes the "
+                    "inlets and outlets to match, keeping the patch cords of those that stay. Errors are "
+                    "printed to the Max console and never take Max down."};
     MIN_TAGS{"programming"};
     MIN_AUTHOR{"Tim Place"};
     MIN_RELATED{"js, node.script"};
 
     // The first inlet and outlet; the constructor adds as many more as the class's process()
-    // declares (plan 2.4).
+    // declares, and a reload changes them to match (plan 2.4).
     inlet<>  m_inlet{this, "(signal) the first input to the Python process() method, and messages"};
     outlet<> m_outlet_main{this, "(signal) the first output returned from the Python process() method", "signal"};
 
@@ -203,7 +205,7 @@ class python : public object<python>, public vector_operator<> {
         }
         create_attributes();
         create_messages();
-        report_ports();
+        adapt_ports();
     }
 
     /// Dispatch a Max message to the bound Python method.
@@ -377,24 +379,18 @@ class python : public object<python>, public vector_operator<> {
     /// an outlet for each output — at least one of each: the first inlet also takes messages.
     /// Constructor only: min makes the Max inlets and outlets from these when it returns.
     void create_ports() {
-        const auto& names = m_processor ? m_processor->input_names() : std::vector<std::string>{};
-        for (std::size_t i = 1; i < names.size(); ++i) {
-            m_more_inlets.push_back(std::make_unique<inlet<>>(
-                this, "(signal) " + names[i] + ": input " + std::to_string(i + 1) + " to the Python process() method"));
-        }
-        const std::size_t outputs = m_processor ? m_processor->output_count() : 1;
-        for (std::size_t i = 1; i < outputs; ++i) {
-            m_more_outlets.push_back(std::make_unique<outlet<>>(
-                this, "(signal) output " + std::to_string(i + 1) + " returned from the Python process() method",
-                "signal"));
-        }
+        describe_ports(m_processor ? std::max<std::size_t>(1, m_processor->input_count()) : 1,
+                       m_processor ? m_processor->output_count() : 1);
         m_ports_made = true;
     }
 
-    /// Say when a reload changed the inputs or outputs process() declares away from the inlets and
-    /// outlets this object was made with (once, until they match again). The core matches them:
-    /// a missing input reads as silence, an extra output is dropped.
-    void report_ports() {
+    /// Make the inlets and outlets match what a reloaded class's process() declares, in place:
+    /// Max's dynamic inlets and outlets, changed between the box's dynlet_begin and dynlet_end,
+    /// keep the patch cords of every inlet and outlet that stays. The signal chain is then marked
+    /// broken, so it is rebuilt with the new counts. An object without a box (made by object_new)
+    /// keeps its ports and says so, once, until they match again; the core matches the channels: a
+    /// missing input reads as silence, an extra output is dropped.
+    void adapt_ports() {
         if (!m_ports_made) {
             return;
         }
@@ -402,12 +398,70 @@ class python : public object<python>, public vector_operator<> {
         const auto outlets = 1 + m_more_outlets.size();
         const auto inputs  = std::max<std::size_t>(1, m_processor->input_count());
         const auto outputs = m_processor->output_count();
-        const bool differ  = inputs != inlets || outputs != outlets;
-        if (differ && !m_ports_differ) {
-            cout << "process() now has " << inputs << " input(s) and " << outputs << " output(s); this object has "
-                 << inlets << " inlet(s) and " << outlets << " outlet(s) — re-create it to change them" << endl;
+        if (inputs == inlets && outputs == outlets) {
+            describe_ports(inlets, outlets); // a parameter may have been renamed
+            m_ports_differ = false;
+            return;
         }
-        m_ports_differ = differ;
+
+        c74::max::t_object* box{};
+        if (c74::max::object_obex_lookup(maxobj(), k_sym__pound_b, &box) != c74::max::MAX_ERR_NONE || !box) {
+            if (!m_ports_differ) {
+                cout << "process() now has " << inputs << " input(s) and " << outputs << " output(s); this object has "
+                     << inlets << " inlet(s) and " << outlets << " outlet(s) — re-create it to change them" << endl;
+            }
+            describe_ports(inlets, outlets);
+            m_ports_differ = true;
+            return;
+        }
+
+        c74::max::object_method(box, c74::max::gensym("dynlet_begin"));
+        c74::max::dsp_resize(reinterpret_cast<c74::max::t_pxobject*>(maxobj()), static_cast<long>(inputs));
+        for (auto n = outlets; n > outputs; --n) {
+            c74::max::outlet_delete(c74::max::outlet_nth(maxobj(), static_cast<long>(n - 1)));
+        }
+        for (auto n = outlets; n < outputs; ++n) {
+            c74::max::outlet_append(maxobj(), nullptr, c74::max::gensym("signal"));
+        }
+        describe_ports(inputs, outputs); // min's lists follow Max's before anything can read them
+        c74::max::object_method(box, c74::max::gensym("dynlet_end"));
+        m_ports_differ = false;
+
+        if (auto* chain = c74::max::dspchain_fromobject(maxobj())) {
+            c74::max::dspchain_setbroken(chain);
+        }
+    }
+
+    /// min's lists of this object's inlets and outlets, one entry for each the Max object has:
+    /// min's dsp64 reads a connection count for each, and its assist the help text, which names
+    /// each inlet for its process() parameter. They make no Max inlets or outlets after the
+    /// constructor: the Max ones are made by min (at creation) or by adapt_ports().
+    void describe_ports(const std::size_t inlet_count, const std::size_t outlet_count) {
+        auto& inlet_list = inlets();
+        for (const auto& more : m_more_inlets) {
+            inlet_list.erase(std::remove(inlet_list.begin(), inlet_list.end(), more.get()), inlet_list.end());
+        }
+        m_more_inlets.clear();
+        const auto& names = m_processor ? m_processor->input_names() : std::vector<std::string>{};
+        for (std::size_t i = 1; i < inlet_count; ++i) {
+            const auto number = std::to_string(i + 1);
+            m_more_inlets.push_back(std::make_unique<inlet<>>(
+                this, i < names.size()
+                          ? "(signal) " + names[i] + ": input " + number + " to the Python process() method"
+                          : "(signal) input " + number + ": not used by the Python process() method"));
+        }
+
+        auto& outlet_list = outlets();
+        while (1 + m_more_outlets.size() > outlet_count && !m_more_outlets.empty()) {
+            const auto* last = m_more_outlets.back().get();
+            outlet_list.erase(std::remove(outlet_list.begin(), outlet_list.end(), last), outlet_list.end());
+            m_more_outlets.pop_back();
+        }
+        while (1 + m_more_outlets.size() < outlet_count) {
+            const auto number = std::to_string(m_more_outlets.size() + 2);
+            m_more_outlets.push_back(std::make_unique<outlet<>>(
+                this, "(signal) output " + number + " returned from the Python process() method", "signal"));
+        }
     }
 
     /// Replace the previous incarnation's Max messages with the class's current methods.
