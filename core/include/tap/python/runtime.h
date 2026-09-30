@@ -173,7 +173,11 @@ namespace tap::python {
         // save — and executes it as a fresh module registered in sys.modules under module_name (typing
         // and attrs resolve annotations through sys.modules). Modules are cached by source: loading an
         // unchanged file returns the module already executed, so every instance of one file shares a
-        // single execution per save. On failure the previous module stays registered.
+        // single execution per save. On failure the previous module stays registered, and the file is
+        // run again by the next load (something it imports may have been fixed) — but a failure of the
+        // same source already reported within _REPORT_WINDOW seconds is marked _tap_python_reported,
+        // so that a save that breaks a file shared by many objects, or a patch opening many of them,
+        // reports it once, while an object created later still says why it is silent (plan 6.10).
         //
         // hint_kind(hint) -> str. The name the host maps a type hint by: 'int', 'float', 'bool', 'str',
         // 'ndarray', 'tuple', ... ('any' for no hint, 'ClassVar' for a class variable). Optional[X] and
@@ -190,9 +194,11 @@ namespace tap::python {
         // describe(callable) -> ([(name, kind, parameter_kind, has_default)], return_kind, error).
         // parameter_kind is inspect.Parameter.kind as an int.
         inline constexpr const char* k_support_source = R"(
-import inspect, re, sys, types, typing
+import inspect, re, sys, time, types, typing
 
 _cache = {}
+_failed = {}
+_REPORT_WINDOW = 2.0
 
 def load(module_name, path):
     with open(path, 'rb') as f:
@@ -200,19 +206,32 @@ def load(module_name, path):
     cached = _cache.get(module_name)
     if cached is not None and cached[0] == source:
         return cached[1], False
-    code = compile(source, path, 'exec', dont_inherit=True)
-    module = types.ModuleType(module_name)
-    module.__file__ = path
-    previous = sys.modules.get(module_name)
-    sys.modules[module_name] = module
     try:
-        exec(code, module.__dict__)
-    except BaseException:
-        if previous is not None:
-            sys.modules[module_name] = previous
+        code = compile(source, path, 'exec', dont_inherit=True)
+        module = types.ModuleType(module_name)
+        module.__file__ = path
+        previous = sys.modules.get(module_name)
+        sys.modules[module_name] = module
+        try:
+            exec(code, module.__dict__)
+        except BaseException:
+            if previous is not None:
+                sys.modules[module_name] = previous
+            else:
+                sys.modules.pop(module_name, None)
+            raise
+    except BaseException as error:
+        now = time.monotonic()
+        last = _failed.get(module_name)
+        if last is not None and last[0] == source and now - last[1] < _REPORT_WINDOW:
+            try:
+                error._tap_python_reported = True
+            except Exception:
+                pass
         else:
-            sys.modules.pop(module_name, None)
+            _failed[module_name] = (source, now)
         raise
+    _failed.pop(module_name, None)
     _cache[module_name] = (source, module)
     return module, True
 
@@ -391,6 +410,22 @@ def describe(fn):
     /// host process — so user code calling sys.exit() would quit Max. Here a SystemExit is reported
     /// like any other exception. It also leaves sys.last_exc unset, so a failed call does not keep
     /// its frames (and the objects they reference) alive.
+    /// True — clearing it — when the raised exception is a failure to load a file that was reported
+    /// moments ago by another processor loading the same source (see load() in the support module):
+    /// said once, not once per object sharing the file. False, leaving it raised, otherwise.
+    inline bool take_reported_load_failure() {
+        PyObject* exception = PyErr_GetRaisedException();
+        if (!exception) {
+            return false;
+        }
+        if (PyObject_HasAttrString(exception, "_tap_python_reported") == 1) {
+            Py_DECREF(exception);
+            return true;
+        }
+        PyErr_SetRaisedException(exception); // steals the reference
+        return false;
+    }
+
     inline void report_exception() {
         PyObject* exception = PyErr_GetRaisedException();
         if (!exception) {

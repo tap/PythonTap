@@ -158,8 +158,10 @@ namespace tap::python {
             // per execution of the file, by the processor that ran it; the others sharing it are quiet
             m_announcing = executed;
             if (!module) {
-                report_exception();
-                log(log_level::error, "Failed to load " + path.string());
+                if (!take_reported_load_failure()) { // 6.10: once per failing save, not per object
+                    report_exception();
+                    log(log_level::error, "Failed to load " + path.string());
+                }
                 release_binding();
                 return false;
             }

@@ -375,11 +375,16 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
 - [ ] **6.9 The help patcher and `numpy_allpass.py`** — the help patcher points to the `numpy_gain`
   and `allpass` examples but not to `numpy_allpass`, the one that shows what the block path is for;
   add it in Max (and re-save), perhaps with the measured comparison.
-- [ ] **6.10 One traceback per broken save** — a file that fails to load is not cached, so every
+- [x] **6.10 One traceback per broken save** — a file that fails to load is not cached, so every
   object sharing it runs it and prints the traceback: 25 objects, 25 tracebacks. 6.7 left this
   alone, because the obvious fix — remember the failing source and stay quiet — would also hide
   the error from an object created later (a patch reopened with the file still broken). Needs a
-  rule that reports once per save without that.
+  rule that reports once per save without that. *Done:* the loader still runs the file on every
+  load, but marks a failure of the same source it reported less than two seconds ago
+  (`_REPORT_WINDOW`), and the processor stays quiet for a marked failure — a save, or a patch
+  opening many objects, reports once; an object made later reports again. Pinned by a core test
+  (two processors; another broken save; a later object) and the runtime test `announce-once` (a
+  broken save, five objects in Max, one report — five before the change).
 
 ## Phase 7 — plugin front ends (optional, post-1.0)
 
