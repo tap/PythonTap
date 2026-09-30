@@ -233,7 +233,7 @@ SCENARIO("prepare() while block audio runs never crashes or corrupts a vector") 
     processor p{"block_gain"};
     REQUIRE(p.load());
     p.prepare(48000.0, 64);
-    REQUIRE(run("import sys\nsys.setswitchinterval(1e-6)"));
+    REQUIRE(run("import sys\n_switch_interval = sys.getswitchinterval()\nsys.setswitchinterval(1e-6)"));
 
     std::atomic<bool> stop{false};
     std::atomic<int>  wrong{0};
@@ -259,7 +259,7 @@ SCENARIO("prepare() while block audio runs never crashes or corrupts a vector") 
     }
     stop = true;
     audio.join();
-    REQUIRE(run("import sys\nsys.setswitchinterval(0.005)"));
+    REQUIRE(run("import sys\nsys.setswitchinterval(_switch_interval)"));
     CHECK(wrong.load() == 0);
 }
 

@@ -104,7 +104,17 @@ while audio ran segfaulted in 5 of 5 runs.
   return defines outlets, fixed at construction.
 - [ ] **2.5 Worker mode (D1)** — `@mode worker`: Python on a worker thread, lock-free FIFO,
   latency reported to Max, underrun → silence.
-- [ ] **2.6 Shorter reload stalls** — compile outside the swap and hold the GIL only for the swap.
+- [x] **2.6 Shorter reload stalls** — compile outside the swap and hold the GIL only for the swap.
+  *Measured first* (`core/bench/reload_bench.cpp`: an audio thread with Core Audio's real-time
+  scheduling computes 512-sample buffers of 64-sample vectors at 96 kHz while the main thread saves
+  and reloads the class every 100 ms): a reload of the allpass examples holds the GIL for about
+  3.5 ms, and with CPython's 5 ms switch interval the audio thread waited for all of it — late
+  buffers in most runs, the worst 45 ms (the reloading thread descheduled while holding the GIL).
+  *Done:* the runtime sets a 0.5 ms switch interval (`runtime_options::switch_interval`): no late
+  buffer in three runs, the 99th percentile 0.7–2 ms, the median unchanged. Splitting `load()` into
+  phases was not needed for files this size: what a switch cannot interrupt is a single C call —
+  compiling the file, above all — which is short for them; a very large class file would still
+  compile in one piece (2.5, worker mode, is the answer to that).
 
 ## Phase 3 — the type bridge and class contract
 
