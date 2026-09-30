@@ -10,6 +10,8 @@ through the real signal chain, `poly~`, the console, and loading without a runti
 ```sh
 python3 runtime-tests/run.py              # everything (~2 minutes); exit status 0 when all pass
 python3 runtime-tests/run.py --only reload -v
+python3 runtime-tests/run.py --session soak   # the hour-long soak (plan 6.2)
+python3 runtime-tests/run.py --session perf   # Max's CPU meter under load (plan 6.3, ~4 minutes)
 ```
 
 Needs macOS, Max 9 in `/Applications` (`--max` for another), the external built, the runtime
@@ -24,7 +26,9 @@ runtime-tests/
 ├── patchers/               # generated; never edit by hand
 │   ├── maxtest.host.maxpat           # the poly~ abstraction hosting a [tap.python~ #1]
 │   ├── *.maxtest.maxpat              # the tests run with the runtime installed
-│   └── without-runtime/              # run only by run.py, with support/ moved aside
+│   ├── without-runtime/              # run only by run.py, with support/ moved aside
+│   ├── soak/                         # the hour-long soak, only with --session soak
+│   └── perf/                         # the CPU measurement, only with --session perf
 ├── python/                 # the classes the tests load (maxtest_*.py)
 ├── max-test-config.json    # the harness's OSC ports
 └── max-test/               # the harness (submodule, pinned)
@@ -46,7 +50,12 @@ runtime-tests/
    `support/` is always put back — and a run killed midway leaves it as `support.maxtest-aside/`,
    which the next run restores.
 4. **Session `main`**: starts Max again and runs every `*.maxtest.maxpat`.
-5. Reads the results from the harness's SQLite database (in the installed `max-test`) and prints
+5. Only when asked for: **session `soak`** (plan 6.2) runs `soak/tap.python~.soak.maxpat` for an
+   hour, sampling Max's memory every minute, and writes a summary — memory, reloads, and what the
+   patcher logged each minute — to `logs/soak.summary`; **session `perf`** (plan 6.3) runs
+   `perf/tap.python~.perf.maxpat` and averages Max's CPU-meter readings into `logs/perf.json`,
+   which `scripts/update-perf-docs.py --max` turns into the ReadMe's table.
+6. Reads the results from the harness's SQLite database (in the installed `max-test`) and prints
    them. Max's standard output goes to `runtime-tests/logs/` — only min's own lines appear there;
    the console errors seen during a failing test are printed from its log instead.
 
@@ -72,6 +81,18 @@ first runs taught, built into the helpers:
   when it fails: made plain first, because the harness writes its log into SQL between double
   quotes, and a quote in the text makes the database post an error that would be logged again.
 
+- **Max's file watcher coalesces saves made close together**: saving once a second, the object
+  was told of about half of them, the first some seconds late. A test that needs a reload at a
+  given moment sends `filechanged` itself (the soak saves *and* sends it); one that tests the
+  watcher leaves a couple of seconds after a save (`WATCH`).
+- **`adstatus cpu` reports on its own when audio starts or restarts** — dozens of stale values at
+  once. `Test.cpu_reading()` keeps only its answer to a bang.
+- **A `poly~`'s `up`/`down` change its vector size too** (`down 2` halves it), and `down 1` sent
+  after `up 2` undoes the `up`. Fine for per-sample checks; a block-path measurement at another
+  rate is not like for like, so the perf patcher measures at the device's own rate.
+- **A check that audio did not change passes vacuously if no audio ran**: pair each with a sample
+  check (the soak's `phase-N-…-output`).
+
 The fixtures' docstrings say what each is for. Open a patcher in Max to watch a test run; its
 `test.*` objects only record anything when the harness opened it.
 
@@ -82,4 +103,5 @@ inspector, that an `attrui` displaying a removed attribute looks right (the test
 nothing breaks), and whether the audio *device* drops out while a reload holds the GIL (the tests
 check every sample the object outputs, not the driver). Changing the sample rate in Audio Status is
 covered by `poly~`'s `up` instead, which does not touch the audio device. Windows is not covered:
-the runner is macOS-only.
+the runner is macOS-only. The perf session measures at whatever sample rate the audio device is
+set to — set it in Audio Status first if you want another.
