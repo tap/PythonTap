@@ -238,6 +238,28 @@ while audio ran segfaulted in 5 of 5 runs.
   ships — Min-API, the Max SDK, CPython's, and each installed package's own (PEP 639
   `dist-info/licenses/`, where numpy lists what it bundles) — with an index, collected from the
   package's actual contents; CI runs the collection on Linux.
+- [ ] **4.7 uv for development and release tooling** — *Discussed (2026-09-30):* use uv where it
+  replaces work we do by hand; keep the shipped runtime a python-build-standalone archive pinned
+  by SHA256 in `runtime.lock`. For uv: `uv pip compile --universal --generate-hashes` in place of
+  most of `update-locks.py`'s PyPI handling; `uv pip install --python-platform <triple> --target …`
+  to install any platform's wheels from any machine (what 4.8 needs); `uv python install 3.13` for
+  the Linux fast loop's CPython with headers; `uv run` with inline script metadata for the
+  scripts. Against using it for the runtime: `uv python install` pins only through the uv
+  version, installs in its own layout, and may mark the interpreter externally managed (to
+  check) — and the work that matters (the `@rpath` install name, re-signing, the universal
+  libpython) is ours either way. Users never need uv; the ReadMe may mention
+  `uv pip install --python support/bin/python3 …` beside pip.
+- [ ] **4.8 One package for every platform on each tag** — *Decided (2026-09-30):* a tag also
+  attaches a single `PythonTap-<version>.zip` holding every platform's external and runtime, and
+  v0.x tags publish as pre-releases automatically (1.0 and later stay drafts until signing
+  exists). Needs one runtime per platform side by side — `support/macos-arm64/`,
+  `support/macos-x86_64/`, `support/windows-x64/` (one folder cannot hold both: Windows' `Lib/`
+  and the Mac's `lib/` collide on a case-insensitive disk) — with the macOS external choosing by
+  the architecture it runs as (each slice of the universal binary can carry its own rpath) and the
+  Windows external loading `python313.dll` from its folder by full path before the first
+  delay-loaded call (Max adds only `support/` itself to the DLL search path); and a last
+  `release.yml` job that merges the platform builds into one `PythonTap/` and attaches it with
+  its checksum (about 130 MB, against 37–55 MB per platform zip today).
 
 ## Phase 5 — documentation and examples
 
@@ -367,6 +389,9 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
   ReadMe promises (`release.yml` fixed; the draft's added by hand); the external's bundle
   identifier is min's template, unexpanded — `com.74objects.${PRODUCT_NAME:rfc1034identifier}` —
   to fix before signing and notarizing; and `docs/PRODUCTION-PLAN.md` ships inside the package.
+  *Both fixed since:* max-sdk-base leaves the identifier for Xcode to expand, which no other
+  generator does (every sibling Max package ships it the same way), so the object's CMakeLists
+  expands it — `com.74objects.tap.python-tilde`; `assemble-package.py` leaves the plan out.
   *Observed, not explained:* with the release installed, Max's file database took 8–11 minutes to
   report ready at each launch (seconds with the linked checkout; Max had also just been updated to
   9.1.5 and rebuilt its database) — the runner no longer waits for it, as tests opened by name do
@@ -431,6 +456,7 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
 7. Phase 4.5–4.6 — release packaging and licenses.
 8. Phase 2.4–2.6 — multichannel, worker mode, reload stalls (features; may follow 1.0).
 9. Phase 6 — in-Max validation before tagging 1.0.
+10. Phase 4.7–4.8 — uv for the tooling, then one package for every platform on each tag.
 
 ## External prerequisites
 
