@@ -2,6 +2,9 @@
 /// @copyright  Copyright 2022-2026 Timothy Place. All rights reserved.
 /// @license    Use of this source code is governed by the MIT License found in the License.md file.
 
+#include <cstdint>
+#include <fstream>
+#include <string>
 #include <vector>
 
 #include "c74_min_unittest.h" // required unit-test header (defines main via Catch)
@@ -56,6 +59,58 @@ namespace c74 {
             return MAX_ERR_NONE;
         }
         void qelem_free(void*) {}
+        }
+    } // namespace max
+} // namespace c74
+
+// Max's dynamic inlets and outlets, which the mock kernel lacks: every object is in a pretend box,
+// and what the object asks of it is recorded, so the tests can check what it does and that min's
+// own lists follow.
+namespace dynlets {
+    long              signal_inlets{}; // the last dsp_resize, 0 if none
+    long              appended{};      // outlets appended
+    std::vector<long> deleted;         // the indices of the outlets deleted, in order
+    bool              chain_broken{};
+
+    void reset() {
+        signal_inlets = 0;
+        appended      = 0;
+        deleted.clear();
+        chain_broken = false;
+    }
+} // namespace dynlets
+
+namespace c74 {
+    namespace max {
+        extern "C" {
+        t_max_err object_obex_lookup(void*, t_symbol* key, t_object** val) {
+            static int s_box;
+            if (key != gensym("#B")) {
+                return MAX_ERR_GENERIC;
+            }
+            *val = reinterpret_cast<t_object*>(&s_box);
+            return MAX_ERR_NONE;
+        }
+        void dsp_resize(t_pxobject*, long nsignals) {
+            dynlets::signal_inlets = nsignals;
+        }
+        void* outlet_append(t_object*, t_symbol*, t_symbol*) {
+            ++dynlets::appended;
+            return nullptr;
+        }
+        void* outlet_nth(t_object*, long n) {
+            return reinterpret_cast<void*>(static_cast<std::intptr_t>(n + 1)); // never null
+        }
+        void outlet_delete(void* x) {
+            dynlets::deleted.push_back(static_cast<long>(reinterpret_cast<std::intptr_t>(x) - 1));
+        }
+        t_dspchain* dspchain_fromobject(t_object*) {
+            static int s_chain;
+            return reinterpret_cast<t_dspchain*>(&s_chain);
+        }
+        void dspchain_setbroken(t_dspchain*) {
+            dynlets::chain_broken = true;
+        }
         }
     } // namespace max
 } // namespace c74
@@ -255,4 +310,104 @@ SCENARIO("The object has as many signal inlets and outlets as its class's proces
         CHECK(all_equal(out_right, 0.25));
     }
     c74::max::object_free(wrapped);
+}
+
+namespace {
+
+    /// A class with these process() parameters (per sample), returning this many values.
+    std::string shaped_class(const std::vector<std::string>& inputs, const std::size_t outputs) {
+        std::string parameters;
+        std::string sum = "0.0";
+        for (const auto& name : inputs) {
+            parameters += ", " + name + ": float";
+            sum += " + " + name;
+        }
+        std::string hint   = "float";
+        std::string values = sum;
+        if (outputs > 1) {
+            hint = "tuple[float";
+            for (std::size_t i = 1; i < outputs; ++i) {
+                hint += ", float";
+                values += ", " + sum;
+            }
+            hint += "]";
+        }
+        return "class maxtest_mock_shape:\n    def process(self" + parameters + ") -> " + hint + ":\n        return "
+               + values + "\n";
+    }
+
+    void write_file(const std::filesystem::path& path, const std::string& text) {
+        std::ofstream{path, std::ios::binary | std::ios::trunc} << text;
+    }
+
+} // namespace
+
+SCENARIO("A save that changes process()'s inputs or outputs changes the object's inlets and outlets in place "
+         "(plan 2.4)") {
+    ext_main(nullptr);
+    // a fixture in the package's python folder, where python/maxtest_*.py is ignored by git
+    const auto file = tap::python::package_root() / "python" / "maxtest_mock_shape.py";
+    write_file(file, shaped_class({"left", "right"}, 2));
+    const auto argument = symbol_atom("maxtest_mock_shape");
+    auto*      wrapped  = c74::min::wrapper_new<python>(c74::min::symbol("dummy"), 1, &argument);
+    REQUIRE(wrapped);
+    python& my_object = wrapped->m_min_object;
+    REQUIRE(my_object.inlets().size() == 2);
+    REQUIRE(my_object.outlets().size() == 2);
+    dynlets::reset();
+
+    WHEN("a save gives it three inputs and one output") {
+        write_file(file, shaped_class({"a", "b", "c"}, 1));
+        my_object.update_source();
+        THEN("Max's signal inlets become three and the last outlet is deleted") {
+            CHECK(dynlets::signal_inlets == 3);
+            CHECK(dynlets::deleted == std::vector<long>{1});
+            CHECK(dynlets::appended == 0);
+            CHECK(dynlets::chain_broken);
+        }
+        THEN("min's lists follow, each inlet named for its parameter") {
+            REQUIRE(my_object.inlets().size() == 3);
+            CHECK(my_object.outlets().size() == 1);
+            CHECK(my_object.inlets()[1]->description().find("b: input 2") != std::string::npos);
+            CHECK(my_object.inlets()[2]->description().find("c: input 3") != std::string::npos);
+        }
+    }
+
+    WHEN("a save gives it no inputs and three outputs") {
+        write_file(file, shaped_class({}, 3));
+        my_object.update_source();
+        THEN("one signal inlet stays, for messages, and an outlet is appended") {
+            CHECK(dynlets::signal_inlets == 1);
+            CHECK(dynlets::appended == 1);
+            CHECK(dynlets::deleted.empty());
+            CHECK(my_object.inlets().size() == 1);
+            CHECK(my_object.outlets().size() == 3);
+        }
+    }
+
+    WHEN("a save renames an input but keeps the counts") {
+        write_file(file, shaped_class({"mid", "side"}, 2));
+        my_object.update_source();
+        THEN("Max's inlets and outlets are left alone, and the inlet's help names the new parameter") {
+            CHECK(dynlets::signal_inlets == 0);
+            CHECK(dynlets::appended == 0);
+            CHECK(dynlets::deleted.empty());
+            CHECK_FALSE(dynlets::chain_broken);
+            REQUIRE(my_object.inlets().size() == 2);
+            CHECK(my_object.inlets()[1]->description().find("side: input 2") != std::string::npos);
+        }
+    }
+
+    WHEN("a save breaks the class") {
+        write_file(file, "class maxtest_mock_shape:\n    def process(self, x: float) -> float\n");
+        my_object.update_source();
+        THEN("the inlets and outlets stay as they were") {
+            CHECK(dynlets::signal_inlets == 0);
+            CHECK(my_object.inlets().size() == 2);
+            CHECK(my_object.outlets().size() == 2);
+        }
+    }
+
+    c74::max::object_free(wrapped);
+    std::filesystem::remove(file);
 }

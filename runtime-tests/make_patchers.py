@@ -561,17 +561,22 @@ def channels() -> Test:
     t = Test("tap.python~.channels.maxtest.maxpat",
              "Several inputs and outputs (plan 2.4): process()'s parameters are the object's signal inlets "
              "and its return hint its outlets — stereo_width's two of each, a generator's none (one inlet "
-             "still, for messages). A save that changes how many keeps the object's inlets and outlets "
-             "until it is re-created: a missing output is silent.")
+             "still, for messages). A save that changes how many changes the object's inlets and outlets "
+             "in place, keeping the patch cords of those that stay: new ones take cords and carry signal, "
+             "and the cords of those removed go with them.")
     left, right = t.signal(0.8), t.signal(0.2)
     width = t.obj("tap.python~ stereo_width", inlets=2, outlets=2, signal=True)
     t.patcher.connect(left, 0, width, 0)
     t.patcher.connect(right, 0, width, 1)
     generator = t.python("maxtest_generator")
     a, b = t.signal(0.3), t.signal(0.6)
-    shape = t.obj("tap.python~ maxtest_shape", inlets=2, outlets=2, signal=True)
+    # named, so that thispatcher can connect cords to the inlet and outlet a save adds
+    shape = t.patcher.box("tap.python~ maxtest_shape", 2, 2, column=2, outlettype=["signal"] * 2, varname="shape")
     t.patcher.connect(a, 0, shape, 0)
     t.patcher.connect(b, 0, shape, 1)
+    t.patcher.box("sig~ 0.9", 1, 1, column=2, outlettype=["signal"], varname="third_input")
+    third_output = t.patcher.box("+~ 0.", inlets=2, column=3, outlettype=["signal"], varname="third_output")
+    scripting = t.obj("thispatcher")
     editor = t.python("maxtest_editor", column=1)
 
     def outlet(box: str, n: int) -> str:  # a box passing outlet n of `box` on, to sample
@@ -589,9 +594,16 @@ def channels() -> Test:
     t.step(t.sample_equals("mono-left-at-width-0", width_left, 0.5),
            t.sample_equals("mono-right-at-width-0", width_right, 0.5),
            t.sample_equals("generator-takes-messages", generator, 0.5))
+    t.step(t.send("reshape maxtest_shape 3 3", editor), t.send("filechanged", shape))
+    t.step(t.sample_equals("grown-keeps-first-cords", shape_first, 0.3),
+           t.sample_equals("grown-keeps-second-cords", shape_second, 0.6))
+    t.step(t.send("script connect third_input 0 shape 2", scripting),
+           t.send("script connect shape 2 third_output 0", scripting))
+    t.step(t.sample_equals("added-inlet-to-added-outlet", third_output, 0.9))
     t.step(t.send("reshape maxtest_shape 1 1", editor), t.send("filechanged", shape))
-    t.step(t.sample_equals("reshaped-first-output", shape_first, 0.3),
-           t.sample_equals("output-the-class-lost-is-silent", shape_second, 0.0),
+    t.step(t.sample_equals("shrunk-keeps-first-cords", shape_first, 0.3),
+           t.sample_equals("removed-outlet-takes-its-cord", shape_second, 0.0),
+           t.sample_equals("removed-outlets-take-their-cords", third_output, 0.0),
            t.errors_are("console-clean", "== 0"), wait=WATCH)
     return t
 
