@@ -131,7 +131,45 @@ while audio ran segfaulted in 5 of 5 runs.
   that `thispatcher` connects to the new inlet and outlet carry signal (this check fails against
   (b)); shrunk to one, the removed outlets' cords go with them.
 - [ ] **2.5 Worker mode (D1)** — `@mode worker`: Python on a worker thread, lock-free FIFO,
-  latency reported to Max, underrun → silence.
+  latency reported to Max, underrun → silence. *Design (proposed, 2026-09-30):*
+  - **What it buys.** In direct mode the audio thread takes the GIL, so anything else holding it —
+    a reload compiling a large file (2.6's limit), a message handler, a GC pass — delays the
+    buffer. In worker mode the audio thread never takes the GIL or calls CPython: it copies
+    vectors in and out of a queue, and Python runs on a thread of its own, a fixed latency behind.
+  - **In the core** (D6), beside `processor`: a `worker` that owns the thread and a ring of slots,
+    each one vector of every host input and output channel. The audio thread writes vector *k*'s
+    inputs into a slot and reads vector *k − L*'s outputs; the worker takes slots in order and runs
+    the existing `processor::process()` on them — per sample or per vector, with 2.4's channel
+    matching — so the class contract does not change. Slot states are atomics (single producer,
+    single consumer, no locks); the audio thread wakes the worker with a C++20 atomic notify, which
+    never blocks. The worker's thread is created and joined on the main thread.
+  - **Latency** *L* is whole vectors, set by `@latency` (in vectors, default 2), reported by a
+    read-only `latency` attribute in samples (*L* × vector size) that a patch can read to align
+    other paths. Max has no documented call for an MSP object to report latency to the host, so
+    none is used; the output is primed with *L* vectors of silence.
+  - **Underruns.** A slot not done when its outputs are due is output as silence and counted; the
+    worker still processes it when it gets there (so the class's state stays continuous) and
+    discards its outputs, catching up through the backlog, so the latency stays *L*. If it falls
+    a whole ring behind (the ring holds *L* + a margin), the oldest inputs are dropped, which the
+    class sees as a gap. Both are reported once per load from the main thread (`flush_reports()`),
+    never printed on the audio thread.
+  - **`prepare()` and the mode.** The ring is sized when the chain compiles (`dspsetup`: vector
+    size, and the object's inlet and outlet counts), with the worker stopped and restarted around
+    it; `prepare()` runs as now, on the main thread. `@mode` and `@latency` take effect at the next
+    compile — setting them marks the chain broken (as 2.4 does), so that is at once while audio
+    runs.
+  - **Reloads, attributes and messages** are unchanged: they take the GIL on the main or scheduler
+    thread, and the worker picks up a new binding at its next vector, as the audio thread does
+    now. An attribute change is heard *L* vectors later.
+  - **Tests.** Core battery (Linux, under TSan too): worker output equals direct output delayed by
+    *L* vectors, per sample and per vector, several channels; a worker stalled by a class that
+    sleeps underruns to silence, is reported once, and comes back at the same latency; reload
+    under a running worker; resizing in `prepare()`; destruction joins the thread. Runtime test in
+    Max: `@mode worker` against `delay~` of *L* vectors, a reload under audio, and the `latency`
+    attribute.
+  - **Open:** the worker calls Python once per host vector; batching several vectors per call
+    would cut the per-call overhead further (worker mode's other win) at more latency — a later
+    option, `@block`, if measurements show it pays.
 - [x] **2.6 Shorter reload stalls** — compile outside the swap and hold the GIL only for the swap.
   *Measured first* (`core/bench/reload_bench.cpp`: an audio thread with Core Audio's real-time
   scheduling computes 512-sample buffers of 64-sample vectors at 96 kHz while the main thread saves
