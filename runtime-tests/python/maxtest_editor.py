@@ -1,6 +1,5 @@
 # Runtime-test fixture (runtime-tests/run.py copies it into python/): edits the other fixtures'
-# files, as a person would in an editor, so that the object's file watcher reloads them. (The
-# encoding is explicit: the embedded interpreter's default is ASCII, not UTF-8.)
+# files, as a person would in an editor, so that the object's file watcher reloads them.
 import re
 from pathlib import Path
 

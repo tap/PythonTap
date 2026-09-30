@@ -103,3 +103,25 @@ SCENARIO("sys.stdout and sys.stderr are text streams libraries can probe") {
         }
     }
 }
+
+SCENARIO("Text is UTF-8 by default, whatever the host's locale (plan 6.6)") {
+    ensure_runtime();
+    CHECK(run("import sys\nassert sys.flags.utf8_mode == 1, sys.flags.utf8_mode\n"));
+
+    GIVEN("a UTF-8 text file") {
+        const auto path = scripts_dir() / "utf8_probe.txt";
+        std::ofstream{path, std::ios::binary} << "caf\xc3\xa9 \xe2\x80\x94 \xe2\x99\xab\n"; // café — ♫
+        const std::string file = "r'" + path.string() + "'";
+
+        THEN("open() reads it without being told the encoding") {
+            CHECK(
+                run("text = open(" + file + ").read()\nassert text == 'caf\\u00e9 \\u2014 \\u266b\\n', repr(text)\n"));
+        }
+        THEN("open() writes UTF-8 without being told the encoding") {
+            CHECK(run("open(" + file
+                      + ", 'w').write('\\u00e9')\n"
+                        "data = open("
+                      + file + ", 'rb').read()\nassert data == b'\\xc3\\xa9', data\n"));
+        }
+    }
+}
