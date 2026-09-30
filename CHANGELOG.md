@@ -6,6 +6,19 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ## Unreleased
 
+### Added — several inputs and outputs
+
+- **process() can take several signal inputs and return several outputs.** Its parameters are the
+  object's signal inlets and its return hint its outlets: `process(self, left: np.ndarray, right:
+  np.ndarray) -> tuple[np.ndarray, np.ndarray]` makes `[tap.python~ …]` with two of each, and
+  `process(self) -> float` a generator (with one inlet still, for messages). The inputs are all
+  `np.ndarray` or all per sample; a tuple return must say how many values it has. A return with the
+  wrong number of values is output as silence and reported once. New example: `stereo_width.py`.
+  The object takes its inlets and outlets from the class when it is made; a save that changes how
+  many is reported, and takes effect when the object is re-created. (Plan 2.4.) *Changed with it:*
+  `process()` taking `*args` is now reported and not bound (before, it was bound and its extra
+  arguments never arrived).
+
 ### Changed — a broken file is reported once
 
 - **A save that breaks a class file is reported once, however many objects share it.** Every

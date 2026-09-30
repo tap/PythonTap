@@ -8,8 +8,8 @@
 
 // The mock kernel does not implement these Max functions, which the object
 // references for its dynamically generated attributes/messages and its file
-// watcher. Provide inert stubs so the test binary links (the headers declare
-// them with C linkage). With these stubs the Max-side attribute and method
+// watcher, or implements one too thinly (attr_args_offset). Provide stubs so the
+// test binary links (the headers declare them with C linkage). With these stubs the Max-side attribute and method
 // registrations fail harmlessly, so the tests below drive the object's own
 // attribute and message handlers directly, as Max's dispatch would.
 namespace c74 {
@@ -35,6 +35,16 @@ namespace c74 {
         }
         t_max_err object_method_typed(void*, t_symbol*, long, t_atom*, t_atom*) {
             return MAX_ERR_NONE;
+        }
+        // The mock's says 0 — no arguments at all — so an object could not be given its class file.
+        // As the SDK documents it: how many atoms come before the first @attribute.
+        long attr_args_offset(short ac, t_atom* av) {
+            for (short i = 0; i < ac; ++i) {
+                if (atom_gettype(av + i) == A_SYM && atom_getsym(av + i)->s_name[0] == '@') {
+                    return i;
+                }
+            }
+            return ac;
         }
         void  filewatcher_start(void*) {}
         void* qelem_new(void*, method) {
@@ -216,4 +226,33 @@ SCENARIO("Messages reach the class's methods with their arguments converted") {
             REQUIRE(all_equal(render(my_object, 1.0), 1.0));
         }
     }
+}
+
+SCENARIO("The object has as many signal inlets and outlets as its class's process() declares (plan 2.4)") {
+    ext_main(nullptr);
+    // test_wrapper takes no arguments: make [tap.python~ stereo_width] as Max would
+    const auto argument = symbol_atom("stereo_width");
+    auto*      wrapped  = c74::min::wrapper_new<python>(c74::min::symbol("dummy"), 1, &argument);
+    REQUIRE(wrapped);
+    python& my_object = wrapped->m_min_object;
+
+    THEN("two of each, the second inlet named for process()'s parameter") {
+        REQUIRE(my_object.inlets().size() == 2);
+        CHECK(my_object.outlets().size() == 2);
+        CHECK(my_object.inlets()[1]->description().find("right") != std::string::npos);
+    }
+    THEN("each channel is processed") {
+        std::vector<double> left(64, 0.75);
+        std::vector<double> right(64, 0.25);
+        std::vector<double> out_left(64, 12345.0);
+        std::vector<double> out_right(64, 12345.0);
+        double*             in[2]  = {left.data(), right.data()};
+        double*             out[2] = {out_left.data(), out_right.data()};
+        audio_bundle        input{in, 2, 64};
+        audio_bundle        output{out, 2, 64};
+        my_object(input, output);
+        CHECK(all_equal(out_left, 0.75)); // width 1: as it was
+        CHECK(all_equal(out_right, 0.25));
+    }
+    c74::max::object_free(wrapped);
 }

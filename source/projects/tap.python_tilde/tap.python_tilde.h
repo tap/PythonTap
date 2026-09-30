@@ -41,15 +41,19 @@ class python : public object<python>, public vector_operator<> {
                     "messages called according to their signatures, with methods named int, float, symbol and "
                     "bang answering those standard messages. Its process() method runs on the signal: once per "
                     "signal vector when annotated with numpy arrays, or once per sample when annotated with "
-                    "float. An optional prepare(sample_rate, vector_size) method receives the audio settings "
+                    "float; its parameters are the object's signal inlets, and its return hint its outlets "
+                    "(a tuple of values for more than one). An optional prepare(sample_rate, vector_size) "
+                    "method receives the audio settings "
                     "before audio starts and whenever they change. The file is watched and reloaded when saved, "
                     "keeping attribute values; errors are printed to the Max console and never take Max down."};
     MIN_TAGS{"programming"};
     MIN_AUTHOR{"Tim Place"};
     MIN_RELATED{"js, node.script"};
 
-    inlet<>  m_inlet{this, "(signal) input passed to the Python process() method"};
-    outlet<> m_outlet_main{this, "(signal) output returned from the Python process() method", "signal"};
+    // The first inlet and outlet; the constructor adds as many more as the class's process()
+    // declares (plan 2.4).
+    inlet<>  m_inlet{this, "(signal) the first input to the Python process() method, and messages"};
+    outlet<> m_outlet_main{this, "(signal) the first output returned from the Python process() method", "signal"};
 
     argument<symbol> m_source_arg{
         this, "source",
@@ -144,7 +148,11 @@ class python : public object<python>, public vector_operator<> {
             m_python_source = "default";
         }
         else {
-            m_python_source = to_string(args);
+            // the class file's name: one symbol, read as it is (anything else, as text, is not a
+            // valid name, and the core says so)
+            m_python_source = args.size() == 1 && c74::max::atom_gettype(&args[0]) == c74::max::A_SYM
+                                  ? std::string{c74::max::atom_getsym(&args[0])->s_name}
+                                  : to_string(args);
         }
 
         m_processor = std::make_unique<runtime::processor>(
@@ -160,6 +168,7 @@ class python : public object<python>, public vector_operator<> {
             reserved_messages(), [this] { m_reports.set(); });
 
         update_source();
+        create_ports(); // before min makes the Max inlets and outlets from its lists, after this
 
         // watch the source file for changes (delivered as our 'filechanged' message) — only a plain
         // file name: the core refuses anything else (e.g. "../x"), and so must the watcher
@@ -194,6 +203,7 @@ class python : public object<python>, public vector_operator<> {
         }
         create_attributes();
         create_messages();
+        report_ports();
     }
 
     /// Dispatch a Max message to the bound Python method.
@@ -290,6 +300,10 @@ class python : public object<python>, public vector_operator<> {
     std::filesystem::path                                                     m_scripts_dir{};
     std::unique_ptr<runtime::file_watch>                                      m_file_watch;
     std::unique_ptr<runtime::processor>                                       m_processor;
+    std::vector<std::unique_ptr<inlet<>>>                                     m_more_inlets;  // after the first
+    std::vector<std::unique_ptr<outlet<>>>                                    m_more_outlets; // after the first
+    bool                                                                      m_ports_made{};
+    bool                                                                      m_ports_differ{};
     std::unordered_map<std::string, std::unique_ptr<runtime::python_message>> m_python_messages;
     std::unordered_map<std::string, std::unique_ptr<runtime::python_attr>>    m_python_attributes;
 
@@ -357,6 +371,43 @@ class python : public object<python>, public vector_operator<> {
                     std::make_unique<runtime::python_attr>(maxobj(), attribute.name, attribute.type);
             }
         }
+    }
+
+    /// A signal inlet for each input the class's process() declares, named for its parameter, and
+    /// an outlet for each output — at least one of each: the first inlet also takes messages.
+    /// Constructor only: min makes the Max inlets and outlets from these when it returns.
+    void create_ports() {
+        const auto& names = m_processor ? m_processor->input_names() : std::vector<std::string>{};
+        for (std::size_t i = 1; i < names.size(); ++i) {
+            m_more_inlets.push_back(std::make_unique<inlet<>>(
+                this, "(signal) " + names[i] + ": input " + std::to_string(i + 1) + " to the Python process() method"));
+        }
+        const std::size_t outputs = m_processor ? m_processor->output_count() : 1;
+        for (std::size_t i = 1; i < outputs; ++i) {
+            m_more_outlets.push_back(std::make_unique<outlet<>>(
+                this, "(signal) output " + std::to_string(i + 1) + " returned from the Python process() method",
+                "signal"));
+        }
+        m_ports_made = true;
+    }
+
+    /// Say when a reload changed the inputs or outputs process() declares away from the inlets and
+    /// outlets this object was made with (once, until they match again). The core matches them:
+    /// a missing input reads as silence, an extra output is dropped.
+    void report_ports() {
+        if (!m_ports_made) {
+            return;
+        }
+        const auto inlets  = 1 + m_more_inlets.size();
+        const auto outlets = 1 + m_more_outlets.size();
+        const auto inputs  = std::max<std::size_t>(1, m_processor->input_count());
+        const auto outputs = m_processor->output_count();
+        const bool differ  = inputs != inlets || outputs != outlets;
+        if (differ && !m_ports_differ) {
+            cout << "process() now has " << inputs << " input(s) and " << outputs << " output(s); this object has "
+                 << inlets << " inlet(s) and " << outlets << " outlet(s) — re-create it to change them" << endl;
+        }
+        m_ports_differ = differ;
     }
 
     /// Replace the previous incarnation's Max messages with the class's current methods.
