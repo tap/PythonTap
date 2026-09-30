@@ -100,8 +100,8 @@ while audio ran segfaulted in 5 of 5 runs.
 - [x] **2.3 `prepare(self, sample_rate, vector_size)`**, from min's `dspsetup`; also called on each
   newly loaded instance before it is published, so no vector ever runs on an unprepared instance.
   `allpass.py` uses it (and its α range is now open, per 5.4).
-- [ ] **2.4 Multiple inlets/outlets** — `process` arguments define signal inlets and a tuple
-  return defines outlets, fixed at construction. *Decided (2026-09-30):* when a save changes the
+- [x] **2.4 Multiple inlets/outlets** — `process` arguments define signal inlets and a tuple
+  return defines outlets. *Decided (2026-09-30):* when a save changes the
   counts, the object adapts its inlets and outlets in place with Max's dynamic inlets and outlets
   (`dynlet_begin`/`dynlet_end` around `dsp_resize` and `outlet_append`/`outlet_delete`, as
   Cycling '74 describes in its developer forum) rather than asking for the object to be
@@ -119,7 +119,17 @@ while audio ran segfaulted in 5 of 5 runs.
   `[tap.python~ stereo_width]` has two of each and processes both (the test file now stands in a
   faithful `attr_args_offset`, and the object reads a one-symbol argument directly, not through
   `atom_gettext` — the mock's gives nothing); runtime test `channels` (stereo_width, a generator, a
-  save that changes the shape). *(c) adapting them on reload (dynlets).*
+  save that changes the shape). *(c) adapting them on reload (dynlets) — done:* after a reload that
+  changes the counts, `adapt_ports()` finds the object's box (`#B`) and, between `dynlet_begin`
+  and `dynlet_end`, sets the signal inlets with `dsp_resize` and deletes or appends outlets at the
+  end (`outlet_nth`/`outlet_delete`, `outlet_append`); min's own inlet and outlet lists follow at
+  once (its dsp64 reads a connection count for each, its assist the help text, now renamed with
+  the parameters on every reload); then `dspchain_setbroken(dspchain_fromobject())` has the signal
+  chain rebuilt. Without a box the object keeps its ports and says so, as in (b). Mock test: the
+  dynlet calls recorded against a pretend box, for a save that grows, shrinks, renames and breaks
+  the class; runtime test `channels`: grown from two to three, the old cords carry on and cords
+  that `thispatcher` connects to the new inlet and outlet carry signal (this check fails against
+  (b)); shrunk to one, the removed outlets' cords go with them.
 - [ ] **2.5 Worker mode (D1)** — `@mode worker`: Python on a worker thread, lock-free FIFO,
   latency reported to Max, underrun → silence.
 - [x] **2.6 Shorter reload stalls** — compile outside the swap and hold the GIL only for the swap.
