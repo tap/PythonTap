@@ -48,6 +48,7 @@ namespace {
         {"allpass", "per sample: allpass.py, a Schroeder allpass filter"},
         {"bench_block_identity", "per vector: returns its input (the bridge alone)"},
         {"numpy_gain", "per vector: numpy_gain.py, a gain"},
+        {"numpy_allpass", "per vector: numpy_allpass.py, the same allpass filter"},
     };
     constexpr double      k_sample_rates[] = {48000.0, 96000.0};
     constexpr std::size_t k_vector_sizes[] = {64, 512}; // Max's default signal vector, and a large one

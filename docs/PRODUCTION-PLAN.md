@@ -304,7 +304,10 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
   percent of a core at 48 kHz), so a per-sample class's cost is its Python code (`allpass.py`,
   more than twenty times that); the block path's call is under a microsecond per vector. In Max the
   per-sample path matches the benchmark and the block path reads about half again more. Taken on
-  a busy machine (the note records the load average); regenerate on an idle one.
+  a busy machine (the note records the load average); regenerate on an idle one. *Then:*
+  `numpy_allpass.py`, the allpass written per vector — identical output, checked sample for sample
+  in the core battery — measured beside `allpass.py`: 11× less CPU at 48 kHz and 18× less at 96 kHz
+  in 64-sample vectors, and about 16× less by Max's own meter.
 - [ ] **6.4 Loading without a runtime** (4.2) — with `support/` moved aside the external loads and
   says what is missing, on macOS and Windows; installing the runtime then works after a Max restart
   (macOS) or for the next object (Windows). *macOS: done* — `run.py`'s without-runtime session

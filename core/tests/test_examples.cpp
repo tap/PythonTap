@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include <catch2/generators/catch_generators.hpp>
+
 #include "support.h"
 
 using namespace tap::python;
@@ -124,4 +126,47 @@ SCENARIO("numpy_gain.py processes a vector per call") {
     CHECK(all_equal(render(p, 0.5, 64), 0.5));
     REQUIRE(p.set_attribute("gain", 0.5));
     CHECK(all_equal(render(p, 0.5, 64), 0.25));
+}
+
+SCENARIO("numpy_allpass.py computes exactly what allpass.py does, a vector at a time") {
+    ensure_runtime();
+    if (!importable("attrs") || !importable("numpy")) {
+        SKIP("attrs and numpy are not importable by the embedded interpreter");
+    }
+
+    log_capture log;
+    processor   per_sample{"allpass"};
+    processor   per_vector{"numpy_allpass", log.sink()};
+    REQUIRE(per_sample.load());
+    REQUIRE(per_vector.load());
+    REQUIRE(log.contains("one call per vector (numpy)", log_level::info));
+
+    // a delay shorter than the vector (the vector is split), then longer than it
+    const auto            delay_ms = GENERATE(0.5, 1.0, 5.0);
+    constexpr std::size_t k_vector = 64;
+    for (auto* p : {&per_sample, &per_vector}) {
+        REQUIRE(p->set_attribute("delay", delay_ms));
+        p->prepare(48000.0, k_vector);
+    }
+
+    std::uint64_t       seed = 12345; // a fixed pseudo-random input in [-1, 1)
+    std::vector<double> in(k_vector);
+    std::vector<double> a(k_vector);
+    std::vector<double> b(k_vector);
+    bool                identical = true;
+    for (int vector = 0; vector < 200; ++vector) {
+        for (auto& s : in) {
+            seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;
+            s    = static_cast<double>(seed >> 11) / static_cast<double>(1ULL << 52) - 1.0;
+        }
+        if (vector == 100) { // and a delay change mid-stream: both clear, and carry on alike
+            for (auto* p : {&per_sample, &per_vector}) {
+                REQUIRE(p->set_attribute("delay", delay_ms * 2.0));
+            }
+        }
+        per_sample.process(in.data(), a.data(), k_vector);
+        per_vector.process(in.data(), b.data(), k_vector);
+        identical = identical && a == b;
+    }
+    CHECK(identical);
 }

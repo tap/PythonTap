@@ -89,7 +89,7 @@ Python sources live in the package's `python` folder. `[tap.python~ name]` loads
 - **Attributes** — class-level annotated fields (e.g. via `attrs`) become Max attributes. `int` maps to a Max `long`, `float` to `float64`, `bool` to an on/off `long` (your field receives a real `bool`), anything else to a symbol; `Optional[X]` and `X | None` count as `X`. Names starting with `_` are private, and `ClassVar`s are not fields. If a hint cannot be resolved (say a name imported only under `TYPE_CHECKING`), the console says so and the annotation is read as written.
 - **Messages** — public methods (including classmethods and staticmethods) become Max messages, called according to their signature: parameters with defaults are optional, `*args` takes any number of arguments, and a keyword-only parameter must have a default (a method with a required keyword-only parameter is not exposed). Argument hints (`int`, `float`, `bool`, `str`) drive the conversion from Max atoms; an unannotated parameter receives the atom as it is (an `int`, `float` or `str`). Methods named `int`, `float`, `symbol`, and `bang` map to those standard Max messages. Names Max or the object handle themselves (`filechanged`, `dsp64`, `notify`, `assist`, `loadbang`, `dblclick`, `anything`, …) are not exposed; the console names any method skipped this way so you can rename it.
 - **Audio** — a method `process()` runs on the signal, in one of two forms chosen by its type hint:
-  - `process(self, x: np.ndarray) -> np.ndarray` is called **once per signal vector** with a numpy array of the input and must return an array of the same length (any numeric dtype, or a list; it is converted). This is the form to use for anything that must run in real time — see `python/numpy_gain.py`. The input array is reused from one call to the next: copy it if you want to keep it.
+  - `process(self, x: np.ndarray) -> np.ndarray` is called **once per signal vector** with a numpy array of the input and must return an array of the same length (any numeric dtype, or a list; it is converted). This is the form to use for anything that must run in real time — see `python/numpy_gain.py`, and `python/numpy_allpass.py` for a filter with feedback. The input array is reused from one call to the next: copy it if you want to keep it.
   - `process(self, x: float) -> float` is called **once per sample** — simplest for sketching; the call is cheap, but every line of Python in it runs once per sample (see [the performance note](#a-note-on-performance)).
 
   One signal inlet and one signal outlet, single-channel; wrap the object in `mc.` for multichannel. (Returning a tuple for multiple outputs is not supported yet.) Output that is not a number, or not finite (NaN, infinity), is replaced with 0.0 and reported once in the Max console.
@@ -99,7 +99,7 @@ Python sources live in the package's `python` folder. `[tap.python~ name]` loads
 
 ### A note on performance
 
-`process()` runs on the audio thread, holding Python's global interpreter lock. The per-sample form (`x: float`) makes one Python call per sample. The call itself is cheap — a fraction of a percent of a core, in the measurements below — but every line of Python in it runs 48,000 or 96,000 times a second, so the cost is your code's: `allpass.py`, a few lines of indexing and arithmetic, costs more than twenty times the call. It is fantastic for sketching and live-coding an algorithm. The numpy form (`x: np.ndarray`) makes one call per signal vector, and numpy then works on the whole vector at C speed: it is the one to use when the algorithm has real work in it and has to keep up. Either way the audio thread waits while other Python code holds the interpreter — a reload, a message, or another instance: all `tap.python~` instances share one interpreter, so heavy Python work in one can steal time from the others. Errors in `process()` are printed from Max's main thread, never from the audio thread.
+`process()` runs on the audio thread, holding Python's global interpreter lock. The per-sample form (`x: float`) makes one Python call per sample. The call itself is cheap — a fraction of a percent of a core, in the measurements below — but every line of Python in it runs 48,000 or 96,000 times a second, so the cost is your code's: `allpass.py`, a few lines of indexing and arithmetic, costs more than twenty times the call — and `numpy_allpass.py`, the same filter written a vector at a time, a small fraction of it. It is fantastic for sketching and live-coding an algorithm. The numpy form (`x: np.ndarray`) makes one call per signal vector, and numpy then works on the whole vector at C speed: it is the one to use when the algorithm has real work in it and has to keep up. Either way the audio thread waits while other Python code holds the interpreter — a reload, a message, or another instance: all `tap.python~` instances share one interpreter, so heavy Python work in one can steal time from the others. Errors in `process()` are printed from Max's main thread, never from the audio thread.
 
 What `process()` costs, measured by `core/bench` — which calls it exactly as Max's audio thread does, one vector at a time — as the share of one CPU core it needs:
 
@@ -107,15 +107,19 @@ What `process()` costs, measured by `core/bench` — which calls it exactly as M
 
 | `process()` | Cost (at 48 kHz) | CPU at 48 kHz | CPU at 96 kHz |
 |---|---|---:|---:|
-| returns its input (the bridge alone) — per sample, vectors of 64 | 67 ns per sample | 0.32% | 0.59% |
-| `default.py`, a gain (an attrs class) — per sample, vectors of 64 | 84 ns per sample | 0.4% | 0.74% |
-| `allpass.py`, a Schroeder allpass filter — per sample, vectors of 64 | 1.8 µs per sample | 8.7% | 17% |
-| returns its input (the bridge alone) — per vector of 64 | 0.3 µs per vector | 0.022% | 0.045% |
-| returns its input (the bridge alone) — per vector of 512 | 0.67 µs per vector | 0.0063% | 0.013% |
-| `numpy_gain.py`, a gain — per vector of 64 | 1.3 µs per vector | 0.095% | 0.18% |
-| `numpy_gain.py`, a gain — per vector of 512 | 2 µs per vector | 0.019% | 0.038% |
+| returns its input (the bridge alone) — per sample, vectors of 64 | 45 ns per sample | 0.22% | 0.43% |
+| `default.py`, a gain (an attrs class) — per sample, vectors of 64 | 58 ns per sample | 0.28% | 0.57% |
+| `allpass.py`, a Schroeder allpass filter — per sample, vectors of 64 | 1.2 µs per sample | 6% | 12% |
+| returns its input (the bridge alone) — per vector of 64 | 0.23 µs per vector | 0.017% | 0.034% |
+| returns its input (the bridge alone) — per vector of 512 | 0.52 µs per vector | 0.0049% | 0.0097% |
+| `numpy_gain.py`, a gain — per vector of 64 | 0.97 µs per vector | 0.073% | 0.15% |
+| `numpy_gain.py`, a gain — per vector of 512 | 1.5 µs per vector | 0.014% | 0.028% |
+| `numpy_allpass.py`, the same allpass filter — per vector of 64 | 7 µs per vector | 0.53% | 0.68% |
+| `numpy_allpass.py`, the same allpass filter — per vector of 512 | 31 µs per vector | 0.29% | 0.34% |
 
-The share of one core: each row timed once per round for seven rounds, interleaved, keeping its fastest; every median was within 16% of it. Measured 2026-09-29 on Intel(R) Core(TM) i9-8950HK CPU @ 2.90GHz, macOS 15.7.9 (x86_64), CPython 3.13.14, numpy 2.5.3, load average 5.0.
+`numpy_allpass.py` computes exactly what `allpass.py` does — the core battery checks it sample for sample — and in 64-sample vectors needs 11× less at 48 kHz (0.53% of a core against 6%) and 18× less at 96 kHz (0.68% of a core against 12%). It computes a vector in stretches no longer than the delay, one numpy expression each: the default 1 ms delay is 48 samples at 48 kHz, so a 64-sample vector takes two, and 96 at 96 kHz, so it takes one — a delay shorter than the vector costs more.
+
+The share of one core: each row timed once per round for seven rounds, interleaved, keeping its fastest; every median was within 32% of it. Measured 2026-09-30 on Intel(R) Core(TM) i9-8950HK CPU @ 2.90GHz, macOS 15.7.9 (x86_64), CPython 3.13.14, numpy 2.5.3, load average 2.4.
 
 <!-- perf:end -->
 
@@ -125,11 +129,12 @@ In Max itself, measured by Max's own CPU meter — which covers everything the a
 
 | In Max at 96 kHz | Instances | Max's CPU meter | Each | `core/bench`, each |
 |---|---:|---:|---:|---:|
-| `default.py`, per sample | 26 | 20% | 0.77% | 0.74% |
-| `numpy_gain.py`, per vector of 64 | 26 | 7% | 0.28% | 0.18% |
-| `allpass.py`, per sample | 1 | 17% | 17% | 17% |
+| `default.py`, per sample | 26 | 22% | 0.84% | 0.55% |
+| `numpy_gain.py`, per vector of 64 | 26 | 7% | 0.28% | 0.14% |
+| `allpass.py`, per sample | 1 | 18% | 18% | 12% |
+| `numpy_allpass.py`, per vector of 64 | 26 | 28% | 1.1% | 0.69% |
 
-Max's own DSP CPU meter (`adstatus cpu`): the mean of ten readings a second apart with the instances running in a `poly~`, less the reading with no object (0.0%); *each* divides by the number running. The audio device ran at 96 kHz with 64-sample signal vectors and a 512-sample I/O vector. The meter reads in whole percent. Measured 2026-09-29 with Max 9.1.5, on Intel(R) Core(TM) i9-8950HK CPU @ 2.90GHz, macOS 15.7.9 (x86_64), CPython 3.13.14, numpy 2.5.3.
+Max's own DSP CPU meter (`adstatus cpu`): the mean of ten readings a second apart with the instances running in a `poly~`, less the reading with no object (0.0%); *each* divides by the number running. The audio device ran at 96 kHz with 64-sample signal vectors and a 512-sample I/O vector. The meter reads in whole percent. Measured 2026-09-30 with Max 9.1.5, on Intel(R) Core(TM) i9-8950HK CPU @ 2.90GHz, macOS 15.7.9 (x86_64), CPython 3.13.14, numpy 2.5.3.
 
 <!-- perf-max:end -->
 
