@@ -90,16 +90,48 @@ Python sources live in the package's `python` folder. `[tap.python~ name]` loads
 - **Messages** — public methods (including classmethods and staticmethods) become Max messages, called according to their signature: parameters with defaults are optional, `*args` takes any number of arguments, and a keyword-only parameter must have a default (a method with a required keyword-only parameter is not exposed). Argument hints (`int`, `float`, `bool`, `str`) drive the conversion from Max atoms; an unannotated parameter receives the atom as it is (an `int`, `float` or `str`). Methods named `int`, `float`, `symbol`, and `bang` map to those standard Max messages. Names Max or the object handle themselves (`filechanged`, `dsp64`, `notify`, `assist`, `loadbang`, `dblclick`, `anything`, …) are not exposed; the console names any method skipped this way so you can rename it.
 - **Audio** — a method `process()` runs on the signal, in one of two forms chosen by its type hint:
   - `process(self, x: np.ndarray) -> np.ndarray` is called **once per signal vector** with a numpy array of the input and must return an array of the same length (any numeric dtype, or a list; it is converted). This is the form to use for anything that must run in real time — see `python/numpy_gain.py`. The input array is reused from one call to the next: copy it if you want to keep it.
-  - `process(self, x: float) -> float` is called **once per sample** — simplest for sketching, and expensive.
+  - `process(self, x: float) -> float` is called **once per sample** — simplest for sketching; the call is cheap, but every line of Python in it runs once per sample (see [the performance note](#a-note-on-performance)).
 
   One signal inlet and one signal outlet, single-channel; wrap the object in `mc.` for multichannel. (Returning a tuple for multiple outputs is not supported yet.) Output that is not a number, or not finite (NaN, infinity), is replaced with 0.0 and reported once in the Max console.
 - **Audio settings** — an optional method `prepare(self, sample_rate: float, vector_size: int) -> None` is called with Max's sample rate and vector size before the object processes any audio, again whenever they change, and on every reload before the new code runs. `python/allpass.py` uses it to size its delay line.
-- **Hot reload** — saving the `.py` file reloads it in place, as a fresh module (names you deleted from the file are gone): the attributes and messages follow the new class, and audio resumes with the new code. Until the new code is ready the object keeps running the old one, so a successful reload swaps in without a gap in the audio. Attribute values carry over — set from the patcher or by your own code — for every attribute the new class still has with the same type; an attribute whose type changed starts from its new default, and one you removed disappears from the object. If the file has an error, the object prints the traceback to the Max console and outputs silence until the next successful reload (and the attribute values come back with it). Every object using the same file shares one execution of it per save.
+- **Hot reload** — saving the `.py` file reloads it in place, as a fresh module (names you deleted from the file are gone): the attributes and messages follow the new class, and audio resumes with the new code. Until the new code is ready the object keeps running the old one, so a successful reload swaps in without a gap in the audio. Attribute values carry over — set from the patcher or by your own code — for every attribute the new class still has with the same type; an attribute whose type changed starts from its new default, and one you removed disappears from the object. If the file has an error, the object prints the traceback to the Max console and outputs silence until the next successful reload (and the attribute values come back with it). Every object using the same file shares one execution of it per save. Max's file watcher notices a save within a couple of seconds, but it coalesces saves made in quick succession — a script saving once a second, say — so the object then reloads for only some of them, and can lag behind until they stop; sending the object `filechanged` reloads it at once.
 - **Errors** — an exception raised by your code (in `process()`, a message, an attribute setter, the constructor or at import) prints its traceback to the Max console; it never takes Max down. That includes `sys.exit()`, which is reported like any other exception rather than quitting Max.
 
 ### A note on performance
 
-`process()` runs on the audio thread, holding Python's global interpreter lock. The per-sample form (`x: float`) makes one Python call per sample — fantastic for sketching and live-coding an algorithm, and expensive: expect meaningful CPU load at high sample rates. The numpy form (`x: np.ndarray`) makes one call per signal vector and is the one to use when it has to keep up. Either way the audio thread waits while other Python code holds the interpreter — a reload, a message, or another instance: all `tap.python~` instances share one interpreter, so heavy Python work in one can steal time from the others. Errors in `process()` are printed from Max's main thread, never from the audio thread.
+`process()` runs on the audio thread, holding Python's global interpreter lock. The per-sample form (`x: float`) makes one Python call per sample. The call itself is cheap — a fraction of a percent of a core, in the measurements below — but every line of Python in it runs 48,000 or 96,000 times a second, so the cost is your code's: `allpass.py`, a few lines of indexing and arithmetic, costs more than twenty times the call. It is fantastic for sketching and live-coding an algorithm. The numpy form (`x: np.ndarray`) makes one call per signal vector, and numpy then works on the whole vector at C speed: it is the one to use when the algorithm has real work in it and has to keep up. Either way the audio thread waits while other Python code holds the interpreter — a reload, a message, or another instance: all `tap.python~` instances share one interpreter, so heavy Python work in one can steal time from the others. Errors in `process()` are printed from Max's main thread, never from the audio thread.
+
+What `process()` costs, measured by `core/bench` — which calls it exactly as Max's audio thread does, one vector at a time — as the share of one CPU core it needs:
+
+<!-- perf:begin (generated by scripts/update-perf-docs.py; do not edit) -->
+
+| `process()` | Cost (at 48 kHz) | CPU at 48 kHz | CPU at 96 kHz |
+|---|---|---:|---:|
+| returns its input (the bridge alone) — per sample, vectors of 64 | 67 ns per sample | 0.32% | 0.59% |
+| `default.py`, a gain (an attrs class) — per sample, vectors of 64 | 84 ns per sample | 0.4% | 0.74% |
+| `allpass.py`, a Schroeder allpass filter — per sample, vectors of 64 | 1.8 µs per sample | 8.7% | 17% |
+| returns its input (the bridge alone) — per vector of 64 | 0.3 µs per vector | 0.022% | 0.045% |
+| returns its input (the bridge alone) — per vector of 512 | 0.67 µs per vector | 0.0063% | 0.013% |
+| `numpy_gain.py`, a gain — per vector of 64 | 1.3 µs per vector | 0.095% | 0.18% |
+| `numpy_gain.py`, a gain — per vector of 512 | 2 µs per vector | 0.019% | 0.038% |
+
+The share of one core: each row timed once per round for seven rounds, interleaved, keeping its fastest; every median was within 16% of it. Measured 2026-09-29 on Intel(R) Core(TM) i9-8950HK CPU @ 2.90GHz, macOS 15.7.9 (x86_64), CPython 3.13.14, numpy 2.5.3, load average 5.0.
+
+<!-- perf:end -->
+
+In Max itself, measured by Max's own CPU meter — which covers everything the audio thread does around `process()` too — beside what `core/bench` predicts:
+
+<!-- perf-max:begin (generated by scripts/update-perf-docs.py --max; do not edit) -->
+
+| In Max at 96 kHz | Instances | Max's CPU meter | Each | `core/bench`, each |
+|---|---:|---:|---:|---:|
+| `default.py`, per sample | 26 | 20% | 0.77% | 0.74% |
+| `numpy_gain.py`, per vector of 64 | 26 | 7% | 0.28% | 0.18% |
+| `allpass.py`, per sample | 1 | 17% | 17% | 17% |
+
+Max's own DSP CPU meter (`adstatus cpu`): the mean of ten readings a second apart with the instances running in a `poly~`, less the reading with no object (0.0%); *each* divides by the number running. The audio device ran at 96 kHz with 64-sample signal vectors and a 512-sample I/O vector. The meter reads in whole percent. Measured 2026-09-29 with Max 9.1.5, on Intel(R) Core(TM) i9-8950HK CPU @ 2.90GHz, macOS 15.7.9 (x86_64), CPython 3.13.14, numpy 2.5.3.
+
+<!-- perf-max:end -->
 
 ## Building from source
 
@@ -139,6 +171,8 @@ ctest --test-dir build-core --output-on-failure
 
 The example tests need `attrs` and `numpy` importable by that interpreter (or in a folder named by `TAP_PYTHON_TEST_SITE`); without them they are skipped. `-DTAP_PYTHON_SANITIZE=address,undefined` or `=thread` builds the battery under sanitizers, as CI does.
 
+The core's build also makes `core/bench`, which times `process()` as Max's audio thread calls it; `python3 scripts/update-perf-docs.py` builds it (Release), runs it, and rewrites the tables in [the performance note](#a-note-on-performance) — with `--max`, the table measured in Max too. Measure on an idle machine; never edit those tables by hand.
+
 The external and its mock-kernel unit test also build on Linux (Max does not run there, but its glue does), embedding the same CPython instead of a `support/` runtime:
 
 ```sh
@@ -155,7 +189,7 @@ What only a real Max shows — the file watcher, attributes read through `getatt
 python3 runtime-tests/run.py    # launches Max, runs every test patcher, quits it (~2 minutes)
 ```
 
-It installs the harness into `Packages` as `max-test` (and leaves it there). See [runtime-tests/README.md](runtime-tests/README.md) for what it does and how to write a test.
+It installs the harness into `Packages` as `max-test` (and leaves it there). `--session soak` runs the hour-long soak instead — audio through many instances while their files are saved every second, a sample-rate change, memory sampled each minute — and `--session perf` reads Max's CPU meter under load. See [runtime-tests/README.md](runtime-tests/README.md) for what they do and how to write a test.
 
 ## License
 

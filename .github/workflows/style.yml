@@ -50,7 +50,7 @@ jobs:
         run: sudo apt-get update -q && sudo apt-get install -y -q clang-tidy-18
       - name: Configure the core (compile database for its tests)
         run: cmake -S core -B build-core -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DPython3_EXECUTABLE="$(which python)"
-      - name: clang-tidy (this object's and the core's own TUs; min-api, CPython, deps excluded)
+      - name: clang-tidy (this object's and the core's own TUs, its tests and bench; min-api, CPython, deps excluded)
         run: |
           d=source/projects/tap.python_tilde
           msdk=source/min-api/max-sdk-base/c74support
@@ -59,7 +59,7 @@ jobs:
           # Scope diagnostics to this object's and the core's own headers: a path
           # filter over source/projects would also match the bundled CPython
           # headers, which are reached via …/tap.python_tilde/../../../support/… .
-          hf='.*/(tap\.python_tilde/tap\.python_tilde|core/(include|tests)/).*'
+          hf='.*/(tap\.python_tilde/tap\.python_tilde|core/(include|tests|bench)/).*'
           fail=0
           check() { # <file> <clang-tidy args…>
             # a finding, a compile error, or clang-tidy itself failing (non-zero exit with or
@@ -73,7 +73,7 @@ jobs:
           }
           check "$d/tap.python_tilde.cpp" -- -std=c++20 $inc -DC74_MIN_API
           check "$d/tap.python_tilde_test.cpp" -- -std=c++20 $inc -DC74_MIN_API -DMIN_TEST -Isource/min-api/test -DCATCH_CONFIG_NO_CPP17_UNCAUGHT_EXCEPTIONS
-          for f in core/tests/*.cpp; do
+          for f in core/tests/*.cpp core/bench/*.cpp; do
             check "$f" -p build-core
           done
           [ "$fail" -eq 0 ] && echo "clang-tidy clean." || { echo "::error::clang-tidy found violations"; exit 1; }

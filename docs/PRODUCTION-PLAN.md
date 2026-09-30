@@ -232,7 +232,7 @@ Linux (core battery under sanitizers, the external against min's mock kernel) an
 Windows builds, link-shape checks). The first Mac session (2026-09-27, Max 9.0.8, Intel) set up the
 package, added the runtime tests (6.1) and ran them green; they found a crash on every save of a
 class file, now fixed. A second session (2026-09-29) made the hand checks of steps 2 and 4: all
-passed. To continue:
+passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
 
 1. *Set up.* Clone into (or symlink into) `~/Documents/Max 9/Packages/PythonTap` with
    `--recursive`, run `./scripts/install-runtime.sh` (native: fastest to build; add `--universal`
@@ -247,7 +247,8 @@ passed. To continue:
    re-save it in Max 9 and commit. Tabs for the numpy and allpass examples and `mc.` are welcome.
    *Done 2026-09-29:* the layout and every message box check out; kept as committed (5.2).
 3. *Run the runtime tests:* quit Max, `python3 runtime-tests/run.py` (see
-   `runtime-tests/README.md`). It covers 6.1 and the macOS half of 6.4 below.
+   `runtime-tests/README.md`). It covers 6.1 and the macOS half of 6.4 below; `--session soak`
+   (an hour) and `--session perf` cover 6.2 and 6.3.
 4. *Behavior the tests cannot show* — check by hand and note the result here:
    - a `bool` field's attribute shows as on/off (a toggle in the inspector and in attrui);
    - removing a field while an attrui displays it *looks* right (the tests check that nothing
@@ -281,10 +282,29 @@ passed. To continue:
   file crashed Max — min registered `filechanged` with its A_GIMME wrapper, which Max's file
   watcher calls with C arguments; the watcher now belongs to a nobox helper that forwards the save
   as a typed message (`tap.python_tilde_filewatch.h`). *Also found* 6.6.
-- [ ] **6.2 Stress/soak** — an hour of audio with a reload every second; many instances of one
-  module; a sample-rate change mid-run.
-- [ ] **6.3 Performance budget** — CPU per sample (per-sample path) and per vector (block path) at
-  48/96 kHz, recorded in the ReadMe as measured numbers.
+- [x] **6.2 Stress/soak** — an hour of audio with a reload every second; many instances of one
+  module; a sample-rate change mid-run. *Done:* `runtime-tests/run.py --session soak` (the patcher
+  is generated with the others; not in the quick suite). Passed on 2026-09-29: 24 per-sample
+  instances of one class in a `poly~`, one more at top level and 8 block-path instances of
+  another, the device at 96 kHz; every second both files saved with a new revision and every
+  instance told to reload; the `poly~` at twice the rate (`up 2`) for the middle twenty minutes.
+  Every output sample exact in all three phases, the console clean, 3,600 saves running the module
+  3,600 times (147,684 object reloads), Python's tracked objects flat (18.8–22.1 thousand, no
+  trend). Max's memory grew 70 MB (615 → 685 MB, steadily): not the object's — the core alone
+  stays flat over 75,000 reloads, and Max grows as much from `[print]` posting the same number of
+  lines, cleared window or not — but Max's console keeping the two lines each object posts per
+  reload (6.7). *Found on the way:* Max's file watcher coalesces saves made close together (saving
+  once a second, about half are delivered, some seconds late) — now in the ReadMe.
+- [x] **6.3 Performance budget** — CPU per sample (per-sample path) and per vector (block path) at
+  48/96 kHz, recorded in the ReadMe as measured numbers. *Done:* `core/bench` times
+  `processor::process()` as the audio thread calls it — interleaved rounds, each measurement's
+  fastest kept and its median reported — and `scripts/update-perf-docs.py` writes the ReadMe's
+  table from it; `--max` adds Max's own CPU meter under load (`run.py --session perf`) beside the
+  benchmark's prediction. Measured: the per-sample bridge costs about 70 ns a call (a third of a
+  percent of a core at 48 kHz), so a per-sample class's cost is its Python code (`allpass.py`,
+  more than twenty times that); the block path's call is under a microsecond per vector. In Max the
+  per-sample path matches the benchmark and the block path reads about half again more. Taken on
+  a busy machine (the note records the load average); regenerate on an idle one.
 - [ ] **6.4 Loading without a runtime** (4.2) — with `support/` moved aside the external loads and
   says what is missing, on macOS and Windows; installing the runtime then works after a Max restart
   (macOS) or for the next object (Windows). *macOS: done* — `run.py`'s without-runtime session
@@ -300,6 +320,13 @@ passed. To continue:
   fails with `UnicodeDecodeError`. Proposed:
   pre-initialize with UTF-8 mode on (PEP 686 makes it the default from Python 3.15), pinned first by
   a core test — a contract change for the CHANGELOG.
+- [ ] **6.7 Console lines per reload** — found by 6.2: every instance posts two lines on every
+  reload ("Source file update detected. Reloading." and "Audio process() bound: …"), so a save
+  with 25 instances of a class posts 50. Max's console keeps every line, even after the window is
+  cleared (about 0.24 KB each, measured), so an extreme reload rate grows Max's memory — 70 MB
+  over the soak's 147,684 reloads, where a realistic rate (20 instances, a save a minute) costs
+  about half a megabyte an hour. Proposed: one line per save of a file, from whichever instance reloads
+  first, and the binding line only when it changes; a user-visible change for the CHANGELOG.
 
 ## Phase 7 — plugin front ends (optional, post-1.0)
 

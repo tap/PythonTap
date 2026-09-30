@@ -4,6 +4,7 @@
 """Generate tap.python~'s runtime-test patchers (plan 6.1) for the max-test harness.
 
     python3 runtime-tests/make_patchers.py      # rewrites runtime-tests/patchers/
+    python3 runtime-tests/make_patchers.py --soak-minutes 3   # a short soak, to try it (don't commit)
 
 Each test is written here as a script — wait, send a message, sample the signal, read an
 attribute, count console errors — and generated as a max-test patcher: it starts itself from a
@@ -18,6 +19,7 @@ package's python/ folder for the run); the tests also load the shipped examples.
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -33,6 +35,7 @@ WATCH = 2500
 FINISH = 500  # before test.terminate stops audio: the last samples must have been taken
 LOGGED = 50  # console errors logged per test
 WATCHDOG = 60000  # a test that has not ended by now is ended, failing whatever it had not checked
+SOAK_MINUTES = 60  # plan 6.2: an hour
 
 HOST = "maxtest.host"  # the poly~ abstraction that hosts a [tap.python~ #1] (see write_host)
 
@@ -115,9 +118,10 @@ class Test:
     each of which ends in a test.assert named for what it promises.
     """
 
-    def __init__(self, filename: str, description: str, audio: bool = True):
+    def __init__(self, filename: str, description: str, audio: bool = True, watchdog: int = WATCHDOG):
         self.filename = filename
         self.audio = audio
+        self.watchdog = watchdog
         self.patcher = Patcher(filename.split(".maxtest")[0].split(".maxpat")[0], description)
         self.steps: list[tuple[int, list[str]]] = []
         self.errors = ""  # the [error 1] box, made on first use
@@ -212,17 +216,31 @@ class Test:
             self._assert(name, test)
         return query
 
-    def no_change(self, name: str, source: str, value: float) -> tuple[str, str]:
-        """Watch `source` sample by sample: returns (start, check) actions. Bang `start` to begin
-        watching; bang `check` to assert that every sample since was exactly `value`."""
+    def attribute_compare(self, name: str, target: str, attribute: str, compare: str) -> str:
+        """Check `target`'s attribute through [getattr] with a Max comparison, e.g. ">= 10"."""
+        query = self.patcher.box(f"getattr {attribute} @listen 0", outlets=3, column=3)
+        test = self.patcher.box(compare, inlets=2, column=3)
+        self.patcher.connect(query, 1, target)
+        self.patcher.connect(query, 0, test)
+        self._assert(name, test)
+        return query
+
+    def no_change(self, name: str, source, value: float) -> tuple[str, str]:
+        """Watch `source` (a box, or several whose signals sum) sample by sample: returns (start,
+        check) actions. Bang `start` to begin watching; bang `check` to assert that every sample
+        since was exactly `value`."""
         differs = self.patcher.box(f"!=~ {value}", inlets=2, column=3, outlettype=["signal"])
+        for each in source if isinstance(source, list) else []:
+            self.patcher.connect(each, 0, differs)
+        source = None if isinstance(source, list) else source
         peak = self.patcher.box("peakamp~", inlets=2, column=3)
         start = self.patcher.box("t b b", outlets=2, column=3)
         check = self.patcher.box("t b", column=3)
         gate = self.patcher.box("gate", inlets=2, column=3)
         opened = self.patcher.message("1", column=3)
         zero = self.patcher.box("== 0", inlets=2, column=3)
-        self.patcher.connect(source, 0, differs)
+        if source:
+            self.patcher.connect(source, 0, differs)
         self.patcher.connect(differs, 0, peak)
         # starting: read (and so reset) the peak with the gate closed, then open it
         self.patcher.connect(start, 1, peak)
@@ -242,6 +260,38 @@ class Test:
         for index, target in enumerate(targets):
             self.patcher.connect(fan, len(targets) - 1 - index, target)
         return self.send("1", metro), self.send("0", metro)
+
+    def log_value(self, label: str, source: str, outlet: int = 0) -> None:
+        """Log what `source` outputs into the test's results as "<label> <value>" (run.py prints
+        these for the soak test)."""
+        prefix = self.patcher.box(f"prepend {label}", inlets=2, column=4)
+        log = self.patcher.box("test.log measure", outlets=0, column=4)
+        self.patcher.connect(source, outlet, prefix)
+        self.patcher.connect(prefix, 0, log)
+
+    def log_attribute(self, label: str, target: str, attribute: str) -> str:
+        """An action logging `target`'s attribute; bang it to log."""
+        query = self.patcher.box(f"getattr {attribute} @listen 0", outlets=3, column=4)
+        self.patcher.connect(query, 1, target)
+        self.log_value(label, query)
+        return query
+
+    def cpu_reading(self, label: str) -> str:
+        """An action logging Max's DSP CPU (adstatus cpu) as "<label> <percent>". adstatus also
+        reports on its own when audio starts or restarts, so only the answer to this bang is kept."""
+        trigger = self.patcher.box("t b b b", outlets=3, column=4)
+        opened = self.patcher.message("1", column=4)
+        closed = self.patcher.message("0", column=4)
+        gate = self.patcher.box("gate", inlets=2, column=4)
+        cpu = self.patcher.box("adstatus cpu", outlets=2, column=4)
+        self.patcher.connect(trigger, 2, opened)
+        self.patcher.connect(trigger, 1, cpu)
+        self.patcher.connect(trigger, 0, closed)
+        self.patcher.connect(opened, 0, gate)
+        self.patcher.connect(closed, 0, gate)
+        self.patcher.connect(cpu, 0, gate, 1)
+        self.log_value(label, gate)
+        return trigger
 
     def _errors(self) -> str:
         """The [error 1] listening to the Max console: every error posted while the patcher is open."""
@@ -329,7 +379,7 @@ class Test:
             # restart it); if it never starts, audio-started fails and the watchdog ends the test
             trigger = self.patcher.box("t b b", outlets=2, column=0)
             start = self.patcher.message("; dsp start", column=0)
-            watchdog = self.patcher.box(f"delay {WATCHDOG}", inlets=2, column=0)
+            watchdog = self.patcher.box(f"delay {self.watchdog}", inlets=2, column=0)
             state = self.patcher.box("dspstate~", outlets=4, column=0)
             running = self.patcher.box("sel 1", inlets=2, outlets=2, column=0)
             once = self.patcher.box("onebang 1", inlets=2, outlets=2, column=0)
@@ -569,6 +619,105 @@ def prepare() -> Test:
     return t
 
 
+def soak(minutes: float) -> Test:
+    """Plan 6.2, run by `run.py --session soak`: not a .maxtest, so the quick suite skips it."""
+    duration = int(minutes * 60_000)
+    third = duration // 3
+    saves = duration // 1000
+    t = Test("soak/tap.python~.soak.maxpat",
+             f"The soak (plan 6.2): {minutes:g} minutes of audio through 24 per-sample instances of one class "
+             "(in a poly~), one more at top level, and 8 block-path instances of another; every second "
+             "maxtest_editor saves both files with a new revision and every instance is told to reload. A "
+             "third of the way through the poly~ changes its sample rate (up 2), and back at two thirds. "
+             "Every output sample must stay exact in each phase, the console clean, and the saves must have run "
+             "the module again. Logged: Max's DSP CPU after 30 quiet seconds (no reloads, to compare with "
+             "core/bench) and then each minute, with the module's executions and Python's object count.",
+             watchdog=duration + 180_000)
+    source = t.signal(1.0)
+    host = t.host("maxtest_soak", voices=24)
+    census = t.python("maxtest_soak")
+    blocks = [t.python("maxtest_soak_block") for _ in range(8)]
+    editor = t.python("maxtest_editor", column=1)
+    for py in (host, census, *blocks):
+        t.patcher.connect(source, 0, py)
+
+    # each second: a real save of both files (so the module runs again), then every instance reloads —
+    # the file watcher coalesces saves this close together, so it is not left to deliver them
+    reload_all = t.patcher.message("filechanged", column=1)
+    for py in (host, census, *blocks):
+        t.patcher.connect(reload_all, 0, py)
+    saves_start, saves_stop = t.metro(1000, t.send("bump maxtest_soak", editor),
+                                      t.send("bump maxtest_soak_block", editor), reload_all)
+    minute_start, minute_stop = t.metro(60_000, t.send("census", census),
+                                        t.log_attribute("executions", census, "executions"),
+                                        t.log_attribute("objects", census, "objects"), t.cpu_reading("cpu"))
+    phases = [(t.no_change(f"phase-{n}-poly-per-sample-never-interrupted", host, 24.0),
+               t.no_change(f"phase-{n}-block-path-never-interrupted", blocks, 8.0)) for n in (1, 2, 3)]
+
+    def audio_flowed(n: int) -> list[str]:  # the watchers pass vacuously if no audio ran
+        return [t.sample_equals(f"phase-{n}-poly-output", host, 24.0),
+                t.sample_equals(f"phase-{n}-block-output", blocks[0], 1.0)]
+
+    t.step(t.send("resampling 0", host), t.send("target 0", host))  # constants pass unchanged; to every voice
+    t.step(t.cpu_reading("cpu-quiet"), wait=30_000)  # 33 objects running, nothing else going on
+    t.step(phases[0][0][0], phases[0][1][0], saves_start, minute_start)
+    t.step(audio_flowed(1), wait=third - 200)
+    t.step(phases[0][0][1], phases[0][1][1], t.send("up 2", host), t.dsp(False))
+    t.step(t.dsp(True), wait=100)
+    t.step(phases[1][0][0], phases[1][1][0], wait=1500)
+    t.step(audio_flowed(2), wait=third - 1800)
+    t.step(phases[1][0][1], phases[1][1][1], t.send("up 1", host), t.dsp(False))
+    t.step(t.dsp(True), wait=100)
+    t.step(phases[2][0][0], phases[2][1][0], wait=1500)
+    t.step(audio_flowed(3), wait=third - 1800)
+    t.step(phases[2][0][1], phases[2][1][1], saves_stop, minute_stop)
+    t.step(t.send("census", census), t.log_attribute("executions", census, "executions"),
+           t.log_attribute("objects", census, "objects"),
+           t.attribute_compare("saves-ran-the-module-again", census, "executions", f">= {saves * 9 // 10}"),
+           t.errors_are("console-clean", "== 0"), wait=WATCH)
+    return t
+
+
+# (class, instances) measured by the perf patcher, at the audio device's own sample rate
+PERF_LOADS = [("default", 26), ("numpy_gain", 26), ("allpass", 1)]
+PERF_READINGS = 10
+
+
+def perf() -> Test:
+    """Plan 6.3, run by `run.py --session perf`: Max's own DSP CPU meter (adstatus cpu) with no
+    object, then with instances of the shipped examples in a poly~, at the audio device's sample
+    rate and vector size (a poly~'s up or down would change its vector size too, so the rate is
+    left to the device). Logged as "cpu <class> <instances> <percent>"; run.py averages the
+    readings into logs/perf.json."""
+    t = Test("perf/tap.python~.perf.maxpat",
+             "Max's DSP CPU meter (plan 6.3): no object, then instances of default.py, numpy_gain.py and "
+             "allpass.py in a poly~, at the audio device's sample rate. Each figure is "
+             f"{PERF_READINGS} readings a second apart, after the load has run for 5 s.",
+             watchdog=600_000)
+    source = t.signal(0.5)
+    host = t.host()
+    t.patcher.connect(source, 0, host)
+    state = t.patcher.box("dspstate~", outlets=4, column=4)
+    t.log_value("rate", state, 1)
+    t.log_value("vector", state, 2)
+    t.log_value("io", state, 3)
+
+    def readings(label: str) -> list[list[str]]:
+        return [[t.cpu_reading(label)] for _ in range(PERF_READINGS)]
+
+    t.step(state)
+    for reading in readings("cpu none 0"):
+        t.step(reading, wait=1000)
+    for name, count in PERF_LOADS:
+        t.step(t.load(host, name, voices=count))
+        first, *rest = readings(f"cpu {name} {count}")
+        t.step(first, wait=5000)
+        for reading in rest:
+            t.step(reading, wait=1000)
+    t.step(t.errors_are("console-clean", "== 0"))
+    return t
+
+
 def without_runtime() -> Test:
     t = Test("without-runtime/tap.python~.without-runtime.maxpat",
              "Run by run.py with support/ moved aside before Max started (plan 4.2, 6.4): the object "
@@ -612,11 +761,15 @@ def write_host() -> Path:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--soak-minutes", type=float, default=SOAK_MINUTES,
+                        help=f"how long the soak runs (default {SOAK_MINUTES}; commit only the default)")
+    args = parser.parse_args()
     for existing in PATCHERS.rglob("*.maxpat"):
         existing.unlink()
     print(f"wrote {write_host().relative_to(TESTS.parent)}")
-    for make in TESTS_TO_WRITE:
-        path = make().write()
+    for test in [make() for make in TESTS_TO_WRITE] + [soak(args.soak_minutes), perf()]:
+        path = test.write()
         print(f"wrote {path.relative_to(TESTS.parent)}")
 
 
