@@ -111,9 +111,15 @@ while audio ran segfaulted in 5 of 5 runs.
   unsaid length, `*args` or mixed hints are reported and not bound); `input_count()` and
   `output_count()` tell the host; the host's channels are matched to the class's (a missing input
   reads as silence, an extra output is silent); a result of the wrong length is silenced and
-  reported once per load. *(b) the Max object's inlets and outlets from the class at creation;
-  (c) adapting them on reload (dynlets).* Until (b), the object keeps one inlet and one outlet: a
-  class with two inputs binds, its second input silent.
+  reported once per load. *(b) the Max object's inlets and outlets from the class at creation —
+  done:* the constructor adds an `inlet<>` per input after the first (its help naming the
+  parameter: `processor::input_names()`) and an `outlet<>` per output after the first, before min
+  makes the Max ports from its lists; after a reload that changes the counts it says so, once, and
+  the core matches the channels. New example `stereo_width.py` (two in, two out; `width`). Mock test:
+  `[tap.python~ stereo_width]` has two of each and processes both (the test file now stands in a
+  faithful `attr_args_offset`, and the object reads a one-symbol argument directly, not through
+  `atom_gettext` — the mock's gives nothing); runtime test `channels` (stereo_width, a generator, a
+  save that changes the shape). *(c) adapting them on reload (dynlets).*
 - [ ] **2.5 Worker mode (D1)** — `@mode worker`: Python on a worker thread, lock-free FIFO,
   latency reported to Max, underrun → silence.
 - [x] **2.6 Shorter reload stalls** — compile outside the swap and hold the GIL only for the swap.

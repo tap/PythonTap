@@ -123,6 +123,10 @@ namespace tap::python {
         std::size_t input_count() const noexcept { return m_inputs; }
         std::size_t output_count() const noexcept { return m_outputs; }
 
+        /// The names of process()'s input parameters, in order (for the host's inlet help). Main
+        /// thread, after load().
+        const std::vector<std::string>& input_names() const noexcept { return m_input_names; }
+
         /// The most inputs, and the most outputs, a process() may declare.
         static constexpr std::size_t k_max_channels = 64;
 
@@ -226,6 +230,7 @@ namespace tap::python {
             previous.block_mode       = std::exchange(m_block_mode, next.block_mode);
             m_inputs                  = next.inputs;
             m_outputs                 = next.outputs;
+            previous.input_names      = std::exchange(m_input_names, std::move(next.input_names));
             previous.attributes       = std::exchange(m_attributes, std::move(next.attributes));
             previous.messages         = std::exchange(m_messages, std::move(next.messages));
             next.instance             = nullptr;
@@ -505,6 +510,7 @@ namespace tap::python {
             bool                        block_mode{};       // process() takes and returns np.ndarray
             std::size_t                 inputs{1};          // the signal inputs process() declares
             std::size_t                 outputs{1};         // and the outputs
+            std::vector<std::string>    input_names;        // process()'s input parameters
             std::vector<attribute_info> attributes;
             std::vector<bound_message>  messages;
         };
@@ -522,11 +528,12 @@ namespace tap::python {
         std::vector<attribute_info> m_attributes;
         std::vector<bound_message>  m_messages;
         // The rest of the binding and the block buffer: read and written only under the GIL.
-        PyObject*   m_prepare_function{}; // strong, or null
-        bool        m_block_mode{};
-        std::size_t m_inputs{1}; // the bound process()'s inputs and outputs
-        std::size_t m_outputs{1};
-        bool        m_announcing{}; // this load() ran the file: see announce()
+        PyObject*                m_prepare_function{}; // strong, or null
+        bool                     m_block_mode{};
+        std::size_t              m_inputs{1}; // the bound process()'s inputs and outputs
+        std::size_t              m_outputs{1};
+        std::vector<std::string> m_input_names;  // main thread only
+        bool                     m_announcing{}; // this load() ran the file: see announce()
         // The np.ndarray each input arrives in, reused every vector: strong, its buffer held so its
         // memory cannot move.
         struct block_buffer {
@@ -1272,12 +1279,14 @@ namespace tap::python {
             }
             // 2.4: the positional parameters are the signal inputs, all per vector (np.ndarray) or all
             // per sample; the return hint names the outputs — one value, or tuple[...] of n
-            std::size_t inputs     = 0;
-            std::size_t per_vector = 0;
-            bool        var_inputs = false;
+            std::size_t              inputs     = 0;
+            std::size_t              per_vector = 0;
+            bool                     var_inputs = false;
+            std::vector<std::string> names;
             for (const auto& p : sig->parameters) {
                 if (p.parameter_kind == k_positional_only || p.parameter_kind == k_positional_or_named) {
                     ++inputs;
+                    names.push_back(p.name);
                     per_vector += p.kind == "ndarray" ? 1 : 0;
                 }
                 var_inputs = var_inputs || p.parameter_kind == k_var_positional;
@@ -1309,6 +1318,7 @@ namespace tap::python {
             b.block_mode       = block_input; // announced by load() once the binding is in place
             b.inputs           = inputs;
             b.outputs          = outputs;
+            b.input_names      = std::move(names);
         }
 
         /// Bind a public method as a message, described by its signature. A keyword-only parameter

@@ -24,6 +24,16 @@ class maxtest_editor:
         source = re.sub(r"^REVISION = .*$", f"REVISION = {revision + 1}", source, count=1, flags=re.M)
         path.write_text(source, encoding="utf-8")
 
+    def reshape(self, name: str, inputs: int, outputs: int) -> None:
+        """Save the file as a class with `inputs` inputs and `outputs` outputs, each output passing the
+        input in its position (or silence): process() changes shape (plan 2.4)."""
+        parameters = "".join(f", x{i}: float" for i in range(inputs))
+        values = [f"x{i}" if i < inputs else "0.0" for i in range(outputs)]
+        returns = "float" if outputs == 1 else "tuple[" + ", ".join(["float"] * outputs) + "]"
+        result = values[0] if outputs == 1 else "(" + ", ".join(values) + ")"
+        source = f"class {name}:\n    def process(self{parameters}) -> {returns}:\n        return {result}\n"
+        self._file(name).write_text(source, encoding="utf-8")
+
     def remove_field(self, name: str, field: str) -> None:
         path = self._file(name)
         source = re.sub(rf"^\s+{field}: .*\n", "", path.read_text(encoding="utf-8"), count=1, flags=re.M)
