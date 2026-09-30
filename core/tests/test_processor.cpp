@@ -444,3 +444,61 @@ SCENARIO("A file's load is announced once, by the processor that ran it (plan 6.
         }
     }
 }
+
+SCENARIO("A file that fails to load is reported once per save, not once per object (plan 6.10)") {
+    ensure_runtime();
+    write_script("broken_once", "class broken_once:\n"
+                                "    def process(self, x: float) -> float:\n"
+                                "        return x\n\n"
+                                "def (\n");
+    forget_loaded("broken_once");
+    const auto syntax_errors = [] {
+        const auto lines = console().lines();
+        return std::count_if(lines.begin(), lines.end(), [](const log_capture::line& l) {
+            return l.level == log_level::error && l.text.find("SyntaxError:") != std::string::npos;
+        });
+    };
+    log_capture first_log;
+    log_capture second_log;
+    processor   first{"broken_once", first_log.sink()};
+    processor   second{"broken_once", second_log.sink()};
+    console().clear();
+    CHECK_FALSE(first.load());
+    CHECK_FALSE(second.load());
+
+    THEN("the first to load it says why, once; the other is quiet — and silent") {
+        CHECK(first_log.contains("Failed to load", log_level::error));
+        CHECK(second_log.lines().empty());
+        CHECK(syntax_errors() == 1);
+        CHECK(all_equal(render(second, 0.5), 0.0));
+    }
+    WHEN("the file is saved broken another way") {
+        first_log.clear();
+        second_log.clear();
+        console().clear();
+        write_script("broken_once", "class broken_once:\n    pass\n\n)\n");
+        CHECK_FALSE(second.load());
+        CHECK_FALSE(first.load());
+        THEN("that save is reported, once") {
+            CHECK(second_log.contains("Failed to load", log_level::error));
+            CHECK(first_log.lines().empty());
+            CHECK(syntax_errors() == 1);
+        }
+    }
+    WHEN("an object is made later, with the file still broken") {
+        const auto set_window = [](const double seconds) { // "later": past the loader's window
+            gil_lock  lock;
+            PyObject* value = PyFloat_FromDouble(seconds);
+            PyDict_SetItemString(detail::support_globals(), "_REPORT_WINDOW", value);
+            Py_DECREF(value);
+        };
+        set_window(0.0);
+        log_capture later_log;
+        processor   later{"broken_once", later_log.sink()};
+        CHECK_FALSE(later.load());
+        set_window(2.0);
+        THEN("it says why it is silent") {
+            CHECK(later_log.contains("Failed to load", log_level::error));
+        }
+    }
+}

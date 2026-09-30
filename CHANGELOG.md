@@ -6,6 +6,15 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ## Unreleased
 
+### Changed — a broken file is reported once
+
+- **A save that breaks a class file is reported once, however many objects share it.** Every
+  object used to run the file and print its traceback: a syntax error with 25 objects printed 25
+  tracebacks. Now a failure of the same source already reported in the last two seconds — the
+  same save, or a patch opening many objects at once — is not reported again, while an object
+  created later with the file still broken says why it is silent. Every load still runs the file,
+  in case something it imports has been fixed. (Plan 6.10.)
+
 ### Changed — reloads and the audio thread
 
 - **A reload no longer holds up the audio for its whole length.** The interpreter now hands itself
