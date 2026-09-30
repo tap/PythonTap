@@ -316,13 +316,15 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
 - [ ] **6.5 The first release** (4.5) — tag a pre-1.0 version, check the draft's three zips install
   and run from `Packages/` on Apple Silicon, Intel (or Rosetta) and Windows; later, with
   credentials, that signed and notarized packages load without the quarantine step.
-- [ ] **6.6 Text files default to ASCII** — found by 6.1: the interpreter is configured with
+- [x] **6.6 Text files default to ASCII** — found by 6.1: the interpreter is configured with
   `PyConfig_InitIsolatedConfig`, whose pre-configuration leaves the locale unconfigured and UTF-8
   mode off, so in Max `open()` and `Path.read_text()` without `encoding=` decode as ASCII, whatever
   `LANG` says (as in any host that leaves the C locale in place); a class reading a UTF-8 file
   fails with `UnicodeDecodeError`. Proposed:
   pre-initialize with UTF-8 mode on (PEP 686 makes it the default from Python 3.15), pinned first by
-  a core test — a contract change for the CHANGELOG.
+  a core test — a contract change for the CHANGELOG. *Done:* `initialize()` pre-initializes the
+  isolated configuration with `utf8_mode = 1`; `test_runtime.cpp` checks the flag and that
+  `open()` reads and writes UTF-8 without an `encoding`, and failed before the change.
 - [ ] **6.7 Console lines per reload** — found by 6.2: every instance posts two lines on every
   reload ("Source file update detected. Reloading." and "Audio process() bound: …"), so a save
   with 25 instances of a class posts 50. Max's console keeps every line, even after the window is

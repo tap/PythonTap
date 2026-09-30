@@ -453,6 +453,17 @@ def describe(fn):
             detail::init_thread()       = std::this_thread::get_id();
             PyImport_AppendInittab("_maxconsole", detail::console_module_init);
 
+            // UTF-8 mode (PEP 540, the default from Python 3.15): open() and friends default to
+            // UTF-8. The isolated pre-configuration below leaves it off and the host's locale
+            // unconfigured, which made them ASCII — whatever LANG says, and on every platform.
+            PyPreConfig preconfig;
+            PyPreConfig_InitIsolatedConfig(&preconfig);
+            preconfig.utf8_mode = 1;
+            if (const PyStatus pre = Py_PreInitialize(&preconfig); PyStatus_Exception(pre)) {
+                s_status.error = pre.err_msg ? pre.err_msg : "pre-initialization failed";
+                return;
+            }
+
             PyConfig config;
             PyConfig_InitIsolatedConfig(&config); // ignore environment variables and user site-packages
             config.install_signal_handlers = 0;   // we are a plugin: never steal signal handling from the host

@@ -6,6 +6,14 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ## Unreleased
 
+### Changed — text encoding
+
+- **Text files are UTF-8 by default.** The interpreter now runs in Python's UTF-8 mode (PEP 540,
+  Python's own default from 3.15), so `open()`, `Path.read_text()` and the like read and write
+  UTF-8 unless given another `encoding`. Before, they used ASCII — whatever the machine's locale —
+  and a class reading a UTF-8 file failed with `UnicodeDecodeError`. (Plan 6.6, found by the
+  runtime tests.)
+
 ### Added — examples
 
 - **`numpy_allpass.py`**: the allpass filter of `allpass.py`, processed a vector at a time with
