@@ -267,15 +267,18 @@ class python : public object<python>, public vector_operator<> {
         }
     }
 
-    /// The audio perform routine: the core calls the Python process() once per
-    /// sample, holding the GIL for the vector, and outputs silence while unbound.
+    /// The audio perform routine: the core calls the Python process() once per sample or per
+    /// vector, holding the GIL for the vector, and outputs silence while unbound.
     void operator()(audio_bundle input, audio_bundle output) {
         if (!m_processor) {
             output.clear();
             return;
         }
         try {
-            m_processor->process(input.samples(0), output.samples(0), static_cast<std::size_t>(input.frame_count()));
+            // every channel Max gives: the core matches them to what process() declares (plan 2.4)
+            m_processor->process(input.samples(), static_cast<std::size_t>(input.channel_count()), output.samples(),
+                                 static_cast<std::size_t>(output.channel_count()),
+                                 static_cast<std::size_t>(input.frame_count()));
         }
         catch (...) { // never let an exception unwind into the audio driver
             output.clear();

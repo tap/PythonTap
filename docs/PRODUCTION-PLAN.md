@@ -101,7 +101,19 @@ while audio ran segfaulted in 5 of 5 runs.
   newly loaded instance before it is published, so no vector ever runs on an unprepared instance.
   `allpass.py` uses it (and its α range is now open, per 5.4).
 - [ ] **2.4 Multiple inlets/outlets** — `process` arguments define signal inlets and a tuple
-  return defines outlets, fixed at construction.
+  return defines outlets, fixed at construction. *Decided (2026-09-30):* when a save changes the
+  counts, the object adapts its inlets and outlets in place with Max's dynamic inlets and outlets
+  (`dynlet_begin`/`dynlet_end` around `dsp_resize` and `outlet_append`/`outlet_delete`, as
+  Cycling '74 describes in its developer forum) rather than asking for the object to be
+  re-created. Three steps: *(a) the core — done:* `processor::process()` takes N input and M
+  output channels; the positional parameters are the inputs (all `np.ndarray` or all per sample;
+  none makes a generator), the return hint the outputs (`tuple[float, float]` for two; a tuple of
+  unsaid length, `*args` or mixed hints are reported and not bound); `input_count()` and
+  `output_count()` tell the host; the host's channels are matched to the class's (a missing input
+  reads as silence, an extra output is silent); a result of the wrong length is silenced and
+  reported once per load. *(b) the Max object's inlets and outlets from the class at creation;
+  (c) adapting them on reload (dynlets).* Until (b), the object keeps one inlet and one outlet: a
+  class with two inputs binds, its second input silent.
 - [ ] **2.5 Worker mode (D1)** — `@mode worker`: Python on a worker thread, lock-free FIFO,
   latency reported to Max, underrun → silence.
 - [x] **2.6 Shorter reload stalls** — compile outside the swap and hold the GIL only for the swap.

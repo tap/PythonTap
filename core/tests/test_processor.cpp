@@ -294,29 +294,15 @@ SCENARIO("process() raising silences the rest of the vector and unbinds until th
     }
 }
 
-SCENARIO("process() declaring a tuple return is not bound") {
+SCENARIO("process() returning a tuple of unsaid length is not bound") {
     ensure_runtime();
     log_capture log;
     processor   p{"tuple_return", log.sink()};
 
     REQUIRE(p.load());
     CHECK_FALSE(p.has_process());
-    CHECK(log.contains("process() returns a tuple", log_level::error));
+    CHECK(log.contains("process() returns a tuple without saying how many values", log_level::error));
     CHECK(all_equal(render(p, 1.0), 0.0));
-}
-
-SCENARIO("process() declaring more than one input is bound with a warning, and then fails") {
-    ensure_runtime();
-    log_capture log;
-    processor   p{"two_inputs", log.sink()};
-
-    REQUIRE(p.load());
-    CHECK(log.contains("process() declares 2 inputs but only the first is supported", log_level::error));
-    CHECK(p.has_process());
-
-    // honest limit (Phase 2.4): the call passes one argument, so the first sample raises TypeError
-    CHECK(all_equal(render(p, 1.0), 0.0));
-    CHECK_FALSE(p.has_process());
 }
 
 // The reload scenarios are linear (no sibling sections): Catch2 re-runs a scenario once per

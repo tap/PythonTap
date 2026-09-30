@@ -1,4 +1,4 @@
-# Test fixture: process() declares a tuple return, which is not supported yet.
+# Test fixture: process() returns a tuple without saying how many values (plan 2.4).
 
 
 class tuple_return:
