@@ -63,7 +63,8 @@ class python : public object<python>, public vector_operator<> {
                             "Reload the Python file. The object's file watcher sends it when the file is saved; "
                             "send it yourself to force a reload.",
                             MIN_FUNCTION {
-                                cout << "Source file update detected. Reloading." << endl;
+                                // not announced here: the processor that runs the changed file says
+                                // so, once, however many objects share it (plan 6.7)
                                 try {
                                     update_source();
                                 }

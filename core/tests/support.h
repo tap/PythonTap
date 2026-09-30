@@ -99,6 +99,18 @@ namespace tap::python::test {
         return PyRun_SimpleString(source.c_str()) == 0;
     }
 
+    /// Forget which revision of `<name>.py` was last run, so that the next load() runs it again —
+    /// and so says what is true of its class, as a first load in a fresh process does (plan 6.7).
+    /// For scenarios whose sections load the same file again and check what the load logged.
+    inline void forget_loaded(const std::string& name) {
+        gil_lock lock;
+        if (PyObject* cache = detail::support("_cache")) { // borrowed
+            if (PyDict_DelItemString(cache, ("_tap_python_" + name).c_str()) != 0) {
+                PyErr_Clear(); // not loaded yet
+            }
+        }
+    }
+
     /// Write `<scripts_dir>/<name>.py` (tests that reload rewrite their own uniquely named module).
     inline void write_script(const std::string& name, const std::string& source) {
         std::ofstream file{scripts_dir() / (name + ".py"), std::ios::trunc};

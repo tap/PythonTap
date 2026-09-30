@@ -80,6 +80,7 @@ SCENARIO("Messages are dispatched by the method's signature") {
     ensure_runtime();
     log_capture log;
     processor   p{"typed", log.sink()};
+    forget_loaded("typed"); // each section's load runs the file, so logs what is true of the class
     REQUIRE(p.load());
     const auto messages = p.messages();
 
@@ -181,6 +182,7 @@ SCENARIO("process() binds only as a plain instance method") {
         for (const auto* name : {"process_classmethod", "process_staticmethod"}) {
             log_capture log;
             processor   p{name, log.sink()};
+            forget_loaded(name); // this load runs the file, so logs what is true of the class
             REQUIRE(p.load());
             THEN(std::string{name} + " is loaded, but its audio is not bound, and the log says why") {
                 CHECK_FALSE(p.has_process());

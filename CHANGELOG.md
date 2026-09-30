@@ -6,6 +6,17 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ## Unreleased
 
+### Changed — the console on reload
+
+- **One line per save, however many objects share the file.** Every object used to post two lines
+  on every reload ("Source file update detected. Reloading." and "Audio process() bound: …"), so a
+  save with 25 objects of one class posted 50 — and Max keeps every line it is sent. Now the object
+  that runs the changed file posts one, `Loaded name.py: process() bound, one call per sample` (or
+  per vector, or that nothing is bound), and what is true of the class — a type-hint error, a
+  method skipped for its name, a `process()` that cannot be bound — is reported with it, once. A
+  reload of an unchanged file posts nothing. Errors particular to one object are still reported by
+  each. (Plan 6.7, found by the soak test.)
+
 ### Changed — text encoding
 
 - **Text files are UTF-8 by default.** The interpreter now runs in Python's UTF-8 mode (PEP 540,

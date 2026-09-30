@@ -557,6 +557,25 @@ def many_instances() -> Test:
     return t
 
 
+def announce_once() -> Test:
+    t = Test("tap.python~.announce-once.maxtest.maxpat",
+             "What is true of a class is said once per run of its file, however many objects share it "
+             "(plan 6.7): five instances of a class with a reserved method name, reporting it once on "
+             "load, once more after the file changes, and not at all when an unchanged file reloads.",
+             audio=False)
+    host = t.host()  # loaded by the first step, so that what the objects print is caught
+    editor = t.python("maxtest_editor", column=1)
+    pattern = "is.reserved"
+    t.count_errors(pattern)
+    t.step(t.load(host, "maxtest_reserved", voices=5), t.send("target 0", host))
+    t.step(t.errors_are("said-once-for-five-objects", "== 1", pattern))
+    t.step(t.send("bump maxtest_reserved", editor), t.send("filechanged", host))
+    t.step(t.errors_are("said-once-more-after-a-change", "== 2", pattern))
+    t.step(t.send("filechanged", host))
+    t.step(t.errors_are("unchanged-reload-says-nothing", "== 2", pattern), wait=WATCH)
+    return t
+
+
 def faults() -> Test:
     t = Test("tap.python~.faults.maxtest.maxpat",
              "sys.exit() in a message is reported, not obeyed; NaN from process() is output as 0 "
@@ -743,7 +762,8 @@ def without_runtime_restart() -> Test:
     return t
 
 
-TESTS_TO_WRITE = [load, attributes_and_messages, reload, reload_under_audio, many_instances, faults, prepare,
+TESTS_TO_WRITE = [load, attributes_and_messages, reload, reload_under_audio, many_instances, announce_once, faults,
+                  prepare,
                   without_runtime, without_runtime_restart]
 
 

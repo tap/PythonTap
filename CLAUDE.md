@@ -117,6 +117,11 @@ the secrets exist, and attaches zips + SHA256s to a draft release.
   which such a call crashes — so
   the watcher is owned by a nobox helper with the SDK's signature (`tap.python_tilde_filewatch.h`).
   Check the SDK's calling convention before exposing a Max-called method as a `message<>`.
+- **Say what is true of a class once, what is true of an instance per instance.** Many objects can
+  share one class file; only the processor whose `load()` ran the file (`load_script` says so)
+  announces the class — its `Loaded` line and its diagnostics — through `announce()` (plan 6.7).
+  Use `log()` only for what concerns one instance. Tests that load a file again and check what was
+  announced call `forget_loaded()` first.
 - Report user exceptions with `tap::python::report_exception()`, **never `PyErr_Print()`**: for a
   `SystemExit` it calls `Py_Exit()` and quits Max. Never finalize the interpreter, and never let a C++
   exception cross a Max callback (the trampolines are wrapped in `guarded()`).
