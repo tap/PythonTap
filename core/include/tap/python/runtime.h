@@ -187,8 +187,11 @@ namespace tap::python {
         // staticmethods — found without running descriptors, so a property getter never runs just
         // because the class was loaded. Each callable is bound: call it with the arguments only.
         //
-        // describe(callable) -> ([(name, kind, parameter_kind, has_default)], return_kind, error).
-        // parameter_kind is inspect.Parameter.kind as an int.
+        // describe(callable) -> ([(name, kind, parameter_kind, has_default)], return_kind, error,
+        // return_count, return_element_kind). parameter_kind is inspect.Parameter.kind as an int.
+        // return_count is how many values a return hint declares: 1, or n for tuple[a, b, ...] (-1
+        // when a tuple's length is not said: tuple, tuple[float, ...]); return_element_kind is the
+        // hint kind of the value, or of a tuple's first element.
         inline constexpr const char* k_support_source = R"(
 import inspect, re, sys, types, typing
 
@@ -283,7 +286,29 @@ def describe(fn):
          p.default is not inspect.Parameter.empty)
         for p in inspect.signature(fn).parameters.values()
     ]
-    return parameters, hint_kind(hints.get('return', inspect.Parameter.empty)), error
+    returned = hints.get('return', inspect.Parameter.empty)
+    return (parameters, hint_kind(returned), error) + return_shape(returned)
+
+def return_shape(hint):
+    if hint is inspect.Parameter.empty:
+        return 1, 'any'
+    if isinstance(hint, str):
+        text = hint.strip()
+        for prefix in ('typing.Tuple[', 'Tuple[', 'tuple['):
+            if text.startswith(prefix) and text.endswith(']'):
+                parts = [p.strip() for p in text[len(prefix):-1].split(',')]
+                if '...' in parts or parts == ['']:
+                    return -1, 'any'
+                return len(parts), hint_kind(parts[0])
+        if text in ('tuple', 'Tuple', 'typing.Tuple'):
+            return -1, 'any'
+        return 1, hint_kind(hint)
+    if hint is tuple or typing.get_origin(hint) is tuple:
+        args = typing.get_args(hint)
+        if not args or Ellipsis in args or args == ((),):
+            return -1, 'any'
+        return len(args), hint_kind(args[0])
+    return 1, hint_kind(hint)
 )";
 
         /// Create the support module (initialize() calls this with the GIL held).
