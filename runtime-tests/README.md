@@ -12,7 +12,12 @@ python3 runtime-tests/run.py              # everything (~2 minutes); exit status
 python3 runtime-tests/run.py --only reload -v
 python3 runtime-tests/run.py --session soak   # the hour-long soak (plan 6.2)
 python3 runtime-tests/run.py --session perf   # Max's CPU meter under load (plan 6.3, ~4 minutes)
+python3 runtime-tests/run.py --package ~/Documents/Max\ 9/Packages/PythonTap   # an installed release
 ```
+
+`--package` tests a package installed in `Packages` as `PythonTap` — a release zip unzipped there —
+instead of this checkout: its external, its runtime and its `python/` folder; the harness, the
+patchers and the fixtures still come from here (plan 6.5).
 
 Needs macOS, Max 9 in `/Applications` (`--max` for another), the external built, the runtime
 installed, and the package in Max's `Packages` folder as `PythonTap` (see the ReadMe). Quit Max

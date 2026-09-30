@@ -8,6 +8,7 @@
     python3 runtime-tests/run.py --only reload -v    # the main tests whose names contain "reload"
     python3 runtime-tests/run.py --session soak      # the hour-long soak (plan 6.2), on its own
     python3 runtime-tests/run.py --session perf      # Max's CPU meter under load (plan 6.3)
+    python3 runtime-tests/run.py --package ~/Documents/Max\ 9/Packages/PythonTap   # an installed release
 
 Needs macOS with Max 9, the external built (cmake --build build), the runtime installed
 (scripts/install-runtime.sh), and the package in Max's Packages folder as "PythonTap". It launches
@@ -51,10 +52,12 @@ HARNESS = TESTS / "max-test"
 PATCHERS = TESTS / "patchers"
 FIXTURES = TESTS / "python"
 LOGS = TESTS / "logs"
-SCRIPTS_DIR = ROOT / "python"
-SUPPORT = ROOT / "support"
-SUPPORT_ASIDE = ROOT / "support.maxtest-aside"
-EXTERNAL = ROOT / "externals" / "tap.python~.mxo"
+# The package under test: this checkout, or with --package an installed one (use_package()).
+PACKAGE = ROOT
+SCRIPTS_DIR = PACKAGE / "python"
+SUPPORT = PACKAGE / "support"
+SUPPORT_ASIDE = PACKAGE / "support.maxtest-aside"
+EXTERNAL = PACKAGE / "externals" / "tap.python~.mxo"
 OSCAR = HARNESS / "extensions" / "oscar.mxo"
 
 # Must match misc/max-test-config.json: Max listens on one port and sends to the other.
@@ -196,8 +199,9 @@ class MaxSession:
         print(f"  launching Max (console: {self.console_path.relative_to(ROOT)})")
         self.wait_for("/ping/return", 180, poll="/ping", every=2)
         self.db_path = self.wait_for("/testdb/path", 30, poll="/testdb/path?", every=2)[0]
-        print("  waiting for Max's file database")
-        self.wait_for("/db/ready", 600, poll="/db/ready?", every=2)
+        # Not waiting for Max's file database: the tests are opened by name, through the search
+        # path, which does not need it (the harness's own "run everything" does). With a release
+        # installed it has taken minutes to report ready.
 
     def run_test(self, name: str, timeout: float) -> float:
         """Open one test patcher and wait for it to terminate itself. Returns the seconds taken."""
@@ -331,6 +335,18 @@ def perf_results(session: MaxSession, after_id: int) -> dict:
 # ---- setting up and putting things back --------------------------------------------------------
 
 
+def use_package(package: Path) -> None:
+    """Test the package at `package` — a release unzipped into Packages, say — instead of this
+    checkout: its external, its runtime, its python/ folder. The harness, the test patchers and the
+    fixtures still come from here."""
+    global PACKAGE, SCRIPTS_DIR, SUPPORT, SUPPORT_ASIDE, EXTERNAL
+    PACKAGE = package.resolve()
+    SCRIPTS_DIR = PACKAGE / "python"
+    SUPPORT = PACKAGE / "support"
+    SUPPORT_ASIDE = PACKAGE / "support.maxtest-aside"
+    EXTERNAL = PACKAGE / "externals" / "tap.python~.mxo"
+
+
 def check_prerequisites(max_app: Path, packages: Path) -> None:
     if sys.platform != "darwin":
         raise RunError("the runtime tests run on macOS only (they launch Max)")
@@ -339,16 +355,17 @@ def check_prerequisites(max_app: Path, packages: Path) -> None:
     if subprocess.run(["pgrep", "-x", "Max"], capture_output=True).returncode == 0:
         raise RunError("Max is running — quit it first (the tests launch their own)")
     if not EXTERNAL.exists():
-        raise RunError("the external is not built — cmake -S . -B build && cmake --build build")
+        raise RunError("the external is not built — cmake -S . -B build && cmake --build build"
+                       if PACKAGE == ROOT else f"no external in {PACKAGE}")
     if not SUPPORT.exists():
-        raise RunError("no runtime in support/ — run scripts/install-runtime.sh")
+        raise RunError(f"no runtime in {SUPPORT} — run scripts/install-runtime.sh")
     if not packages.is_dir():
         raise RunError(f"no Max Packages folder at {packages} (use --packages)")
     ours = packages / "PythonTap"
-    if not ours.exists() or ours.resolve() != ROOT:
-        raise RunError(f"{ours} is not this checkout — clone the repo there or symlink it in "
-                       f"(ln -s {ROOT} {ours})")
-    others = [p for p in packages.glob("*/externals/tap.python~.mxo") if p.resolve().parents[1] != ROOT]
+    if not ours.exists() or ours.resolve() != PACKAGE:
+        raise RunError(f"{ours} is not {PACKAGE} — clone the repo there or symlink it in "
+                       f"(ln -s {PACKAGE} {ours})" if PACKAGE == ROOT else f"{ours} is not {PACKAGE}")
+    others = [p for p in packages.glob("*/externals/tap.python~.mxo") if p.resolve().parents[1] != PACKAGE]
     if others:
         raise RunError(f"another tap.python~ is installed, which Max could load instead: {others[0]}")
     if not (HARNESS / "source").is_dir():
@@ -423,7 +440,7 @@ def run_session(max_app: Path, name: str, steps: list, verbose: bool, timeout: f
     print(f"\n== session: {name}")
     session = MaxSession(max_app, name, verbose)
     expected = [s for s in steps if isinstance(s, str)]
-    first_id = 0
+    first_id: int | None = None  # the last test recorded before this session: its results come after
     try:
         session.start()
         first_id = last_test_id(session.db_path)
@@ -439,11 +456,18 @@ def run_session(max_app: Path, name: str, steps: list, verbose: bool, timeout: f
     except RunError as error:
         print(f"  ERROR: {error}")
         session.quit()
-        failures = report(session.db_path, first_id, expected) if session.db_path else []
+        if first_id is None:  # Max never got as far as a test
+            failures = [f"{test}: never ran" for test in expected]
+            for test in expected:
+                print(f"  FAIL  {test}  (never ran)")
+        else:
+            failures = report(session.db_path, first_id, expected)
         failures.append(f"{name}: {error}")
     else:
         session.quit()
         failures = report(session.db_path, first_id, expected)
+    if first_id is None:
+        return failures
     if name == "soak":
         summary = soak_summary(session, first_id)
         (LOGS / "soak.summary").write_text(summary + "\n")
@@ -468,10 +492,15 @@ def main() -> int:
                         help="run only the main tests whose file names contain this (repeatable)")
     parser.add_argument("--timeout", type=float, default=180, help="seconds allowed per test patcher")
     parser.add_argument("--soak-timeout", type=float, default=120, help="minutes allowed for the soak")
+    parser.add_argument("--package", type=Path,
+                        help="test the package installed here (e.g. a release unzipped into Packages as "
+                             "PythonTap) instead of this checkout")
     parser.add_argument("--keep-link", action="store_true",
                         help=f"leave runtime-tests/ linked into Packages (as {TEST_PACKAGE}) afterwards")
     parser.add_argument("-v", "--verbose", action="store_true", help="print the harness's log as it runs")
     args = parser.parse_args()
+    if args.package:
+        use_package(args.package)
 
     main_tests = sorted(p.name for p in PATCHERS.glob("*.maxtest.maxpat"))
     if args.only:

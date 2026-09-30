@@ -210,13 +210,15 @@ jobs:
       - name: Checksums
         run: |
           cd dist
-          cat *.sha256 > SHA256SUMS
-          sha256sum -c SHA256SUMS
+          # from the zips themselves (joining the .sha256 files depended on each ending in a newline;
+          # Windows' does not), then each build's own .sha256 checked against them
+          sha256sum *.zip > SHA256SUMS
+          for f in *.zip.sha256; do sha256sum -c "$f"; done
 
       - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.zip dist/SHA256SUMS \
+          gh release create "$GITHUB_REF_NAME" dist/*.zip dist/*.zip.sha256 dist/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "PythonTap ${GITHUB_REF_NAME#v}" \
             --notes "See CHANGELOG.md for what changed. Unzip into Documents/Max 9/Packages; the Python runtime is included. On a Mac, choose arm64 for Apple Silicon or x86_64 for Intel (or for Max running under Rosetta)."
