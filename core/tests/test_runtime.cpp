@@ -125,3 +125,10 @@ SCENARIO("Text is UTF-8 by default, whatever the host's locale (plan 6.6)") {
         }
     }
 }
+
+SCENARIO("A thread waiting for the GIL gets it within half a millisecond (plan 2.6)") {
+    ensure_runtime();
+    // CPython's 5 ms let a reload keep the audio thread waiting past an I/O buffer's deadline
+    // (core/bench/reload_bench.cpp measures it); the runtime sets 0.5 ms
+    CHECK(run("import sys\nassert sys.getswitchinterval() == 0.0005, sys.getswitchinterval()\n"));
+}

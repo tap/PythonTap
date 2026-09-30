@@ -94,7 +94,7 @@ SCENARIO("Reloading while audio runs never crashes and never interrupts the audi
     REQUIRE(p.load());
 
     // make GIL hand-offs as frequent as possible, so reloads land mid-vector
-    REQUIRE(run("import sys\nsys.setswitchinterval(1e-6)"));
+    REQUIRE(run("import sys\n_switch_interval = sys.getswitchinterval()\nsys.setswitchinterval(1e-6)"));
 
     std::atomic<bool> stop{false};
     std::atomic<int>  wrong_samples{0};
@@ -125,7 +125,7 @@ SCENARIO("Reloading while audio runs never crashes and never interrupts the audi
     }
     stop = true;
     audio.join();
-    REQUIRE(run("import sys\nsys.setswitchinterval(0.005)"));
+    REQUIRE(run("import sys\nsys.setswitchinterval(_switch_interval)"));
 
     CHECK(reloads == 200);
     CHECK(wrong_samples.load() == 0); // no silent (or partial) vectors across 200 reloads
