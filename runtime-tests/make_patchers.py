@@ -557,6 +557,45 @@ def many_instances() -> Test:
     return t
 
 
+def channels() -> Test:
+    t = Test("tap.python~.channels.maxtest.maxpat",
+             "Several inputs and outputs (plan 2.4): process()'s parameters are the object's signal inlets "
+             "and its return hint its outlets — stereo_width's two of each, a generator's none (one inlet "
+             "still, for messages). A save that changes how many keeps the object's inlets and outlets "
+             "until it is re-created: a missing output is silent.")
+    left, right = t.signal(0.8), t.signal(0.2)
+    width = t.obj("tap.python~ stereo_width", inlets=2, outlets=2, signal=True)
+    t.patcher.connect(left, 0, width, 0)
+    t.patcher.connect(right, 0, width, 1)
+    generator = t.python("maxtest_generator")
+    a, b = t.signal(0.3), t.signal(0.6)
+    shape = t.obj("tap.python~ maxtest_shape", inlets=2, outlets=2, signal=True)
+    t.patcher.connect(a, 0, shape, 0)
+    t.patcher.connect(b, 0, shape, 1)
+    editor = t.python("maxtest_editor", column=1)
+
+    def outlet(box: str, n: int) -> str:  # a box passing outlet n of `box` on, to sample
+        through = t.patcher.box("+~ 0.", inlets=2, column=3, outlettype=["signal"])
+        t.patcher.connect(box, n, through)
+        return through
+
+    width_left, width_right = outlet(width, 0), outlet(width, 1)
+    shape_first, shape_second = outlet(shape, 0), outlet(shape, 1)
+    t.step(t.sample_equals("stereo-left-at-width-1", width_left, 0.8),
+           t.sample_equals("stereo-right-at-width-1", width_right, 0.2),
+           t.sample_equals("generator-without-inputs", generator, 0.25),
+           t.sample_equals("second-input-to-second-output", shape_second, 0.6))
+    t.step(t.send("width 0", width), t.send("level 0.5", generator))
+    t.step(t.sample_equals("mono-left-at-width-0", width_left, 0.5),
+           t.sample_equals("mono-right-at-width-0", width_right, 0.5),
+           t.sample_equals("generator-takes-messages", generator, 0.5))
+    t.step(t.send("reshape maxtest_shape 1 1", editor), t.send("filechanged", shape))
+    t.step(t.sample_equals("reshaped-first-output", shape_first, 0.3),
+           t.sample_equals("output-the-class-lost-is-silent", shape_second, 0.0),
+           t.errors_are("console-clean", "== 0"), wait=WATCH)
+    return t
+
+
 def announce_once() -> Test:
     t = Test("tap.python~.announce-once.maxtest.maxpat",
              "What is true of a class is said once per run of its file, however many objects share it "
@@ -768,7 +807,8 @@ def without_runtime_restart() -> Test:
     return t
 
 
-TESTS_TO_WRITE = [load, attributes_and_messages, reload, reload_under_audio, many_instances, announce_once, faults,
+TESTS_TO_WRITE = [load, attributes_and_messages, reload, reload_under_audio, many_instances, channels, announce_once,
+                  faults,
                   prepare,
                   without_runtime, without_runtime_restart]
 
