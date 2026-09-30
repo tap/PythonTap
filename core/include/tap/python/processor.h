@@ -109,6 +109,10 @@ namespace tap::python {
         /// True while process() is bound to the class's process() method.
         bool has_process() const noexcept { return m_process_function.load() != nullptr; }
 
+        /// True when the bound process() takes a whole vector (hinted np.ndarray), false when it is
+        /// called per sample. Main thread, after load().
+        bool block_mode() const noexcept { return m_block_mode; }
+
         /// Load `<scripts_dir>/<name>.py` (executing it only if its source changed since any
         /// processor last loaded it), instantiate the class, carry the previous instance's
         /// attribute values over, and rebuild the attribute and message descriptions. Returns true
@@ -150,6 +154,9 @@ namespace tap::python {
 
             bool      executed = false;
             PyObject* module   = load_script(m_source_name, executed);
+            // 6.7: what is true of the class — its diagnostics, how process() is called — is said once
+            // per execution of the file, by the processor that ran it; the others sharing it are quiet
+            m_announcing = executed;
             if (!module) {
                 report_exception();
                 log(log_level::error, "Failed to load " + path.string());
@@ -161,13 +168,13 @@ namespace tap::python {
             PyObject* py_class = PyObject_GetAttrString(m_module, m_source_name.c_str()); // strong
             if (!py_class) {
                 PyErr_Clear();
-                log(log_level::error, "No class named '" + m_source_name + "' in " + m_source_name + ".py");
+                announce(log_level::error, "No class named '" + m_source_name + "' in " + m_source_name + ".py");
                 release_binding();
                 return false;
             }
             if (!PyCallable_Check(py_class)) {
                 Py_DECREF(py_class);
-                log(log_level::error, "Cannot instantiate the Python class " + m_source_name);
+                announce(log_level::error, "Cannot instantiate the Python class " + m_source_name);
                 release_binding();
                 return false;
             }
@@ -210,6 +217,9 @@ namespace tap::python {
             reset_warnings(); // each kind of audio-thread problem is reported once per load
 
             release(previous); // may run finalizers, which may let other threads in: now safe
+            if (executed) {
+                log(log_level::info, "Loaded " + m_source_name + ".py: " + binding_description());
+            }
             return true;
         }
 
@@ -479,6 +489,7 @@ namespace tap::python {
         // The rest of the binding and the block buffer: read and written only under the GIL.
         PyObject*   m_prepare_function{}; // strong, or null
         bool        m_block_mode{};
+        bool        m_announcing{};  // this load() ran the file: see announce()
         PyObject*   m_block_input{}; // strong: the np.ndarray process() receives, reused every vector
         Py_buffer   m_block_view{};  // held while m_block_input is, so its memory cannot move
         double*     m_block_data{};
@@ -509,6 +520,23 @@ namespace tap::python {
             if (m_log) {
                 m_log(level, text);
             }
+        }
+
+        /// Log something true of the class rather than of this instance: only from the processor
+        /// whose load ran the file (see load()).
+        void announce(const log_level level, const std::string& text) const {
+            if (m_announcing) {
+                log(level, text);
+            }
+        }
+
+        /// How the class's audio is bound, for the line load() announces.
+        std::string binding_description() const {
+            if (!has_process()) {
+                return "no process() bound, so the object outputs silence";
+            }
+            return m_block_mode ? "process() bound, one call per vector (numpy)"
+                                : "process() bound, one call per sample";
         }
 
         /// A new reference to the current instance, or nullptr. Caller holds the GIL.
@@ -663,8 +691,8 @@ namespace tap::python {
                     // removed from the class
                 }
                 else if (found->type != c.info.type) {
-                    log(log_level::info,
-                        "attribute '" + c.info.name + "' changed type; it starts from the class default");
+                    announce(log_level::info,
+                             "attribute '" + c.info.name + "' changed type; it starts from the class default");
                 }
                 else if (PyObject_SetAttrString(b.instance, c.info.name.c_str(), c.value) != 0) {
                     report_exception();
@@ -943,7 +971,7 @@ namespace tap::python {
 
         /// Report a type-hint error the support module caught (a borrowed exception, or None).
         void report_hint_error(PyObject* error, const std::string& what) const {
-            if (!error || error == detail::none()) {
+            if (!m_announcing || !error || error == detail::none()) { // a class's hints: said once
                 return;
             }
             PyErr_DisplayException(error);
@@ -1060,8 +1088,8 @@ namespace tap::python {
                     bind_process(method, b);
                 }
                 else if (is_reserved(name)) {
-                    log(log_level::error,
-                        name + "() is reserved by the host and is not exposed as a message; rename the method");
+                    announce(log_level::error,
+                             name + "() is reserved by the host and is not exposed as a message; rename the method");
                 }
                 else {
                     bind_message(name, method, b);
@@ -1087,8 +1115,8 @@ namespace tap::python {
             Py_XDECREF(owner);
             if (!plain) {
                 Py_XDECREF(fn);
-                log(log_level::error, "process() must be a regular instance method (not a classmethod or "
-                                      "staticmethod); audio is not bound");
+                announce(log_level::error, "process() must be a regular instance method (not a classmethod or "
+                                           "staticmethod); audio is not bound");
                 return;
             }
             int  in_count    = 0;
@@ -1103,21 +1131,19 @@ namespace tap::python {
             }
 
             if (in_count > 1) {
-                log(log_level::error, "process() declares " + std::to_string(in_count)
-                                          + " inputs but only the first is supported (single-channel object)");
+                announce(log_level::error, "process() declares " + std::to_string(in_count)
+                                               + " inputs but only the first is supported (single-channel object)");
             }
             if (sig->return_kind == "tuple") {
-                log(log_level::error,
+                announce(
+                    log_level::error,
                     "process() returns a tuple — multichannel output is not supported yet; use a single float return");
                 Py_DECREF(fn);
                 return;
             }
 
-            b.process_function = fn; // takes the reference
-            b.block_mode       = block_input;
-
-            log(log_level::info, block_input ? "Audio process() bound: 1 input, 1 output, one call per vector (numpy)"
-                                             : "Audio process() bound: 1 input, 1 output, one call per sample");
+            b.process_function = fn;          // takes the reference
+            b.block_mode       = block_input; // announced by load() once the binding is in place
         }
 
         /// Bind a public method as a message, described by its signature. A keyword-only parameter
@@ -1144,9 +1170,9 @@ namespace tap::python {
                     break;
                 case k_keyword_only:
                     if (!p.has_default) {
-                        log(log_level::error, name + "() has a keyword-only parameter '" + p.name
-                                                  + "' without a default, which a message cannot pass; it is not "
-                                                    "exposed as a message");
+                        announce(log_level::error, name + "() has a keyword-only parameter '" + p.name
+                                                       + "' without a default, which a message cannot pass; it is not "
+                                                         "exposed as a message");
                         return;
                     }
                     break;

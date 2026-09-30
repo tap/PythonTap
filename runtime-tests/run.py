@@ -287,8 +287,8 @@ def soak_summary(session: MaxSession, after_id: int) -> str:
         lines.append(f"Max's memory: {start[1] / 1024:.0f} MB a minute in, {last[1] / 1024:.0f} MB at the end "
                      f"({(last[1] - start[1]) / 1024:+.1f} MB; peak {peak / 1024:.0f} MB)")
         lines.append("  each minute (MB): " + " ".join(f"{kb / 1024:.0f}" for _, kb in session.memory))
-    reloads = session.console_path.read_text(errors="replace").count("Source file update detected")
-    lines.append(f"reloads (objects told their file changed): {reloads}")
+    runs = session.console_path.read_text(errors="replace").count("Loaded maxtest_soak.py:")
+    lines.append(f"runs of maxtest_soak.py announced in the console: {runs}")
     if session.db_path:
         with sqlite3.connect(session.db_path) as db:
             logged = db.execute("SELECT text FROM logs WHERE test_id_ext > ? ORDER BY log_id", (after_id,)).fetchall()

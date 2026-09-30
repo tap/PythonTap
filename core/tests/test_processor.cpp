@@ -64,7 +64,7 @@ SCENARIO("Loading a class describes its attributes and messages") {
     REQUIRE(p.load());
     CHECK(p.loaded());
     CHECK(p.has_process());
-    CHECK(log.contains("Audio process() bound: 1 input, 1 output", log_level::info));
+    CHECK_FALSE(p.block_mode()); // process(self, x: float): once per sample
 
     THEN("annotated public fields become attributes, typed by their hints, in declaration order") {
         const auto& attributes = p.attributes();
@@ -261,7 +261,7 @@ SCENARIO("process() raising silences the rest of the vector and unbinds until th
     std::atomic<int> notified{0};
     processor        p{"raises_in_process", log.sink(), {}, [&] { ++notified; }};
     REQUIRE(p.load());
-    log.clear(); // drop load()'s own "process() bound" line
+    log.clear(); // drop load()'s own "Loaded" line
 
     console().clear();
     const auto out = render(p, 0.5, 8);
@@ -394,4 +394,53 @@ SCENARIO("A new processor after an edit runs the edited file") {
     processor second{"cached_module"};
     REQUIRE(second.load());
     CHECK(all_equal(render(second, 1.0), 10.0));
+}
+
+SCENARIO("A file's load is announced once, by the processor that ran it (plan 6.7)") {
+    ensure_runtime();
+    // dsp64 is reserved by the host: a diagnostic about the class, not about one instance
+    write_script("announce_once", "class announce_once:\n"
+                                  "    def dsp64(self) -> None:\n"
+                                  "        pass\n\n"
+                                  "    def process(self, x: float) -> float:\n"
+                                  "        return x\n");
+    log_capture first_log;
+    log_capture second_log;
+    processor   first{"announce_once", first_log.sink(), {"dsp64"}};
+    processor   second{"announce_once", second_log.sink(), {"dsp64"}};
+    REQUIRE(first.load());
+    REQUIRE(second.load());
+
+    THEN("the processor that ran the file says so once, with how process() is called; the other is quiet") {
+        CHECK(first_log.contains("Loaded announce_once.py: process() bound, one call per sample", log_level::info));
+        CHECK(first_log.contains("dsp64() is reserved", log_level::error));
+        CHECK(second_log.lines().empty());
+    }
+    WHEN("the file changes, and the other processor reloads first") {
+        first_log.clear();
+        second_log.clear();
+        write_script("announce_once", "import numpy as np\n\n"
+                                      "class announce_once:\n"
+                                      "    def process(self, x: np.ndarray) -> np.ndarray:\n"
+                                      "        return x\n");
+        REQUIRE(second.load());
+        REQUIRE(first.load());
+        THEN("that one announces the new class") {
+            CHECK(second_log.contains("Loaded announce_once.py: process() bound, one call per vector (numpy)",
+                                      log_level::info));
+            CHECK(first_log.lines().empty());
+            CHECK(first.block_mode());
+            CHECK(second.block_mode());
+        }
+    }
+    WHEN("both reload a file that did not change") {
+        first_log.clear();
+        second_log.clear();
+        REQUIRE(first.load());
+        REQUIRE(second.load());
+        THEN("neither says anything") {
+            CHECK(first_log.lines().empty());
+            CHECK(second_log.lines().empty());
+        }
+    }
 }

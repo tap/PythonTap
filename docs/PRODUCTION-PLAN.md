@@ -325,13 +325,19 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
   a core test — a contract change for the CHANGELOG. *Done:* `initialize()` pre-initializes the
   isolated configuration with `utf8_mode = 1`; `test_runtime.cpp` checks the flag and that
   `open()` reads and writes UTF-8 without an `encoding`, and failed before the change.
-- [ ] **6.7 Console lines per reload** — found by 6.2: every instance posts two lines on every
+- [x] **6.7 Console lines per reload** — found by 6.2: every instance posts two lines on every
   reload ("Source file update detected. Reloading." and "Audio process() bound: …"), so a save
   with 25 instances of a class posts 50. Max's console keeps every line, even after the window is
   cleared (about 0.24 KB each, measured), so an extreme reload rate grows Max's memory — 70 MB
   over the soak's 147,684 reloads, where a realistic rate (20 instances, a save a minute) costs
   about half a megabyte an hour. Proposed: one line per save of a file, from whichever instance reloads
   first, and the binding line only when it changes; a user-visible change for the CHANGELOG.
+  *Done:* the processor whose `load()` runs the file (the loader reports it) posts one line,
+  `Loaded name.py: …` with how `process()` is bound, and announces the class's diagnostics
+  (hints, reserved names, an unbindable `process()`) with it; the others sharing the file post
+  nothing, and the external's own reload line is gone. Errors particular to an instance are
+  unchanged. Pinned by a core test (two processors, a change, an unchanged reload) and a runtime
+  test (five objects in Max: the class's diagnostic once per run of the file).
 
 ## Phase 7 — plugin front ends (optional, post-1.0)
 

@@ -64,7 +64,7 @@ SCENARIO("A clean vector records nothing and never notifies the host") {
     ensure_runtime();
     harness h{"gain"};
     REQUIRE(h.p.load());
-    h.log.clear(); // drop load()'s own "process() bound" line
+    h.log.clear(); // drop load()'s own "Loaded" line
     console().clear();
 
     CHECK(all_equal(render(h.p, 0.5), 0.5));
@@ -78,7 +78,7 @@ SCENARIO("A non-numeric return from process() is output as 0.0 and reported once
     ensure_runtime();
     harness h{"non_number"};
     REQUIRE(h.p.load());
-    h.log.clear(); // drop load()'s own "process() bound" line
+    h.log.clear(); // drop load()'s own "Loaded" line
 
     CHECK(all_equal(render(h.p, 1.0), 0.0));
     CHECK(h.p.has_process()); // the audio keeps running
@@ -127,7 +127,7 @@ SCENARIO("A process() hinted np.ndarray is called once per vector") {
     harness h{"block_gain"};
     REQUIRE(h.p.load());
     h.p.prepare(48000.0, 64);
-    CHECK(h.log.contains("one call per vector (numpy)", log_level::info));
+    CHECK(h.p.block_mode());
 
     CHECK(all_equal(render(h.p, 0.5, 64), 0.25));
     CHECK(all_equal(render(h.p, 1.0, 64), 0.5));
@@ -145,7 +145,7 @@ SCENARIO("The per-sample path is called once per sample") {
     ensure_runtime();
     harness h{"gain"};
     REQUIRE(h.p.load());
-    CHECK(h.log.contains("one call per sample", log_level::info));
+    CHECK_FALSE(h.p.block_mode());
 }
 
 SCENARIO("The block input array is one array, reused every vector") {

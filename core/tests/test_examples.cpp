@@ -122,7 +122,7 @@ SCENARIO("numpy_gain.py processes a vector per call") {
     processor   p{"numpy_gain", log.sink()};
     REQUIRE(p.load());
     p.prepare(48000.0, 64);
-    CHECK(log.contains("one call per vector (numpy)", log_level::info));
+    CHECK(p.block_mode());
     CHECK(all_equal(render(p, 0.5, 64), 0.5));
     REQUIRE(p.set_attribute("gain", 0.5));
     CHECK(all_equal(render(p, 0.5, 64), 0.25));
@@ -134,12 +134,11 @@ SCENARIO("numpy_allpass.py computes exactly what allpass.py does, a vector at a 
         SKIP("attrs and numpy are not importable by the embedded interpreter");
     }
 
-    log_capture log;
-    processor   per_sample{"allpass"};
-    processor   per_vector{"numpy_allpass", log.sink()};
+    processor per_sample{"allpass"};
+    processor per_vector{"numpy_allpass"};
     REQUIRE(per_sample.load());
     REQUIRE(per_vector.load());
-    REQUIRE(log.contains("one call per vector (numpy)", log_level::info));
+    REQUIRE(per_vector.block_mode());
 
     // a delay shorter than the vector (the vector is split), then longer than it
     const auto            delay_ms = GENERATE(0.5, 1.0, 5.0);
