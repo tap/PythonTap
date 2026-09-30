@@ -91,7 +91,8 @@ def max_table(results: dict, python: Path, bench: dict) -> str:
     rate, vector_size = results["sample_rate"], results["vector_size"]
     described = {"default": ("`default.py`, per sample", "default", vector_size),
                  "numpy_gain": (f"`numpy_gain.py`, per vector of {vector_size}", "numpy_gain", vector_size),
-                 "allpass": ("`allpass.py`, per sample", "allpass", vector_size)}
+                 "allpass": ("`allpass.py`, per sample", "allpass", vector_size),
+                 "numpy_allpass": (f"`numpy_allpass.py`, per vector of {vector_size}", "numpy_allpass", vector_size)}
     predicted = {(m["subject"], m["sample_rate"], m["vector_size"]): m["load"] for m in bench["measurements"]}
     lines = [MAX_BEGIN, "",
              f"| In Max at {rate / 1000:g} kHz | Instances | Max's CPU meter | Each | `core/bench`, each |",
@@ -129,6 +130,21 @@ def spread(results: dict) -> float:
     return max(m["median"] / m["load"] - 1.0 for m in results["measurements"])
 
 
+def comparison(results: dict) -> list[str]:
+    """A sentence comparing allpass.py with numpy_allpass.py, from the measurements."""
+    load = {(m["subject"], m["sample_rate"], m["vector_size"]): m["load"] for m in results["measurements"]}
+    try:
+        pairs = [(rate, load[("allpass", rate, 64)], load[("numpy_allpass", rate, 64)]) for rate in (48000.0, 96000.0)]
+    except KeyError:
+        return []
+    ratios = " and ".join(f"{per_sample / per_vector:.0f}× less at {rate / 1000:g} kHz ({percent(per_vector)} of a core "
+                          f"against {percent(per_sample)})" for rate, per_sample, per_vector in pairs)
+    return ["", "`numpy_allpass.py` computes exactly what `allpass.py` does — the core battery checks it sample for "
+            f"sample — and in 64-sample vectors needs {ratios}. It computes a vector in stretches no longer than "
+            "the delay, one numpy expression each: the default 1 ms delay is 48 samples at 48 kHz, so a 64-sample "
+            "vector takes two, and 96 at 96 kHz, so it takes one — a delay shorter than the vector costs more."]
+
+
 def table(results: dict, python: Path) -> str:
     rows: dict[tuple, dict] = {}
     for m in results["measurements"]:
@@ -145,6 +161,7 @@ def table(results: dict, python: Path) -> str:
         form = f"per sample, vectors of {vector_size}" if not first["block"] else f"per vector of {vector_size}"
         lines.append(f"| {description} — {form} | {cost(row[48000.0])} | {percent(row[48000.0]['load'])} | "
                      f"{percent(row[96000.0]['load'])} |")
+    lines += comparison(results)
     lines += [
         "",
         f"The share of one core: each row timed once per round for seven rounds, interleaved, keeping its "

@@ -6,6 +6,12 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ## Unreleased
 
+### Added — examples
+
+- **`numpy_allpass.py`**: the allpass filter of `allpass.py`, processed a vector at a time with
+  numpy — the same output, sample for sample, at a small fraction of the cost (the ReadMe's
+  performance note compares the two).
+
 ### Fixed
 
 - **Saving the class file no longer crashes Max.** Max's file watcher calls the object's

@@ -414,17 +414,19 @@ class Test:
 
 def load() -> Test:
     t = Test("tap.python~.load.maxtest.maxpat",
-             "Loading: with no argument (python/default.py), the numpy example, and a class file with "
+             "Loading: with no argument (python/default.py), the numpy examples, and a class file with "
              "an attribute set by its argument; the standard int and float messages. Closing the "
              "patcher unloads them all.")
     source = t.signal(1.0)
     default = t.python("")
     block = t.python("numpy_gain @gain 0.25")
     gain = t.python("maxtest_gain @gain 0.5")
-    for py in (default, block, gain):
+    allpass = t.python("numpy_allpass")
+    for py in (default, block, gain, allpass):
         t.patcher.connect(source, 0, py)
     t.step(t.sample_equals("default-loads-with-unity-gain", default, 1.0),
            t.sample_equals("numpy-block-path-applies-gain", block, 0.25),
+           t.sample_equals("numpy-allpass-passes-dc-at-unity", allpass, 1.0),
            t.sample_equals("argument-sets-attribute", gain, 0.5),
            t.attribute_equals("attribute-reads-back", gain, "gain", 0.5))
     t.step(t.send("float 0.5", default))
@@ -679,7 +681,7 @@ def soak(minutes: float) -> Test:
 
 
 # (class, instances) measured by the perf patcher, at the audio device's own sample rate
-PERF_LOADS = [("default", 26), ("numpy_gain", 26), ("allpass", 1)]
+PERF_LOADS = [("default", 26), ("numpy_gain", 26), ("allpass", 1), ("numpy_allpass", 26)]
 PERF_READINGS = 10
 
 
@@ -690,8 +692,8 @@ def perf() -> Test:
     left to the device). Logged as "cpu <class> <instances> <percent>"; run.py averages the
     readings into logs/perf.json."""
     t = Test("perf/tap.python~.perf.maxpat",
-             "Max's DSP CPU meter (plan 6.3): no object, then instances of default.py, numpy_gain.py and "
-             "allpass.py in a poly~, at the audio device's sample rate. Each figure is "
+             "Max's DSP CPU meter (plan 6.3): no object, then instances of default.py, numpy_gain.py, "
+             "allpass.py and numpy_allpass.py in a poly~, at the audio device's sample rate. Each figure is "
              f"{PERF_READINGS} readings a second apart, after the load has run for 5 s.",
              watchdog=600_000)
     source = t.signal(0.5)
