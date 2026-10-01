@@ -308,7 +308,7 @@ while audio ran segfaulted in 5 of 5 runs.
   ships — Min-API, the Max SDK, CPython's, and each installed package's own (PEP 639
   `dist-info/licenses/`, where numpy lists what it bundles) — with an index, collected from the
   package's actual contents; CI runs the collection on Linux.
-- [ ] **4.7 uv for development and release tooling** — *Discussed (2026-09-30):* use uv where it
+- [x] **4.7 uv for development and release tooling** — *Discussed (2026-09-30):* use uv where it
   replaces work we do by hand; keep the shipped runtime a python-build-standalone archive pinned
   by SHA256 in `runtime.lock`. For uv: `uv pip compile --universal --generate-hashes` in place of
   most of `update-locks.py`'s PyPI handling; `uv pip install --python-platform <triple> --target …`
@@ -318,7 +318,18 @@ while audio ran segfaulted in 5 of 5 runs.
   version, installs in its own layout, and may mark the interpreter externally managed (to
   check) — and the work that matters (the `@rpath` install name, re-signing, the universal
   libpython) is ours either way. Users never need uv; the ReadMe may mention
-  `uv pip install --python support/bin/python3 …` beside pip.
+  `uv pip install --python support/bin/python3 …` beside pip. *Evaluated (2026-10-01, uv 0.12.21),
+  and it came down to documentation:* `uv pip compile --generate-hashes` lists every distribution
+  of each pin — 68 hashes for attrs and numpy, every Python version and platform, even with
+  `--python-platform` — where `update-locks.py` pins exactly the 8 wheels we ship, so it stays;
+  4.8 can merge the platform builds CI already makes, so it needs no cross-platform install
+  (which does work: Windows' numpy wheels installed on a Mac against our lock, hashes enforced);
+  the scripts use only the standard library, so `uv run` adds nothing; and `uv python install`
+  marks its interpreter `EXTERNALLY-MANAGED` (pip then refuses to install into it) and installed
+  3.13.15 against our pinned 3.13.14 — confirming the runtime stays ours. What uv is good for here
+  is now documented: `uv python install 3.13` for the Linux loop's CPython with headers (ReadMe,
+  CLAUDE.md), and `uv pip install --python support/bin/python3` for users adding packages to the
+  runtime (it is not externally managed).
 - [ ] **4.8 One package for every platform on each tag** — *Decided (2026-09-30):* a tag also
   attaches a single `PythonTap-<version>.zip` holding every platform's external and runtime, and
   v0.x tags publish as pre-releases automatically (1.0 and later stay drafts until signing
