@@ -432,9 +432,13 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
   and `run.py` says when Max has rewritten the page, to commit it. Max's page matches the committed
   one but for the description, which predated 2.4's text — now committed. The start-up lines are
   not this object's: they still appear while its page is written.
-- [ ] **6.9 The help patcher and `numpy_allpass.py`** — the help patcher points to the `numpy_gain`
+- [x] **6.9 The help patcher and `numpy_allpass.py`** — the help patcher points to the `numpy_gain`
   and `allpass` examples but not to `numpy_allpass`, the one that shows what the block path is for;
-  add it in Max (and re-save), perhaps with the measured comparison.
+  add it in Max (and re-save), perhaps with the measured comparison. *Done:* the examples note names
+  `numpy_allpass` as the same filter per vector, to swap in and watch the patcher's CPU meter (the
+  ReadMe's tables are the measured comparison); and a new note says what 2.4 made true —
+  `process()`'s parameters are the inlets, its return hint the outlets, `stereo_width` has two of
+  each, and a save that changes them changes the object. Checked open in Max 9.1.5.
 - [x] **6.10 One traceback per broken save** — a file that fails to load is not cached, so every
   object sharing it runs it and prints the traceback: 25 objects, 25 tracebacks. 6.7 left this
   alone, because the obvious fix — remember the failing source and stay quiet — would also hide
