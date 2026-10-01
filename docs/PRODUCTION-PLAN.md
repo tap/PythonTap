@@ -10,7 +10,11 @@ note the PR that closed them.
 ## The bar
 
 1. **User Python cannot take Max down.** No crash, no process exit, no hang from anything a user
-   script does (`sys.exit()`, exceptions, non-numeric returns, NaN, pathological names).
+   script does *that reaches Python's exception machinery* (`sys.exit()`, exceptions, non-numeric
+   returns, NaN, pathological names). What never reaches it is outside the guard and said so in the
+   ReadMe (8.1): a process exit below Python (`os._exit()`), a crash in a C extension, and code that
+   never returns — which freezes the thread it runs on (main for a message, audio for `process()`;
+   worker mode confines the latter to the worker thread and, since 8.3, stops it or abandons it).
 2. **The audio thread is protected.** No crash, no allocation or console posting on the hot path,
    and a defined, documented behavior (silence, not a stall) when Python misbehaves.
 3. **Every documented behavior is pinned by a test** — unit (mock kernel) where possible, in-Max
@@ -24,7 +28,7 @@ note the PR that closed them.
 |---|---|---|
 | D1 | Where `process()` runs | **Direct now, worker later.** A block path called once per vector on the audio thread (zero latency); the per-sample path stays as a documented slow path; an opt-in worker-thread mode (`@mode worker`, lock-free FIFO, ≥1 vector latency, audio thread never takes the GIL) follows. |
 | D1a | Opting into the block path | **By type hint.** `process(self, x: np.ndarray) -> np.ndarray` is called per vector; `process(self, x: float) -> float` per sample. Detected at bind time. |
-| D2 | How `[tap.python~ name]` loads code | **File-based.** `python/<name>.py` is loaded by path (`importlib.util.spec_from_file_location`) under a private module name (`_tap_python_user.<name>`); `name` must be an identifier; `python/` is *appended* to `sys.path` so sibling-helper imports keep working without shadowing the stdlib. |
+| D2 | How `[tap.python~ name]` loads code | **File-based.** `python/<name>.py` is loaded by path — its source compiled and executed by the loader in the support module (3.5), never imported, so no `.pyc` is read or written for it (3.6a) — as a fresh module registered in `sys.modules` as `_tap_python_<name>` (with `__file__` only: no `__spec__` or `__package__`, so no relative imports; the folder is flat by design); `name` must be an identifier; `python/` is *appended* to `sys.path` so sibling-helper imports keep working without shadowing the stdlib. *(Revised with 8.1: the first draft named `importlib.util.spec_from_file_location` and `_tap_python_user.<name>`.)* |
 | D3 | How users get the runtime | **Bundled in the release.** CI assembles a complete per-platform package (externals, `support/` with CPython + attrs + numpy, `python/`, help, docs, licenses). `scripts/install-runtime.*` stays for source builds. Signing/notarization steps are wired but **skip cleanly until credentials exist** (none yet). |
 | D4 | Python version policy | **Pin 3.13; upgrade deliberately.** One CPython minor per release; a move (e.g. to 3.14's deferred annotations) is its own PR with tests. No free-threaded or subinterpreter builds until numpy supports them. |
 | D5 | Compatibility before 1.0 | **Breaking changes to the class contract are allowed** where they buy correctness (reserved names, file-based loading, signature dispatch). Each is recorded in a `CHANGELOG.md`; the shipped examples are updated in the same PR. |
@@ -552,7 +556,7 @@ each contract change recorded in `CHANGELOG.md` (D5). The honest limits that rem
 down rather than discovered again. *This plan was itself audited before being adopted
 (2026-10-01); what that changed is marked "revised".*
 
-- [ ] **8.1 Say what is true (A4, A7a, A12 — docs and small hardening, no behavior change).**
+- [x] **8.1 Say what is true (A4, A7a, A12 — docs and small hardening, no behavior change).**
   ReadMe lines 17 and 101, and bar 1 above: *no Python exception*, `sys.exit()` included, takes
   Max down or stops the object — what happens below Python (`os._exit()`, a C extension crashing)
   or never returns to it (an endless loop in a message freezes Max's main thread; in `process()`
@@ -565,7 +569,14 @@ down rather than discovered again. *This plan was itself audited before being ad
   absolute or resolves outside the destination, and check every written path), and pin the
   taphouse drift workflow by SHA or note the exception beside the policy comment (A11). *Done
   when:* the three documents agree with each other and with the code; `--merge` of a crafted zip
-  with a `../` symlink entry fails.
+  with a `../` symlink entry fails. *Done:* the ReadMe's two sentences and bar 1 now name what the
+  guards cover and what they cannot; helpers and a second interpreter are stated; D2 corrected;
+  CLAUDE.md carries the rule. `extract()` refuses an entry whose path leaves the destination
+  (through `..`, an absolute path, or a symlink an earlier entry made) and a symlink whose target
+  is absolute or resolves outside — checked with four crafted zips (a `..` name, an absolute link,
+  an escaping link, a write through an escaping link), all refused, and an honest zip whose
+  `bin/python3` link survives. The taphouse drift check stays pinned by release, with the reason
+  beside the policy comment.
 - [ ] **8.2 Crash and contract fixes in the core and the glue (A2, A3).**
   *A2:* `process_samples()` sanitizes the samples already written before each of its two early
   returns (input conversion failing; the call raising). Test first, in `test_realtime.cpp`: the
