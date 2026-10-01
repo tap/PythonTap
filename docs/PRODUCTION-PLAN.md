@@ -291,6 +291,28 @@ while audio ran segfaulted in 5 of 5 runs.
   ships — Min-API, the Max SDK, CPython's, and each installed package's own (PEP 639
   `dist-info/licenses/`, where numpy lists what it bundles) — with an index, collected from the
   package's actual contents; CI runs the collection on Linux.
+- [ ] **4.7 uv for development and release tooling** — *Discussed (2026-09-30):* use uv where it
+  replaces work we do by hand; keep the shipped runtime a python-build-standalone archive pinned
+  by SHA256 in `runtime.lock`. For uv: `uv pip compile --universal --generate-hashes` in place of
+  most of `update-locks.py`'s PyPI handling; `uv pip install --python-platform <triple> --target …`
+  to install any platform's wheels from any machine (what 4.8 needs); `uv python install 3.13` for
+  the Linux fast loop's CPython with headers; `uv run` with inline script metadata for the
+  scripts. Against using it for the runtime: `uv python install` pins only through the uv
+  version, installs in its own layout, and may mark the interpreter externally managed (to
+  check) — and the work that matters (the `@rpath` install name, re-signing, the universal
+  libpython) is ours either way. Users never need uv; the ReadMe may mention
+  `uv pip install --python support/bin/python3 …` beside pip.
+- [ ] **4.8 One package for every platform on each tag** — *Decided (2026-09-30):* a tag also
+  attaches a single `PythonTap-<version>.zip` holding every platform's external and runtime, and
+  v0.x tags publish as pre-releases automatically (1.0 and later stay drafts until signing
+  exists). Needs one runtime per platform side by side — `support/macos-arm64/`,
+  `support/macos-x86_64/`, `support/windows-x64/` (one folder cannot hold both: Windows' `Lib/`
+  and the Mac's `lib/` collide on a case-insensitive disk) — with the macOS external choosing by
+  the architecture it runs as (each slice of the universal binary can carry its own rpath) and the
+  Windows external loading `python313.dll` from its folder by full path before the first
+  delay-loaded call (Max adds only `support/` itself to the DLL search path); and a last
+  `release.yml` job that merges the platform builds into one `PythonTap/` and attaches it with
+  its checksum (about 130 MB, against 37–55 MB per platform zip today).
 
 ## Phase 5 — documentation and examples
 
@@ -331,8 +353,8 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
    only to check a universal build), then `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release &&
    cmake --build build && ctest --test-dir build`. The external lands in `externals/`. When Max
    loads an external newer than `docs/tap.python~.maxref.xml`, min rewrites the page from the
-   object's metadata; the committed one was generated against the mock kernel, so if Max's
-   differs, commit Max's. (A symlinked package works for externals, but Max loads a package's
+   object's metadata (6.8: the build dates the `.mxo` for it, and `run.py` says when it happened);
+   commit Max's page when it differs. (A symlinked package works for externals, but Max loads a package's
    *extensions* only from a real folder — why `run.py` installs the harness as a copy.)
 2. *5.2 — the help patcher.* Open `help/tap.python~.maxhelp`: its new boxes were added by hand
    (as JSON, in Max's layout), so check they sit sensibly and every message box works, then
@@ -420,6 +442,9 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
   ReadMe promises (`release.yml` fixed; the draft's added by hand); the external's bundle
   identifier is min's template, unexpanded — `com.74objects.${PRODUCT_NAME:rfc1034identifier}` —
   to fix before signing and notarizing; and `docs/PRODUCTION-PLAN.md` ships inside the package.
+  *Both fixed since:* max-sdk-base leaves the identifier for Xcode to expand, which no other
+  generator does (every sibling Max package ships it the same way), so the object's CMakeLists
+  expands it — `com.74objects.tap.python-tilde`; `assemble-package.py` leaves the plan out.
   *Observed, not explained:* with the release installed, Max's file database took 8–11 minutes to
   report ready at each launch (seconds with the linked checkout; Max had also just been updated to
   9.1.5 and rebuilt its database) — the runner no longer waits for it, as tests opened by name do
@@ -447,15 +472,26 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
   nothing, and the external's own reload line is gone. Errors particular to an instance are
   unchanged. Pinned by a core test (two processors, a change, an unchanged reload) and a runtime
   test (five objects in Max: the class's diagnostic once per run of the file).
-- [ ] **6.8 The reference page from Max** — runbook step 1 expects min to rewrite
+- [x] **6.8 The reference page from Max** — runbook step 1 expects min to rewrite
   `docs/tap.python~.maxref.xml` when Max loads an external newer than it; in the Mac sessions it
   did not. Max's standard output had "file not found" and "failed to get date modified" lines at
   start-up — probably min's `doc_update` failing to resolve a path, not yet shown to come from this
   object. Find out why, and whether the committed page (generated against the mock kernel) is the
-  one Max would write.
-- [ ] **6.9 The help patcher and `numpy_allpass.py`** — the help patcher points to the `numpy_gain`
+  one Max would write. *Done:* min's `doc_update` dates the external by its `.mxo` folder, and a
+  rebuild changes only the files inside it — the checkout's folder dated from its first build
+  (2026-08-05), older than the page, so the page never looked stale; a freshly unzipped release
+  has a new folder, which is why Max rewrote the installed package's page. The macOS build now
+  touches the folder after each link (a Windows `.mxe64` is one file, dated by its link already),
+  and `run.py` says when Max has rewritten the page, to commit it. Max's page matches the committed
+  one but for the description, which predated 2.4's text — now committed. The start-up lines are
+  not this object's: they still appear while its page is written.
+- [x] **6.9 The help patcher and `numpy_allpass.py`** — the help patcher points to the `numpy_gain`
   and `allpass` examples but not to `numpy_allpass`, the one that shows what the block path is for;
-  add it in Max (and re-save), perhaps with the measured comparison.
+  add it in Max (and re-save), perhaps with the measured comparison. *Done:* the examples note names
+  `numpy_allpass` as the same filter per vector, to swap in and watch the patcher's CPU meter (the
+  ReadMe's tables are the measured comparison); and a new note says what 2.4 made true —
+  `process()`'s parameters are the inlets, its return hint the outlets, `stereo_width` has two of
+  each, and a save that changes them changes the object. Checked open in Max 9.1.5.
 - [x] **6.10 One traceback per broken save** — a file that fails to load is not cached, so every
   object sharing it runs it and prints the traceback: 25 objects, 25 tracebacks. 6.7 left this
   alone, because the obvious fix — remember the failing source and stay quiet — would also hide
@@ -484,6 +520,7 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
 7. Phase 4.5–4.6 — release packaging and licenses.
 8. Phase 2.4–2.6 — multichannel, worker mode, reload stalls (features; may follow 1.0).
 9. Phase 6 — in-Max validation before tagging 1.0.
+10. Phase 4.7–4.8 — uv for the tooling, then one package for every platform on each tag.
 
 ## External prerequisites
 

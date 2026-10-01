@@ -44,7 +44,9 @@ FOLDERS = ["help", "docs", "python"]
 
 # Never shipped from the copied folders.
 # maxtest_*.py: the runtime tests' fixtures, copied into python/ while runtime-tests/run.py runs
-IGNORED = shutil.ignore_patterns("__pycache__", "*.pyc", ".ipynb_checkpoints", ".DS_Store", "maxtest_*")
+# PRODUCTION-PLAN.md: the development roadmap in docs/, beside the reference page Max reads
+IGNORED = shutil.ignore_patterns("__pycache__", "*.pyc", ".ipynb_checkpoints", ".DS_Store", "maxtest_*",
+                                 "PRODUCTION-PLAN.md")
 
 
 class AssemblyError(Exception):
