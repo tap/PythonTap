@@ -21,7 +21,9 @@ its phases, and the audit findings behind them. Tick its items (with the PR) as 
   signatures) that `processor.h` builds its descriptions from), `value.h` (the Max-atom value model and its coercion
   rules, which reproduce `atom_getlong`/`atom_getfloat`/`atom_getsym`), `processor.h` (load/reload,
   class introspection, attribute and message dispatch, `prepare()`, and `process()` — per sample, or
-  per vector when the input is hinted `np.ndarray` — plus `flush_reports()`). New CPython-facing
+  per vector when the input is hinted `np.ndarray` — plus `flush_reports()`), `worker.h` (worker
+  mode, plan 2.5: `process()` on a thread of its own, a fixed number of vectors behind an audio
+  thread that only copies through a lock-free ring and never takes the GIL). New CPython-facing
   behavior goes here, never in the wrapper. CMake target `tap::python` (`core/CMakeLists.txt`).
 - **`core/tests/`** — the core's Catch2 battery against CPython 3.13, with Python fixtures in
   `core/tests/python/` and the shipped examples copied alongside. Runs on Linux, including under

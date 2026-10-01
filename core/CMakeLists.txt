@@ -16,6 +16,9 @@ add_library(tap::python ALIAS tap_python_core)      # the family convention: tap
 add_library(tap::python_core ALIAS tap_python_core) # the original spelling, kept
 target_include_directories(tap_python_core INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_compile_features(tap_python_core INTERFACE cxx_std_20)
+# worker.h runs process() on a std::thread (plan 2.5)
+find_package(Threads REQUIRED)
+target_link_libraries(tap_python_core INTERFACE Threads::Threads)
 
 if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     enable_testing()
