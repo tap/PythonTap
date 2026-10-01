@@ -130,7 +130,7 @@ while audio ran segfaulted in 5 of 5 runs.
   the class; runtime test `channels`: grown from two to three, the old cords carry on and cords
   that `thispatcher` connects to the new inlet and outlet carry signal (this check fails against
   (b)); shrunk to one, the removed outlets' cords go with them.
-- [ ] **2.5 Worker mode (D1)** — `@mode worker`: Python on a worker thread, lock-free FIFO,
+- [x] **2.5 Worker mode (D1)** — `@mode worker`: Python on a worker thread, lock-free FIFO,
   latency reported to Max, underrun → silence. *Design (decided 2026-09-30):*
   - **What it buys.** In direct mode the audio thread takes the GIL, so anything else holding it —
     a reload compiling a large file (2.6's limit), a message handler, a GC pass — delays the
@@ -185,7 +185,7 @@ while audio ran segfaulted in 5 of 5 runs.
     reload; a stall past the ring drops exactly the vectors beyond it; restart, stop, and stop
     during a stall; ten reloads under an audio thread. Clean under TSan (locally, macOS) — the
     Linux CI job runs it too. *(b) the Max object:* `@mode`, `@latency`, `@latencysamples`, the
-    ring sized in `dspsetup`; runtime test in Max. *Found in Max:* an ordinary worker thread was
+    ring sized in `dspsetup`; runtime test in Max — *done*. *Found in Max:* an ordinary worker thread was
     late for vectors in 2 of 5 quiet seconds even with 32 vectors (21 ms) of latency, on a busy
     machine (load average 6–11); the worker now gets the real-time scheduling of an audio thread —
     a hook the core calls on the thread as it starts (`thread_setup`), where the wrapper sets
