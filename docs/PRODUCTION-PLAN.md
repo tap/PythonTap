@@ -712,7 +712,7 @@ down rather than discovered again. *This plan was itself audited before being ad
   file's module left in `sys.modules` and working, the old value after an unchanged save (the
   documented limit), no `__pycache__`. *Decided:* the rule stands as documented — "save the class
   file too" — rather than a forced reload on `filechanged` or a folder watch; revisit if users ask.
-- [ ] **8.6 Type hints that map as a reader expects (A8).** In `hint_kind`: unwrap `Annotated`
+- [x] **8.6 Type hints that map as a reader expects (A8).** In `hint_kind`: unwrap `Annotated`
   and `Final` to their first argument; *revised:* a `Union` of several members other than `None`
   maps to **`any`** — the atom passes as it is, as for an unannotated parameter — rather than to
   one preferred member, since preferring `float` for `str | float` would silently lose strings as
@@ -722,7 +722,12 @@ down rather than discovered again. *This plan was itself audited before being ad
   `np.bool_`) are recognized by their `__mro__` names without the support module importing numpy.
   In `return_shape`: see through `Optional[tuple[…]]` to the tuple. Test: `typed_more.py` in
   `test_types.cpp` with the audit's table. CHANGELOG: the mapping changes (a `float | int` field
-  was a symbol attribute).
+  was a symbol attribute). *Done:* `_unwrap()` for `Annotated`/`Final` (objects and, by regex, strings);
+  unions of several kinds → `'any'` (`_one_kind`); `isinstance(hint, type)` then `issubclass`
+  against bool, int, float, str in that order, then numpy's abstract bases by `__mro__` name and
+  module; `return_shape` sees through `Optional`/`| None` (objects and strings). Fixtures
+  `typed_more.py`, `typed_strings.py` (hints that cannot resolve, read as written) and
+  `typed_numpy.py`; two scenarios in `test_types.cpp`.
 - [ ] **8.7 Windows: paths meet Max as UTF-8 (A9).** Every `path.string()` handed to a Max call or
   a console line (`locatefile_extended` in the constructor, the core's "No file …" and
   "Failed to load …") goes through `u8string()` (C++20: `reinterpret_cast` its `c_str()`). Verify

@@ -327,8 +327,12 @@ namespace tap::python {
         // return for helpers.
         //
         // hint_kind(hint) -> str. The name the host maps a type hint by: 'int', 'float', 'bool', 'str',
-        // 'ndarray', 'tuple', ... ('any' for no hint, 'ClassVar' for a class variable). Optional[X] and
-        // X | None are X; an unresolved hint written as a string is read by name.
+        // 'ndarray', 'tuple', ... ('any' for no hint, 'ClassVar' for a class variable). Optional[X],
+        // X | None, Annotated[X, ...] and Final[X] are X; a union of several kinds is 'any' (the value
+        // passes as the atom carried it: preferring one member would lose the others, plan 8.6); a
+        // subclass of float, int, bool or str is its base, and numpy's scalar types map by their
+        // abstract bases (floating, integer, bool) without numpy being imported here; an unresolved
+        // hint written as a string is read by name, with the same unwrapping.
         //
         // class_hints(cls) -> ([(name, kind)], error). The class's annotated fields, base classes
         // first. If typing.get_type_hints fails (e.g. a name imported only under TYPE_CHECKING), falls
@@ -414,6 +418,47 @@ def load(module_name, path):
     return module, True
 
 _OPTIONAL = re.compile(r'(?:typing\.)?Optional\[(.*)\]')
+_WRAPPED = re.compile(r'(?:typing\.)?(?:Annotated|Final)\[(.*)\]')
+_NUMPY_KINDS = {'floating': 'float', 'integer': 'int', 'bool': 'bool', 'bool_': 'bool', 'str_': 'str'}
+
+def _first_argument(text):
+    """The first of a hint's comma-separated arguments, as written: 'float' of 'float, "meta"'."""
+    depth = 0
+    for i, c in enumerate(text):
+        if c in '[(':
+            depth += 1
+        elif c in '])':
+            depth -= 1
+        elif c == ',' and depth == 0:
+            return text[:i].strip()
+    return text.strip()
+
+def _split_union(text):
+    """The members of 'a | b | None' other than None, as written."""
+    parts, depth, start = [], 0, 0
+    for i, c in enumerate(text):
+        if c in '[(':
+            depth += 1
+        elif c in '])':
+            depth -= 1
+        elif c == '|' and depth == 0:
+            parts.append(text[start:i])
+            start = i + 1
+    parts.append(text[start:])
+    return [p.strip() for p in parts if p.strip() not in ('None', '')]
+
+def _unwrap(hint):
+    """Annotated[X, ...] and Final[X] are X, however deep."""
+    while True:
+        origin = typing.get_origin(hint)
+        if origin is typing.Annotated or origin is typing.Final:
+            hint = typing.get_args(hint)[0]
+        else:
+            return hint
+
+def _one_kind(kinds):
+    kinds = set(kinds)
+    return kinds.pop() if len(kinds) == 1 else 'any'
 
 def hint_kind(hint):
     if hint is inspect.Parameter.empty:
@@ -423,18 +468,32 @@ def hint_kind(hint):
         match = _OPTIONAL.fullmatch(text)
         if match:
             return hint_kind(match.group(1))
-        parts = [p.strip() for p in text.split('|') if p.strip() != 'None']
+        match = _WRAPPED.fullmatch(text)
+        if match:
+            return hint_kind(_first_argument(match.group(1)))
+        parts = _split_union(text)
         if len(parts) == 1 and parts[0] != text:
             return hint_kind(parts[0])
+        if len(parts) > 1:
+            return _one_kind(hint_kind(p) for p in parts)
         return text.split('[')[0].split('.')[-1]
+    hint = _unwrap(hint)
     origin = typing.get_origin(hint)
     if origin is typing.ClassVar:
         return 'ClassVar'
     if origin is typing.Union or origin is types.UnionType:
         args = [a for a in typing.get_args(hint) if a is not type(None)]
-        return hint_kind(args[0]) if len(args) == 1 else 'str'
+        return hint_kind(args[0]) if len(args) == 1 else _one_kind(hint_kind(a) for a in args)
     if origin is not None:
         return getattr(origin, '__name__', 'str')
+    if isinstance(hint, type):
+        for base, kind in ((bool, 'bool'), (int, 'int'), (float, 'float'), (str, 'str')):
+            if issubclass(hint, base):
+                return kind
+        for cls in hint.__mro__:  # numpy's scalars, by their abstract bases, without importing numpy
+            kind = _NUMPY_KINDS.get(cls.__name__)
+            if kind is not None and cls.__module__.startswith('numpy'):
+                return kind
     return getattr(hint, '__name__', 'str')
 
 def class_hints(cls):
@@ -488,6 +547,12 @@ def return_shape(hint):
         return 1, 'any'
     if isinstance(hint, str):
         text = hint.strip()
+        match = _OPTIONAL.fullmatch(text)
+        if match:
+            return return_shape(match.group(1))
+        parts = _split_union(text)
+        if len(parts) == 1 and parts[0] != text:
+            return return_shape(parts[0])
         for prefix in ('typing.Tuple[', 'Tuple[', 'tuple['):
             if text.startswith(prefix) and text.endswith(']'):
                 parts = [p.strip() for p in text[len(prefix):-1].split(',')]
@@ -497,6 +562,11 @@ def return_shape(hint):
         if text in ('tuple', 'Tuple', 'typing.Tuple'):
             return -1, 'any'
         return 1, hint_kind(hint)
+    hint = _unwrap(hint)
+    if typing.get_origin(hint) is typing.Union or typing.get_origin(hint) is types.UnionType:
+        args = [a for a in typing.get_args(hint) if a is not type(None)]
+        if len(args) == 1:
+            return return_shape(args[0])  # Optional[tuple[...]] is the tuple
     if hint is tuple or typing.get_origin(hint) is tuple:
         args = typing.get_args(hint)
         if not args or Ellipsis in args or args == ((),):

@@ -5,8 +5,11 @@
 // Copyright 2022-2026 Timothy Place.
 
 #include <cstdint>
+#include <cstdlib>
 #include <string>
 #include <vector>
+
+#include <catch2/generators/catch_generators.hpp>
 
 #include "support.h"
 
@@ -165,6 +168,77 @@ SCENARIO("Hints that cannot be resolved are reported, and the annotations as wri
 
     REQUIRE(p.call("set_level", std::vector<value>{0.5}));
     CHECK(all_equal(render(p, 1.0), 0.5));
+}
+
+// 8.6 — hint shapes a reader expects to map as their payload does
+
+SCENARIO("Annotated, Final, mixed unions and Optional tuples map as their payload does (plan 8.6)") {
+    ensure_runtime();
+    const auto [name, strings] = GENERATE(std::pair{"typed_more", false}, std::pair{"typed_strings", true});
+    log_capture log;
+    processor   p{name, log.sink()};
+    forget_loaded(name); // this load runs the file, so logs what is true of the class
+    REQUIRE(p.load());
+
+    std::vector<std::pair<std::string, value_type>> fields;
+    for (const auto& a : p.attributes()) {
+        fields.emplace_back(a.name, a.type);
+    }
+    if (!strings) {
+        CHECK(fields
+              == std::vector<std::pair<std::string, value_type>>{{"noted", value_type::real},
+                                                                 {"fixed", value_type::integer},
+                                                                 {"either", value_type::any},
+                                                                 {"text_or_number", value_type::any},
+                                                                 {"maybe_noted", value_type::real}});
+    }
+    else {
+        CHECK(fields
+              == std::vector<std::pair<std::string, value_type>>{
+                  {"noted", value_type::real}, {"either", value_type::any}, {"maybe", value_type::integer}});
+        CHECK(log.contains("could not resolve the type hints", log_level::error)); // read as written
+    }
+    THEN("an Optional tuple return names its outputs") {
+        CHECK(p.output_count() == 2);
+        std::vector<double> in{1.0, 2.0};
+        std::vector<double> a(2, 12345.0);
+        std::vector<double> b(2, 12345.0);
+        const double*       ins[1]  = {in.data()};
+        double*             outs[2] = {a.data(), b.data()};
+        p.process(ins, 1, outs, 2, 2);
+        CHECK(a == std::vector<double>{1.0, 2.0});
+        CHECK(b == (strings ? std::vector<double>{1.0, 2.0} : std::vector<double>{-1.0, -2.0}));
+    }
+    THEN("a field of several kinds takes the value as the atom carried it") {
+        REQUIRE(p.set_attribute("either", 2.5));
+        CHECK(std::get<std::string>(*p.get_attribute("either", value_type::any)) == "2.5");
+        REQUIRE(p.set_attribute("either", std::int64_t{3}));
+        CHECK(std::get<std::string>(*p.get_attribute("either", value_type::any)) == "3");
+    }
+}
+
+SCENARIO("numpy scalar types as field hints map to the kinds they hold (plan 8.6)") {
+    ensure_runtime();
+    {
+        gil_lock  lock;
+        PyObject* numpy = PyImport_ImportModule("numpy");
+        if (!numpy) {
+            PyErr_Clear();
+            if (std::getenv("TAP_PYTHON_TEST_REQUIRE_EXAMPLES")) {
+                FAIL("numpy is not importable by the embedded interpreter");
+            }
+            SKIP("numpy is not importable by the embedded interpreter");
+        }
+        Py_DECREF(numpy);
+    }
+    processor p{"typed_numpy"};
+    REQUIRE(p.load());
+    REQUIRE(p.attributes().size() == 3);
+    CHECK(p.attributes()[0].type == value_type::real);
+    CHECK(p.attributes()[1].type == value_type::integer);
+    CHECK(p.attributes()[2].type == value_type::boolean);
+    REQUIRE(p.set_attribute("level", 0.25));
+    CHECK(all_equal(render(p, 1.0), 0.25));
 }
 
 SCENARIO("process() binds only as a plain instance method") {

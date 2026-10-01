@@ -6,6 +6,16 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ## Unreleased
 
+### Changed — type hints map as a reader expects
+
+- **`Annotated[X, …]` and `Final[X]` fields are `X`; a union of several kinds passes the atom as
+  it is; numpy scalar types map to the kinds they hold; `Optional[tuple[…]]` names its outputs.**
+  A `float | int` field used to become a symbol attribute that stored `""` for any number; now it
+  takes the value as the atom carried it (an `int`, `float` or `str`), as an unannotated parameter
+  does. `Annotated` and `Final` used to be symbols; `np.float64` and friends too; and
+  `-> tuple[float, float] | None` bound one output and then reported every sample as not a number.
+  The same holds for hints read as written. (Plan 8.6, audit A8.)
+
 ### Changed — helper modules follow the class file
 
 - **A helper module in `python/` is imported afresh when a class file that changed is saved.**
