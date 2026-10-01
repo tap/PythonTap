@@ -58,6 +58,8 @@ SCRIPTS_DIR = PACKAGE / "python"
 SUPPORT = PACKAGE / "support"
 SUPPORT_ASIDE = PACKAGE / "support.maxtest-aside"
 EXTERNAL = PACKAGE / "externals" / "tap.python~.mxo"
+# The reference page min rewrites from the object's descriptions (plan 6.8)
+REFPAGE = ROOT / "docs" / "tap.python~.maxref.xml"
 OSCAR = HARNESS / "extensions" / "oscar.mxo"
 
 # Must match misc/max-test-config.json: Max listens on one port and sends to the other.
@@ -357,6 +359,13 @@ def check_prerequisites(max_app: Path, packages: Path) -> None:
     if not EXTERNAL.exists():
         raise RunError("the external is not built — cmake -S . -B build && cmake --build build"
                        if PACKAGE == ROOT else f"no external in {PACKAGE}")
+    binary = EXTERNAL / "Contents" / "MacOS" / "tap.python~"
+    sources = [f for folder in ("core/include", "source/projects") for f in (ROOT / folder).rglob("*")
+               if f.is_file() and not f.name.endswith("_test.cpp")]  # the mock test is not in the external
+    newest = max(sources, key=lambda f: f.stat().st_mtime)
+    built_here = EXTERNAL.resolve().is_relative_to(ROOT)  # not an installed release's
+    if built_here and binary.exists() and newest.stat().st_mtime > binary.stat().st_mtime:  # after switching branches
+        raise RunError(f"the external is older than {newest.relative_to(ROOT)} — cmake --build build")
     if not SUPPORT.exists():
         raise RunError(f"no runtime in {SUPPORT} — run scripts/install-runtime.sh")
     if not packages.is_dir():
@@ -550,6 +559,10 @@ def main() -> int:
             link.unlink(missing_ok=True)
 
     print()
+    if PACKAGE == ROOT and REFPAGE.exists() and subprocess.run(
+            ["git", "-C", str(ROOT), "diff", "--quiet", "--", str(REFPAGE)]).returncode == 1:
+        # min rewrites it when Max loads an external newer than it (plan 6.8)
+        print(f"Max rewrote {REFPAGE.relative_to(ROOT)} from the object's descriptions: review and commit it.")
     if failures:
         print(f"{len(failures)} failure(s):")
         for failure in failures:

@@ -8,8 +8,11 @@
 // it to the host:
 // - the class's type-annotated public fields become attributes (attributes())
 // - its public methods become messages, their argument types taken from the hints (messages())
-// - a method `process()` becomes the audio callback (process()): `process(self, x: float) -> float`
-//   is called once per sample; `process(self, x: np.ndarray) -> np.ndarray` once per vector
+// - a method `process()` becomes the audio callback (process()): its parameters are the signal
+//   inputs and its return the outputs — `process(self, x: float) -> float` is called once per
+//   sample, `process(self, x: np.ndarray) -> np.ndarray` once per vector, and
+//   `process(self, a: float, b: float) -> tuple[float, float]` takes two inputs and gives two
+//   outputs (plan 2.4); input_count() and output_count() tell the host how many
 // - an optional `prepare(self, sample_rate: float, vector_size: int)` is told the audio settings
 //   (prepare()) before the instance first processes audio, and again whenever they change
 //
@@ -73,8 +76,9 @@ namespace tap::python {
         /// @param source_name       the module and class name (`<name>.py` defining `class <name>`)
         /// @param log               receives the processor's own diagnostics (may be called on the
         ///                          audio thread)
-        /// @param reserved_messages method names the host handles itself; a Python method with one
-        ///                          of these names is not exposed as a message (with a diagnostic)
+        /// @param reserved_messages names the host handles itself, as messages or attributes; a Python
+        ///                          method or annotated field with one of these names is not exposed
+        ///                          (with a diagnostic)
         /// @param report_ready      called on the audio thread when something needs reporting; the
         ///                          host must then call flush_reports() from its main thread. Must be
         ///                          real-time safe (no locks, no allocation).
@@ -112,6 +116,24 @@ namespace tap::python {
         /// True when the bound process() takes a whole vector (hinted np.ndarray), false when it is
         /// called per sample. Main thread, after load().
         bool block_mode() const noexcept { return m_block_mode; }
+
+        /// How many signal inputs and outputs the class's process() declares — its parameters, and
+        /// the values its return hint names (one, or n for tuple[...]) — for the host to give the
+        /// object that many. 1 and 1 until a class binds process(); unchanged by a failed load.
+        /// Main thread, after load().
+        std::size_t input_count() const noexcept { return m_inputs; }
+        std::size_t output_count() const noexcept { return m_outputs; }
+
+        /// The names of process()'s input parameters, in order (for the host's inlet help). Main
+        /// thread, after load().
+        const std::vector<std::string>& input_names() const noexcept { return m_input_names; }
+
+        /// How many times load() has succeeded: what a host reporting once per load compares against
+        /// (worker mode does, plan 2.5). Any thread.
+        std::uint64_t load_count() const noexcept { return m_loads.load(std::memory_order_acquire); }
+
+        /// The most inputs, and the most outputs, a process() may declare.
+        static constexpr std::size_t k_max_channels = 64;
 
         /// Load `<scripts_dir>/<name>.py` (executing it only if its source changed since any
         /// processor last loaded it), instantiate the class, carry the previous instance's
@@ -158,8 +180,10 @@ namespace tap::python {
             // per execution of the file, by the processor that ran it; the others sharing it are quiet
             m_announcing = executed;
             if (!module) {
-                report_exception();
-                log(log_level::error, "Failed to load " + path.string());
+                if (!take_reported_load_failure()) { // 6.10: once per failing save, not per object
+                    report_exception();
+                    log(log_level::error, "Failed to load " + path.string());
+                }
                 release_binding();
                 return false;
             }
@@ -197,7 +221,7 @@ namespace tap::python {
             // Tell the new instance the audio settings before anything can run it.
             if (m_prepared) {
                 if (next.block_mode) {
-                    ensure_block_buffer(m_vector_size);
+                    ensure_block_buffers(m_vector_size, next.inputs);
                 }
                 call_prepare(next.prepare_function);
             }
@@ -209,12 +233,16 @@ namespace tap::python {
             previous.process_function = m_process_function.exchange(next.process_function);
             previous.prepare_function = std::exchange(m_prepare_function, next.prepare_function);
             previous.block_mode       = std::exchange(m_block_mode, next.block_mode);
+            m_inputs                  = next.inputs;
+            m_outputs                 = next.outputs;
+            previous.input_names      = std::exchange(m_input_names, std::move(next.input_names));
             previous.attributes       = std::exchange(m_attributes, std::move(next.attributes));
             previous.messages         = std::exchange(m_messages, std::move(next.messages));
             next.instance             = nullptr;
             next.process_function     = nullptr;
             next.prepare_function     = nullptr;
             reset_warnings(); // each kind of audio-thread problem is reported once per load
+            m_loads.fetch_add(1, std::memory_order_release);
 
             release(previous); // may run finalizers, which may let other threads in: now safe
             if (executed) {
@@ -236,7 +264,7 @@ namespace tap::python {
 
             gil_lock lock;
             if (m_block_mode) {
-                ensure_block_buffer(vector_size);
+                ensure_block_buffers(vector_size, m_inputs);
             }
             PyObject* function = m_prepare_function; // bound to the current instance
             Py_XINCREF(function);
@@ -268,6 +296,11 @@ namespace tap::python {
                 log(log_level::error,
                     "process() produced a non-finite sample (NaN or infinity) — replaced with 0.0 (reported once per "
                     "load)");
+            }
+            if (const auto returned = m_pending_bad_count.exchange(k_no_length); returned != k_no_length) {
+                log(log_level::error, "process() returned " + std::to_string(returned) + " value(s) for "
+                                          + std::to_string(m_bad_count_expected.load())
+                                          + " outputs — output as silence (reported once per load)");
             }
             if (const auto returned = m_pending_bad_length.exchange(k_no_length); returned != k_no_length) {
                 log(log_level::error, "process() returned " + std::to_string(returned) + " sample(s) for a vector of "
@@ -423,39 +456,50 @@ namespace tap::python {
             return true;
         }
 
-        /// The audio callback. Calls the class's process() once per sample, or once per vector when
-        /// its input is hinted np.ndarray. `input` and `output` may alias. Outputs silence while
+        /// The audio callback: `input_count` input channels and `output_count` output channels of
+        /// `frame_count` samples. Calls the class's process() once per sample, or once per vector
+        /// when its inputs are hinted np.ndarray, with as many inputs as it declares: an input the
+        /// host does not give reads as silence, and an output it does not give is dropped; an output
+        /// the class does not give is silent. Channels may alias (in place). Outputs silence while
         /// not bound; if process() raises, silences the rest of the vector, unbinds until the next
         /// load() and records the exception for flush_reports(). A reload landing mid-vector does
         /// not affect this vector: it finishes on the binding it started with.
-        void process(const double* input, double* output, const std::size_t frame_count) {
+        void process(const double* const* inputs, const std::size_t input_count, double* const* outputs,
+                     const std::size_t output_count, const std::size_t frame_count) {
             if (!has_process()) {
-                std::fill(output, output + frame_count, 0.0);
+                silence(outputs, 0, output_count, 0, frame_count);
                 return;
             }
 
             gil_lock lock;
 
-            // the instance and function are swapped together, with no Python call between, so
-            // under the GIL they are always a matching pair
+            // the instance, function and channel counts are swapped together, with no Python call
+            // between, so under the GIL they always match
             PyObject* function = m_process_function.load();
             PyObject* instance = m_instance.load();
             if (!function || !instance) {
-                std::fill(output, output + frame_count, 0.0);
+                silence(outputs, 0, output_count, 0, frame_count);
                 return;
             }
             Py_INCREF(function);
             Py_INCREF(instance);
+            const channels io{inputs, input_count, outputs, output_count, m_inputs, m_outputs};
 
             if (m_block_mode) {
-                process_block(function, instance, input, output, frame_count);
+                process_block(function, instance, io, frame_count);
             }
             else {
-                process_samples(function, instance, input, output, frame_count);
+                process_samples(function, instance, io, frame_count);
             }
+            silence(outputs, io.outputs, output_count, 0, frame_count); // outputs the class does not give
 
             Py_DECREF(instance);
             Py_DECREF(function);
+        }
+
+        /// One input and one output: process(&input, 1, &output, 1, frame_count).
+        void process(const double* input, double* output, const std::size_t frame_count) {
+            process(&input, 1, &output, 1, frame_count);
         }
 
       private:
@@ -470,6 +514,9 @@ namespace tap::python {
             PyObject*                   process_function{}; // strong
             PyObject*                   prepare_function{}; // strong, or null
             bool                        block_mode{};       // process() takes and returns np.ndarray
+            std::size_t                 inputs{1};          // the signal inputs process() declares
+            std::size_t                 outputs{1};         // and the outputs
+            std::vector<std::string>    input_names;        // process()'s input parameters
             std::vector<attribute_info> attributes;
             std::vector<bound_message>  messages;
         };
@@ -487,13 +534,22 @@ namespace tap::python {
         std::vector<attribute_info> m_attributes;
         std::vector<bound_message>  m_messages;
         // The rest of the binding and the block buffer: read and written only under the GIL.
-        PyObject*   m_prepare_function{}; // strong, or null
-        bool        m_block_mode{};
-        bool        m_announcing{};  // this load() ran the file: see announce()
-        PyObject*   m_block_input{}; // strong: the np.ndarray process() receives, reused every vector
-        Py_buffer   m_block_view{};  // held while m_block_input is, so its memory cannot move
-        double*     m_block_data{};
-        std::size_t m_block_size{};
+        PyObject*                  m_prepare_function{}; // strong, or null
+        bool                       m_block_mode{};
+        std::size_t                m_inputs{1}; // the bound process()'s inputs and outputs
+        std::size_t                m_outputs{1};
+        std::vector<std::string>   m_input_names;  // main thread only
+        bool                       m_announcing{}; // this load() ran the file: see announce()
+        std::atomic<std::uint64_t> m_loads{};      // successful load()s
+        // The np.ndarray each input arrives in, reused every vector: strong, its buffer held so its
+        // memory cannot move.
+        struct block_buffer {
+            PyObject* array{};
+            Py_buffer view{};
+            double*   data{};
+        };
+        std::vector<block_buffer> m_block_inputs;
+        std::size_t               m_block_size{};
         // Attribute values captured from the previous instance, for the next one (main thread).
         struct carried_value {
             attribute_info info;
@@ -515,6 +571,9 @@ namespace tap::python {
         std::atomic<bool>         m_warned_non_numeric{};
         std::atomic<bool>         m_warned_non_finite{};
         std::atomic<bool>         m_warned_bad_length{};
+        std::atomic<std::int64_t> m_pending_bad_count{k_no_length};
+        std::atomic<std::int64_t> m_bad_count_expected{};
+        std::atomic<bool>         m_warned_bad_count{};
 
         void log(const log_level level, const std::string& text) const {
             if (m_log) {
@@ -706,6 +765,7 @@ namespace tap::python {
             m_warned_non_numeric = false;
             m_warned_non_finite  = false;
             m_warned_bad_length  = false;
+            m_warned_bad_count   = false;
         }
 
         void notify_report() const {
@@ -736,6 +796,18 @@ namespace tap::python {
             notify_report();
         }
 
+        /// Record that process() returned `result` when it declares `outputs` outputs: not a tuple of
+        /// that many values. Caller holds the GIL.
+        void record_bad_count(PyObject* result, const std::size_t outputs) {
+            if (m_warned_bad_count.exchange(true)) {
+                return;
+            }
+            const auto count     = PyTuple_Check(result) ? static_cast<std::int64_t>(PyTuple_GET_SIZE(result)) : 1;
+            m_bad_count_expected = static_cast<std::int64_t>(outputs);
+            m_pending_bad_count  = count;
+            notify_report();
+        }
+
         /// Replace non-finite samples with 0.0, recording the first occurrence per load.
         void sanitize(double* output, const std::size_t frame_count) {
             bool found = false;
@@ -751,66 +823,145 @@ namespace tap::python {
             }
         }
 
-        /// The per-sample path. Caller holds the GIL and references to `function` and `instance`.
-        void process_samples(PyObject* function, PyObject* instance, const double* input, double* output,
+        /// The host's channels, and how many process() declares. Main thread and audio thread.
+        struct channels {
+            const double* const* in;           // the host's input channels
+            std::size_t          host_inputs;  // how many it gives
+            double* const*       out;          // the host's output channels
+            std::size_t          host_outputs; // how many it gives
+            std::size_t          inputs;       // how many process() declares
+            std::size_t          outputs;
+        };
+
+        /// Zero channels [first, end) of `out`, from `first_frame` to `frame_count`.
+        static void silence(double* const* out, const std::size_t first, const std::size_t end,
+                            const std::size_t first_frame, const std::size_t frame_count) {
+            for (std::size_t c = first; c < end; ++c) {
+                std::fill(out[c] + first_frame, out[c] + frame_count, 0.0);
+            }
+        }
+
+        /// The per-sample path: process(x0, x1, ...) per sample, returning a number, or a tuple of
+        /// as many numbers as it declares outputs. Caller holds the GIL and references to
+        /// `function` and `instance`.
+        void process_samples(PyObject* function, PyObject* instance, const channels& io,
                              const std::size_t frame_count) {
+            const std::size_t written = std::min(io.outputs, io.host_outputs);
+            PyObject*         call_args[1 + k_max_channels]{instance};
             for (std::size_t i = 0; i < frame_count; ++i) {
-                PyObject* x = PyFloat_FromDouble(input[i]);
-                if (!x) {
-                    record_exception();
-                    std::fill(output + i, output + frame_count, 0.0);
-                    return;
+                // every input of this sample is read before any output of it is written (in place)
+                for (std::size_t c = 0; c < io.inputs; ++c) {
+                    call_args[1 + c] = PyFloat_FromDouble(c < io.host_inputs ? io.in[c][i] : 0.0);
+                    if (!call_args[1 + c]) {
+                        release_arguments(call_args, c);
+                        record_exception();
+                        silence(io.out, 0, written, i, frame_count);
+                        return;
+                    }
                 }
-                PyObject* const call_args[2] = {instance, x};
-                PyObject*       result       = PyObject_Vectorcall(function, call_args, 2, nullptr);
-                Py_DECREF(x);
+                PyObject* result = PyObject_Vectorcall(function, call_args, 1 + io.inputs, nullptr);
+                release_arguments(call_args, io.inputs);
 
                 if (!result) {
                     record_exception();
                     unbind_process(function); // load() re-arms it
-                    std::fill(output + i, output + frame_count, 0.0);
+                    silence(io.out, 0, written, i, frame_count);
                     return;
                 }
-
-                double y = PyFloat_AsDouble(result); // also handles ints and other number types
-                if (y == -1.0 && PyErr_Occurred()) {
-                    PyErr_Clear();
-                    record_non_numeric(result);
-                    y = 0.0;
+                if (io.outputs == 1) {
+                    if (written == 1) {
+                        io.out[0][i] = to_sample(result);
+                    }
                 }
-                output[i] = y;
+                else if (PyTuple_Check(result) && static_cast<std::size_t>(PyTuple_GET_SIZE(result)) == io.outputs) {
+                    for (std::size_t c = 0; c < written; ++c) {
+                        io.out[c][i] = to_sample(PyTuple_GET_ITEM(result, static_cast<Py_ssize_t>(c)));
+                    }
+                }
+                else {
+                    record_bad_count(result, io.outputs);
+                    for (std::size_t c = 0; c < written; ++c) {
+                        io.out[c][i] = 0.0;
+                    }
+                }
                 Py_DECREF(result);
             }
-            sanitize(output, frame_count);
+            for (std::size_t c = 0; c < written; ++c) {
+                sanitize(io.out[c], frame_count);
+            }
         }
 
-        /// The block path: one call per vector with the reused input array. Caller holds the GIL
-        /// and references to `function` and `instance`.
-        void process_block(PyObject* function, PyObject* instance, const double* input, double* output,
-                           const std::size_t frame_count) {
+        /// Release the `count` input values after `call_args[0]`.
+        static void release_arguments(PyObject* const* call_args, const std::size_t count) {
+            for (std::size_t c = 0; c < count; ++c) {
+                Py_DECREF(call_args[1 + c]);
+            }
+        }
+
+        /// A sample from what process() returned: any number (ints too); anything else is 0.0,
+        /// reported once per load.
+        double to_sample(PyObject* value) {
+            const double y = PyFloat_AsDouble(value);
+            if (y == -1.0 && PyErr_Occurred()) {
+                PyErr_Clear();
+                record_non_numeric(value);
+                return 0.0;
+            }
+            return y;
+        }
+
+        /// The block path: one call per vector with the reused input arrays, returning an array, or
+        /// a tuple of as many arrays as it declares outputs. Caller holds the GIL and references to
+        /// `function` and `instance`.
+        void process_block(PyObject* function, PyObject* instance, const channels& io, const std::size_t frame_count) {
+            const std::size_t written = std::min(io.outputs, io.host_outputs);
             // allocates only when the vector size differs from the one prepare() announced
-            if (!ensure_block_buffer(frame_count)) {
-                std::fill(output, output + frame_count, 0.0);
+            if (!ensure_block_buffers(frame_count, io.inputs)) {
+                silence(io.out, 0, written, 0, frame_count);
                 return;
             }
 
-            // copy in and take our reference before calling, which may yield the GIL
-            std::memcpy(m_block_data, input, frame_count * sizeof(double));
-            PyObject* x = m_block_input;
-            Py_INCREF(x);
-            PyObject* const call_args[2] = {instance, x};
-            PyObject*       result       = PyObject_Vectorcall(function, call_args, 2, nullptr);
-            Py_DECREF(x);
+            // copy in and take our references before calling, which may yield the GIL (and a reload
+            // may replace the arrays meanwhile)
+            PyObject* call_args[1 + k_max_channels]{instance};
+            for (std::size_t c = 0; c < io.inputs; ++c) {
+                auto& buffer = m_block_inputs[c];
+                if (c < io.host_inputs) {
+                    std::memcpy(buffer.data, io.in[c], frame_count * sizeof(double));
+                }
+                else {
+                    std::fill(buffer.data, buffer.data + frame_count, 0.0);
+                }
+                call_args[1 + c] = buffer.array;
+                Py_INCREF(buffer.array);
+            }
+            PyObject* result = PyObject_Vectorcall(function, call_args, 1 + io.inputs, nullptr);
+            release_arguments(call_args, io.inputs);
 
             if (!result) {
                 record_exception();
                 unbind_process(function);
-                std::fill(output, output + frame_count, 0.0);
+                silence(io.out, 0, written, 0, frame_count);
                 return;
             }
-            copy_block_result(result, output, frame_count);
+            if (io.outputs == 1) {
+                if (written == 1) {
+                    copy_block_result(result, io.out[0], frame_count);
+                }
+            }
+            else if (PyTuple_Check(result) && static_cast<std::size_t>(PyTuple_GET_SIZE(result)) == io.outputs) {
+                for (std::size_t c = 0; c < written; ++c) {
+                    copy_block_result(PyTuple_GET_ITEM(result, static_cast<Py_ssize_t>(c)), io.out[c], frame_count);
+                }
+            }
+            else {
+                record_bad_count(result, io.outputs);
+                silence(io.out, 0, written, 0, frame_count);
+            }
             Py_DECREF(result);
-            sanitize(output, frame_count);
+            for (std::size_t c = 0; c < written; ++c) {
+                sanitize(io.out[c], frame_count);
+            }
         }
 
         static bool is_native_double(const Py_buffer& view) {
@@ -880,54 +1031,64 @@ namespace tap::python {
             Py_DECREF(converted);
         }
 
-        /// Make sure the block input array holds `size` samples, building a new np.zeros(size) if
-        /// not. Caller holds the GIL. The new array is built completely, then swapped in with no
-        /// Python call in between (building it can yield the GIL). Returns false if numpy failed.
-        bool ensure_block_buffer(const std::size_t size) {
-            if (m_block_input && m_block_size == size) {
+        /// Make sure there are at least `count` block input arrays of `size` samples, building a new
+        /// set of np.zeros(size) if not. Caller holds the GIL. The new set is built completely, then
+        /// swapped in with no Python call in between (building it can yield the GIL); it never
+        /// shrinks, so a process() still running on a binding with more inputs finds enough.
+        /// Returns false if numpy failed.
+        bool ensure_block_buffers(const std::size_t size, const std::size_t count) {
+            if (m_block_size == size && m_block_inputs.size() >= count) {
+                return true;
+            }
+            const auto wanted = std::max(count, m_block_size == size ? m_block_inputs.size() : std::size_t{0});
+
+            std::vector<block_buffer> arrays;
+            arrays.reserve(wanted);
+            PyObject* numpy = PyImport_ImportModule("numpy");
+            for (std::size_t c = 0; numpy && c < wanted; ++c) {
+                PyObject* array = PyObject_CallMethod(numpy, "zeros", "n", static_cast<Py_ssize_t>(size));
+                Py_buffer view;
+                if (!array
+                    || PyObject_GetBuffer(array, &view, PyBUF_WRITABLE | PyBUF_C_CONTIGUOUS | PyBUF_FORMAT) != 0) {
+                    Py_XDECREF(array);
+                    break;
+                }
+                if (!is_native_double(view)) {
+                    PyBuffer_Release(&view);
+                    Py_DECREF(array);
+                    break;
+                }
+                arrays.push_back({array, view, static_cast<double*>(view.buf)});
+            }
+            Py_XDECREF(numpy);
+            PyErr_Clear();
+            if (arrays.size() != wanted) {
+                release(arrays);
+                return false;
+            }
+            if (m_block_size == size && m_block_inputs.size() >= count) { // another thread built a set meanwhile
+                release(arrays);
                 return true;
             }
 
-            PyObject* array = nullptr;
-            if (PyObject* numpy = PyImport_ImportModule("numpy")) {
-                array = PyObject_CallMethod(numpy, "zeros", "n", static_cast<Py_ssize_t>(size));
-                Py_DECREF(numpy);
-            }
-            Py_buffer view;
-            if (!array || PyObject_GetBuffer(array, &view, PyBUF_WRITABLE | PyBUF_C_CONTIGUOUS | PyBUF_FORMAT) != 0) {
-                PyErr_Clear();
-                Py_XDECREF(array);
-                return false;
-            }
-            if (!is_native_double(view)) {
-                PyBuffer_Release(&view);
-                Py_DECREF(array);
-                return false;
-            }
-            if (m_block_input && m_block_size == size) { // another thread built one meanwhile
-                PyBuffer_Release(&view);
-                Py_DECREF(array);
-                return true;
-            }
-
-            PyObject* old_input = std::exchange(m_block_input, array);
-            Py_buffer old_view  = std::exchange(m_block_view, view);
-            m_block_data        = static_cast<double*>(view.buf);
-            m_block_size        = size;
-            if (old_input) {
-                PyBuffer_Release(&old_view);
-                Py_DECREF(old_input);
-            }
+            auto previous = std::exchange(m_block_inputs, std::move(arrays));
+            m_block_size  = size;
+            release(previous);
             return true;
         }
 
         /// Caller holds the GIL.
-        void release_block_buffer() {
-            if (m_block_input) {
-                PyBuffer_Release(&m_block_view);
-                Py_CLEAR(m_block_input);
+        static void release(std::vector<block_buffer>& arrays) {
+            for (auto& buffer : arrays) {
+                PyBuffer_Release(&buffer.view);
+                Py_DECREF(buffer.array);
             }
-            m_block_data = nullptr;
+            arrays.clear();
+        }
+
+        /// Caller holds the GIL.
+        void release_block_buffer() {
+            release(m_block_inputs);
             m_block_size = 0;
         }
 
@@ -1006,6 +1167,12 @@ namespace tap::python {
                 if (name.empty() || name[0] == '_' || kind == "ClassVar") {
                     continue;
                 }
+                if (is_reserved(name)) { // a host attribute or message has the name (plan 2.5)
+                    announce(log_level::error,
+                             "the field " + name
+                                 + " is reserved by the host and is not exposed as an attribute; rename the field");
+                    continue;
+                }
                 b.attributes.push_back({name, value_type_from_hint(kind)});
             }
             Py_DECREF(result);
@@ -1022,6 +1189,8 @@ namespace tap::python {
         struct signature {
             std::vector<parameter> parameters;
             std::string            return_kind;
+            int                    return_count{1};     // values the return hint names; -1: a tuple of unsaid length
+            std::string            return_element_kind; // the value's hint kind, or a tuple's first element's
         };
 
         // inspect.Parameter.kind values
@@ -1042,6 +1211,8 @@ namespace tap::python {
             PyObject* parameters = PyTuple_GetItem(result, 0); // borrowed
             sig.return_kind      = utf8(PyTuple_GetItem(result, 1));
             report_hint_error(PyTuple_GetItem(result, 2), what);
+            sig.return_count        = static_cast<int>(PyLong_AsLong(PyTuple_GetItem(result, 3)));
+            sig.return_element_kind = utf8(PyTuple_GetItem(result, 4));
 
             const Py_ssize_t count = parameters ? PyList_Size(parameters) : 0;
             for (Py_ssize_t i = 0; i < count; ++i) {
@@ -1119,31 +1290,48 @@ namespace tap::python {
                                            "staticmethod); audio is not bound");
                 return;
             }
-            int  in_count    = 0;
-            bool block_input = false;
+            // 2.4: the positional parameters are the signal inputs, all per vector (np.ndarray) or all
+            // per sample; the return hint names the outputs — one value, or tuple[...] of n
+            std::size_t              inputs     = 0;
+            std::size_t              per_vector = 0;
+            bool                     var_inputs = false;
+            std::vector<std::string> names;
             for (const auto& p : sig->parameters) {
                 if (p.parameter_kind == k_positional_only || p.parameter_kind == k_positional_or_named) {
-                    if (in_count == 0) {
-                        block_input = p.kind == "ndarray";
-                    }
-                    ++in_count;
+                    ++inputs;
+                    names.push_back(p.name);
+                    per_vector += p.kind == "ndarray" ? 1 : 0;
                 }
+                var_inputs = var_inputs || p.parameter_kind == k_var_positional;
             }
-
-            if (in_count > 1) {
-                announce(log_level::error, "process() declares " + std::to_string(in_count)
-                                               + " inputs but only the first is supported (single-channel object)");
-            }
-            if (sig->return_kind == "tuple") {
-                announce(
-                    log_level::error,
-                    "process() returns a tuple — multichannel output is not supported yet; use a single float return");
+            const auto fail = [&](const std::string& why) {
+                announce(log_level::error, "process() " + why + "; audio is not bound");
                 Py_DECREF(fn);
-                return;
+            };
+            if (var_inputs) {
+                return fail("takes *args, but its parameters are the object's signal inputs: name each one");
             }
+            if (per_vector != 0 && per_vector != inputs) {
+                return fail("mixes np.ndarray inputs (per vector) with others (per sample): hint them all np.ndarray "
+                            "or all float");
+            }
+            if (sig->return_count < 1) {
+                return fail("returns a tuple without saying how many values: hint it tuple[float, float] (or "
+                            "tuple[np.ndarray, np.ndarray]), one per output");
+            }
+            const auto outputs = static_cast<std::size_t>(sig->return_count);
+            if (inputs > k_max_channels || outputs > k_max_channels) {
+                return fail("declares " + std::to_string(inputs) + " inputs and " + std::to_string(outputs)
+                            + " outputs; the most is " + std::to_string(k_max_channels) + " of each");
+            }
+            // with no inputs (a generator), the return hint says which path
+            const bool block_input = inputs != 0 ? per_vector == inputs : sig->return_element_kind == "ndarray";
 
             b.process_function = fn;          // takes the reference
             b.block_mode       = block_input; // announced by load() once the binding is in place
+            b.inputs           = inputs;
+            b.outputs          = outputs;
+            b.input_names      = std::move(names);
         }
 
         /// Bind a public method as a message, described by its signature. A keyword-only parameter

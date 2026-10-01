@@ -8,12 +8,14 @@
 #include "tap/python/processor.h"
 #include "tap/python/runtime.h"
 #include "tap/python/value.h"
+#include "tap/python/worker.h"
 
 // c74_min.h must be the FIRST min header in the translation unit: it defines
 // C74_MIN_WITH_IMPLEMENTATION so the min wrapper's out-of-line statics get
 // emitted here. If c74_min_api.h sneaks in first (e.g. via our helper headers),
 // the include guards swallow those definitions and the external fails to link.
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -21,6 +23,12 @@
 #include <vector>
 
 #include "c74_min.h"
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/mach_time.h>
+#include <mach/thread_policy.h>
+#include <pthread.h>
+#endif
 #include "tap.python_tilde_attribute.h"
 #include "tap.python_tilde_cglue.h"
 #include "tap.python_tilde_filewatch.h"
@@ -41,15 +49,23 @@ class python : public object<python>, public vector_operator<> {
                     "messages called according to their signatures, with methods named int, float, symbol and "
                     "bang answering those standard messages. Its process() method runs on the signal: once per "
                     "signal vector when annotated with numpy arrays, or once per sample when annotated with "
-                    "float. An optional prepare(sample_rate, vector_size) method receives the audio settings "
-                    "before audio starts and whenever they change. The file is watched and reloaded when saved, "
-                    "keeping attribute values; errors are printed to the Max console and never take Max down."};
+                    "float; its parameters are the object's signal inlets, and its return hint its outlets "
+                    "(a tuple of values for more than one). An optional prepare(sample_rate, vector_size) "
+                    "method receives the audio settings "
+                    "before audio starts and whenever they change. With @mode worker, process() runs on a thread of "
+                    "its own, @latency milliseconds behind the audio, so that nothing else Python does can hold "
+                    "the audio up. The file is watched and reloaded when saved, "
+                    "keeping attribute values; a save that changes process()'s inputs or outputs changes the "
+                    "inlets and outlets to match, keeping the patch cords of those that stay. Errors are "
+                    "printed to the Max console and never take Max down."};
     MIN_TAGS{"programming"};
     MIN_AUTHOR{"Tim Place"};
     MIN_RELATED{"js, node.script"};
 
-    inlet<>  m_inlet{this, "(signal) input passed to the Python process() method"};
-    outlet<> m_outlet_main{this, "(signal) output returned from the Python process() method", "signal"};
+    // The first inlet and outlet; the constructor adds as many more as the class's process()
+    // declares, and a reload changes them to match (plan 2.4).
+    inlet<>  m_inlet{this, "(signal) the first input to the Python process() method, and messages"};
+    outlet<> m_outlet_main{this, "(signal) the first output returned from the Python process() method", "signal"};
 
     argument<symbol> m_source_arg{
         this, "source",
@@ -82,6 +98,7 @@ class python : public object<python>, public vector_operator<> {
                           if (m_processor) {
                               try {
                                   m_processor->flush_reports();
+                                  m_worker->flush_reports();
                               }
                               catch (const std::exception& e) {
                                   cerr << "reporting failed: " << e.what() << endl;
@@ -96,16 +113,52 @@ class python : public object<python>, public vector_operator<> {
     message<> dspsetup{this, "dspsetup",
                        MIN_FUNCTION {
                            if (m_processor) {
+                               const auto sample_rate = static_cast<double>(args[0]);
+                               const auto vector_size = static_cast<std::size_t>(static_cast<long>(args[1]));
                                try {
-                                   m_processor->prepare(static_cast<double>(args[0]),
-                                                        static_cast<std::size_t>(static_cast<long>(args[1])));
+                                   m_processor->prepare(sample_rate, vector_size);
                                }
                                catch (const std::exception& e) {
                                    cerr << "prepare failed: " << e.what() << endl;
                                }
+                               set_up_worker(sample_rate, vector_size);
                            }
                            return {};
                        }};
+
+    // Worker mode (plan 2.5): where process() runs, and how far behind. Both take effect when the
+    // signal chain compiles; setting either rebuilds it, so that is at once while audio runs.
+    attribute<symbol> m_mode{this,
+                             "mode",
+                             "direct",
+                             description{"Where process() runs: direct, on the audio thread, with no latency; or "
+                                         "worker, on a thread of its own, about latency milliseconds behind, so that "
+                                         "nothing Python does elsewhere (a reload, a message, a garbage "
+                                         "collection) can hold up the audio."},
+                             range{"direct", "worker"},
+                             c74::min::setter{MIN_FUNCTION {
+                                 const bool worker = !args.empty() && args[0] == symbol("worker");
+                                 rebuild_signal_chain();
+                                 return {symbol(worker ? "worker" : "direct")};
+                             }}};
+    attribute<double> m_latency{this,
+                                "latency",
+                                runtime::worker::k_default_latency_ms,
+                                description{"The latency in worker mode, in milliseconds (0 to 1000), rounded up "
+                                            "to whole signal vectors, at least one. It must be longer than Max's I/O "
+                                            "vector, which Max computes all at once: what is left over is the time "
+                                            "Python has to keep up. More absorbs longer pauses, at the cost of "
+                                            "delay."},
+                                range{0.0, 1000.0},
+                                c74::min::setter{MIN_FUNCTION {
+                                    rebuild_signal_chain();
+                                    return {std::clamp(static_cast<double>(args[0]), 0.0, 1000.0)};
+                                }}};
+    attribute<int>    m_latencysamples{this, "latencysamples", 0,
+                                    description{"The delay worker mode adds, in samples (latency rounded up to "
+                                                   "whole signal vectors), for aligning other signal paths; 0 in "
+                                                   "direct mode or with audio off."},
+                                    readonly{true}};
 
     python(const atoms& args = {}) {
         if (maxobj() == NULL) {
@@ -119,7 +172,7 @@ class python : public object<python>, public vector_operator<> {
         // (see this object's CMakeLists.txt)
         const std::filesystem::path home{TAP_PYTHON_HOME};
 #else
-        const auto home = package / "support";
+        const auto home = runtime::runtime_home(package); // support/, or support/<platform> (plan 4.8)
 #endif
 
         if (!std::filesystem::exists(home)) {
@@ -144,22 +197,28 @@ class python : public object<python>, public vector_operator<> {
             m_python_source = "default";
         }
         else {
-            m_python_source = to_string(args);
+            // the class file's name: one symbol, read as it is (anything else, as text, is not a
+            // valid name, and the core says so)
+            m_python_source = args.size() == 1 && c74::max::atom_gettype(&args[0]) == c74::max::A_SYM
+                                  ? std::string{c74::max::atom_getsym(&args[0])->s_name}
+                                  : to_string(args);
         }
 
-        m_processor = std::make_unique<runtime::processor>(
-            m_python_source,
-            [this](const runtime::log_level level, const std::string_view text) {
-                if (level == runtime::log_level::error) {
-                    cerr << std::string{text} << endl;
-                }
-                else {
-                    cout << std::string{text} << endl;
-                }
-            },
-            reserved_messages(), [this] { m_reports.set(); });
+        const auto object_log = [this](const runtime::log_level level, const std::string_view text) {
+            if (level == runtime::log_level::error) {
+                cerr << std::string{text} << endl;
+            }
+            else {
+                cout << std::string{text} << endl;
+            }
+        };
+        m_processor = std::make_unique<runtime::processor>(m_python_source, object_log, reserved_messages(),
+                                                           [this] { m_reports.set(); });
+        m_worker    = std::make_unique<runtime::worker>(
+            *m_processor, object_log, [this] { m_reports.set(); }, audio_thread_scheduling);
 
         update_source();
+        create_ports(); // before min makes the Max inlets and outlets from its lists, after this
 
         // watch the source file for changes (delivered as our 'filechanged' message) — only a plain
         // file name: the core refuses anything else (e.g. "../x"), and so must the watcher
@@ -182,6 +241,8 @@ class python : public object<python>, public vector_operator<> {
 
     ~python() {
         m_file_watch.reset();
+        m_use_worker = false;
+        m_worker.reset();    // joins the worker thread, before the processor it runs goes
         m_processor.reset(); // releases the Python objects under the GIL
     }
 
@@ -194,6 +255,7 @@ class python : public object<python>, public vector_operator<> {
         }
         create_attributes();
         create_messages();
+        adapt_ports();
     }
 
     /// Dispatch a Max message to the bound Python method.
@@ -267,15 +329,24 @@ class python : public object<python>, public vector_operator<> {
         }
     }
 
-    /// The audio perform routine: the core calls the Python process() once per
-    /// sample, holding the GIL for the vector, and outputs silence while unbound.
+    /// The audio perform routine: the core calls the Python process() once per sample or per
+    /// vector, holding the GIL for the vector, and outputs silence while unbound.
     void operator()(audio_bundle input, audio_bundle output) {
         if (!m_processor) {
             output.clear();
             return;
         }
         try {
-            m_processor->process(input.samples(0), output.samples(0), static_cast<std::size_t>(input.frame_count()));
+            // every channel Max gives: the core matches them to what process() declares (plan 2.4)
+            const auto inputs  = static_cast<std::size_t>(input.channel_count());
+            const auto outputs = static_cast<std::size_t>(output.channel_count());
+            const auto frames  = static_cast<std::size_t>(input.frame_count());
+            if (m_use_worker.load(std::memory_order_acquire)) { // never takes the GIL (plan 2.5)
+                m_worker->process(input.samples(), inputs, output.samples(), outputs, frames);
+            }
+            else {
+                m_processor->process(input.samples(), inputs, output.samples(), outputs, frames);
+            }
         }
         catch (...) { // never let an exception unwind into the audio driver
             output.clear();
@@ -283,20 +354,58 @@ class python : public object<python>, public vector_operator<> {
     }
 
   private:
-    string                                                                    m_python_source{};
-    std::filesystem::path                                                     m_scripts_dir{};
-    std::unique_ptr<runtime::file_watch>                                      m_file_watch;
-    std::unique_ptr<runtime::processor>                                       m_processor;
+    string                                 m_python_source{};
+    std::filesystem::path                  m_scripts_dir{};
+    std::unique_ptr<runtime::file_watch>   m_file_watch;
+    std::unique_ptr<runtime::processor>    m_processor;
+    std::unique_ptr<runtime::worker>       m_worker;       // runs m_processor
+    std::atomic<bool>                      m_use_worker{}; // read by the audio thread
+    std::vector<std::unique_ptr<inlet<>>>  m_more_inlets;  // after the first
+    std::vector<std::unique_ptr<outlet<>>> m_more_outlets; // after the first
+    bool                                   m_ports_made{};
+    bool                                   m_ports_differ{};
     std::unordered_map<std::string, std::unique_ptr<runtime::python_message>> m_python_messages;
     std::unordered_map<std::string, std::unique_ptr<runtime::python_attr>>    m_python_attributes;
 
-    /// Messages the Max object handles itself, which a Python method must never replace: min's
-    /// own class methods, the messages Max sends every object, and this object's file watcher
-    /// (a Python method named filechanged would silently disable hot reload).
+    /// Messages and attributes the Max object handles itself, which a Python method or field must
+    /// never replace: min's own class methods, the messages Max sends every object, this object's
+    /// file watcher (a Python method named filechanged would silently disable hot reload), and its
+    /// own attributes (worker mode's, plan 2.5).
     static std::vector<std::string> reserved_messages() {
-        return {"anything", "appendtodictionary", "assist",     "dblclick",  "dsp",      "dsp64",
-                "dspsetup", "filechanged",        "getvalueof", "inletinfo", "loadbang", "notify",
-                "preset",   "savestate",          "setvalueof", "signal"};
+        return {"anything", "appendtodictionary", "assist",      "dblclick",   "dsp",
+                "dsp64",    "dspsetup",           "filechanged", "getvalueof", "inletinfo",
+                "latency",  "latencysamples",     "loadbang",    "mode",       "notify",
+                "preset",   "savestate",          "setvalueof",  "signal"};
+    }
+
+    /// The worker thread's scheduling (plan 2.5): the real-time class an audio thread has, so that a
+    /// busy machine does not hold it off for longer than its latency (measured in Max: an ordinary
+    /// thread was late even with 32 vectors of latency). On the worker thread as it starts, with the
+    /// vector period in seconds. If the system refuses, the thread keeps ordinary scheduling.
+    static void audio_thread_scheduling(const double period) {
+#if defined(__APPLE__)
+        // Mach's time-constraint policy, in Mach absolute time: the thread runs once a period, needs
+        // up to half of it, and must be done within it
+        if (period <= 0.0) {
+            return;
+        }
+        mach_timebase_info_data_t timebase{};
+        if (mach_timebase_info(&timebase) != KERN_SUCCESS || timebase.numer == 0) {
+            return;
+        }
+        const double                         ticks = period * 1e9 * timebase.denom / timebase.numer;
+        thread_time_constraint_policy_data_t policy{};
+        policy.period      = static_cast<std::uint32_t>(ticks);
+        policy.computation = static_cast<std::uint32_t>(ticks / 2);
+        policy.constraint  = static_cast<std::uint32_t>(ticks);
+        policy.preemptible = 1;
+        thread_policy_set(pthread_mach_thread_np(pthread_self()), THREAD_TIME_CONSTRAINT_POLICY,
+                          reinterpret_cast<thread_policy_t>(&policy), THREAD_TIME_CONSTRAINT_POLICY_COUNT);
+#elif defined(_WIN32)
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+#else
+        (void)period; // Linux development builds: no host runs there
+#endif
     }
 
     /// Python's print() output and tracebacks, for every instance.
@@ -353,6 +462,121 @@ class python : public object<python>, public vector_operator<> {
                 m_python_attributes[attribute.name] =
                     std::make_unique<runtime::python_attr>(maxobj(), attribute.name, attribute.type);
             }
+        }
+    }
+
+    /// A signal inlet for each input the class's process() declares, named for its parameter, and
+    /// an outlet for each output — at least one of each: the first inlet also takes messages.
+    /// Constructor only: min makes the Max inlets and outlets from these when it returns.
+    void create_ports() {
+        describe_ports(m_processor ? std::max<std::size_t>(1, m_processor->input_count()) : 1,
+                       m_processor ? m_processor->output_count() : 1);
+        m_ports_made = true;
+    }
+
+    /// Make the inlets and outlets match what a reloaded class's process() declares, in place:
+    /// Max's dynamic inlets and outlets, changed between the box's dynlet_begin and dynlet_end,
+    /// keep the patch cords of every inlet and outlet that stays. The signal chain is then marked
+    /// broken, so it is rebuilt with the new counts. An object without a box (made by object_new)
+    /// keeps its ports and says so, once, until they match again; the core matches the channels: a
+    /// missing input reads as silence, an extra output is dropped.
+    void adapt_ports() {
+        if (!m_ports_made) {
+            return;
+        }
+        const auto inlets  = 1 + m_more_inlets.size();
+        const auto outlets = 1 + m_more_outlets.size();
+        const auto inputs  = std::max<std::size_t>(1, m_processor->input_count());
+        const auto outputs = m_processor->output_count();
+        if (inputs == inlets && outputs == outlets) {
+            describe_ports(inlets, outlets); // a parameter may have been renamed
+            m_ports_differ = false;
+            return;
+        }
+
+        c74::max::t_object* box{};
+        if (c74::max::object_obex_lookup(maxobj(), k_sym__pound_b, &box) != c74::max::MAX_ERR_NONE || !box) {
+            if (!m_ports_differ) {
+                cout << "process() now has " << inputs << " input(s) and " << outputs << " output(s); this object has "
+                     << inlets << " inlet(s) and " << outlets << " outlet(s) — re-create it to change them" << endl;
+            }
+            describe_ports(inlets, outlets);
+            m_ports_differ = true;
+            return;
+        }
+
+        c74::max::object_method(box, c74::max::gensym("dynlet_begin"));
+        c74::max::dsp_resize(reinterpret_cast<c74::max::t_pxobject*>(maxobj()), static_cast<long>(inputs));
+        for (auto n = outlets; n > outputs; --n) {
+            c74::max::outlet_delete(c74::max::outlet_nth(maxobj(), static_cast<long>(n - 1)));
+        }
+        for (auto n = outlets; n < outputs; ++n) {
+            c74::max::outlet_append(maxobj(), nullptr, c74::max::gensym("signal"));
+        }
+        describe_ports(inputs, outputs); // min's lists follow Max's before anything can read them
+        c74::max::object_method(box, c74::max::gensym("dynlet_end"));
+        m_ports_differ = false;
+
+        rebuild_signal_chain();
+    }
+
+    /// Have Max rebuild the signal chain this object is in (as it does when patch cords change),
+    /// which calls dspsetup again: after its inlets or outlets change, or worker mode's settings.
+    void rebuild_signal_chain() {
+        if (maxobj() == nullptr) {
+            return;
+        }
+        if (auto* chain = c74::max::dspchain_fromobject(maxobj())) {
+            c74::max::dspchain_setbroken(chain);
+        }
+    }
+
+    /// Start the worker for the chain being compiled — this object's inlets and outlets, the
+    /// vector size, @latency — or stop it in direct mode. Main thread, from dspsetup; the old chain
+    /// may still be running, which the worker allows for (plan 2.5).
+    void set_up_worker(const double sample_rate, const std::size_t vector_size) {
+        if (m_mode.get() == symbol("worker")) {
+            m_worker->start(1 + m_more_inlets.size(), 1 + m_more_outlets.size(), vector_size,
+                            runtime::worker::latency_vectors(m_latency, sample_rate, vector_size), sample_rate);
+            m_use_worker.store(true, std::memory_order_release);
+        }
+        else {
+            m_use_worker.store(false, std::memory_order_release);
+            m_worker->stop();
+        }
+        // set directly (not through Max, which refuses to set a readonly attribute), overriding readonly
+        m_latencysamples.set({static_cast<int>(m_worker->latency_samples())}, false, true);
+    }
+
+    /// min's lists of this object's inlets and outlets, one entry for each the Max object has:
+    /// min's dsp64 reads a connection count for each, and its assist the help text, which names
+    /// each inlet for its process() parameter. They make no Max inlets or outlets after the
+    /// constructor: the Max ones are made by min (at creation) or by adapt_ports().
+    void describe_ports(const std::size_t inlet_count, const std::size_t outlet_count) {
+        auto& inlet_list = inlets();
+        for (const auto& more : m_more_inlets) {
+            inlet_list.erase(std::remove(inlet_list.begin(), inlet_list.end(), more.get()), inlet_list.end());
+        }
+        m_more_inlets.clear();
+        const auto& names = m_processor ? m_processor->input_names() : std::vector<std::string>{};
+        for (std::size_t i = 1; i < inlet_count; ++i) {
+            const auto number = std::to_string(i + 1);
+            m_more_inlets.push_back(std::make_unique<inlet<>>(
+                this, i < names.size()
+                          ? "(signal) " + names[i] + ": input " + number + " to the Python process() method"
+                          : "(signal) input " + number + ": not used by the Python process() method"));
+        }
+
+        auto& outlet_list = outlets();
+        while (1 + m_more_outlets.size() > outlet_count && !m_more_outlets.empty()) {
+            const auto* last = m_more_outlets.back().get();
+            outlet_list.erase(std::remove(outlet_list.begin(), outlet_list.end(), last), outlet_list.end());
+            m_more_outlets.pop_back();
+        }
+        while (1 + m_more_outlets.size() < outlet_count) {
+            const auto number = std::to_string(m_more_outlets.size() + 2);
+            m_more_outlets.push_back(std::make_unique<outlet<>>(
+                this, "(signal) output " + number + " returned from the Python process() method", "signal"));
         }
     }
 

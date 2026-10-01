@@ -100,11 +100,119 @@ while audio ran segfaulted in 5 of 5 runs.
 - [x] **2.3 `prepare(self, sample_rate, vector_size)`**, from min's `dspsetup`; also called on each
   newly loaded instance before it is published, so no vector ever runs on an unprepared instance.
   `allpass.py` uses it (and its α range is now open, per 5.4).
-- [ ] **2.4 Multiple inlets/outlets** — `process` arguments define signal inlets and a tuple
-  return defines outlets, fixed at construction.
-- [ ] **2.5 Worker mode (D1)** — `@mode worker`: Python on a worker thread, lock-free FIFO,
-  latency reported to Max, underrun → silence.
-- [ ] **2.6 Shorter reload stalls** — compile outside the swap and hold the GIL only for the swap.
+- [x] **2.4 Multiple inlets/outlets** — `process` arguments define signal inlets and a tuple
+  return defines outlets. *Decided (2026-09-30):* when a save changes the
+  counts, the object adapts its inlets and outlets in place with Max's dynamic inlets and outlets
+  (`dynlet_begin`/`dynlet_end` around `dsp_resize` and `outlet_append`/`outlet_delete`, as
+  Cycling '74 describes in its developer forum) rather than asking for the object to be
+  re-created. Three steps: *(a) the core — done:* `processor::process()` takes N input and M
+  output channels; the positional parameters are the inputs (all `np.ndarray` or all per sample;
+  none makes a generator), the return hint the outputs (`tuple[float, float]` for two; a tuple of
+  unsaid length, `*args` or mixed hints are reported and not bound); `input_count()` and
+  `output_count()` tell the host; the host's channels are matched to the class's (a missing input
+  reads as silence, an extra output is silent); a result of the wrong length is silenced and
+  reported once per load. *(b) the Max object's inlets and outlets from the class at creation —
+  done:* the constructor adds an `inlet<>` per input after the first (its help naming the
+  parameter: `processor::input_names()`) and an `outlet<>` per output after the first, before min
+  makes the Max ports from its lists; after a reload that changes the counts it says so, once, and
+  the core matches the channels. New example `stereo_width.py` (two in, two out; `width`). Mock test:
+  `[tap.python~ stereo_width]` has two of each and processes both (the test file now stands in a
+  faithful `attr_args_offset`, and the object reads a one-symbol argument directly, not through
+  `atom_gettext` — the mock's gives nothing); runtime test `channels` (stereo_width, a generator, a
+  save that changes the shape). *(c) adapting them on reload (dynlets) — done:* after a reload that
+  changes the counts, `adapt_ports()` finds the object's box (`#B`) and, between `dynlet_begin`
+  and `dynlet_end`, sets the signal inlets with `dsp_resize` and deletes or appends outlets at the
+  end (`outlet_nth`/`outlet_delete`, `outlet_append`); min's own inlet and outlet lists follow at
+  once (its dsp64 reads a connection count for each, its assist the help text, now renamed with
+  the parameters on every reload); then `dspchain_setbroken(dspchain_fromobject())` has the signal
+  chain rebuilt. Without a box the object keeps its ports and says so, as in (b). Mock test: the
+  dynlet calls recorded against a pretend box, for a save that grows, shrinks, renames and breaks
+  the class; runtime test `channels`: grown from two to three, the old cords carry on and cords
+  that `thispatcher` connects to the new inlet and outlet carry signal (this check fails against
+  (b)); shrunk to one, the removed outlets' cords go with them.
+- [x] **2.5 Worker mode (D1)** — `@mode worker`: Python on a worker thread, lock-free FIFO,
+  latency reported to Max, underrun → silence. *Design (decided 2026-09-30):*
+  - **What it buys.** In direct mode the audio thread takes the GIL, so anything else holding it —
+    a reload compiling a large file (2.6's limit), a message handler, a GC pass — delays the
+    buffer. In worker mode the audio thread never takes the GIL or calls CPython: it copies
+    vectors in and out of a queue, and Python runs on a thread of its own, a fixed latency behind.
+  - **In the core** (D6), beside `processor`: a `worker` that owns the thread and a ring of slots,
+    each one vector of every host input and output channel. The audio thread writes vector *k*'s
+    inputs into a slot and reads vector *k − L*'s outputs; the worker takes slots in order and runs
+    the existing `processor::process()` on them — per sample or per vector, with 2.4's channel
+    matching — so the class contract does not change. Slot states are atomics (single producer,
+    single consumer, no locks); the audio thread wakes the worker with a C++20 atomic notify, which
+    never blocks. The worker's thread is created and joined on the main thread.
+  - **Latency** *L* is whole vectors, set by `@latency` in milliseconds (default 30, rounded up to
+    whole vectors, at least one — *revised twice after measuring, below: from "vectors, default 2",
+    then from 10 ms*), and reported in samples (*L* × vector size) by the read-only `@latencysamples`, which
+    a patch can read to align other paths. Max has no documented call for an MSP object to report
+    latency to the host, so none is used; the output is primed with *L* vectors of silence.
+  - **Underruns.** A slot not done when its outputs are due is output as silence and counted; the
+    worker still processes it when it gets there (so the class's state stays continuous) and
+    discards its outputs, catching up through the backlog, so the latency stays *L*. If it falls
+    a whole ring behind (the ring holds *L* + a margin), new inputs are dropped until it catches
+    up, which the class sees as a gap. Both are reported once per load from the main thread (`flush_reports()`),
+    never printed on the audio thread.
+  - **`prepare()` and the mode.** The ring is sized when the chain compiles (`dspsetup`: vector
+    size, and the object's inlet and outlet counts), with the worker stopped and restarted around
+    it; `prepare()` runs as now, on the main thread. `@mode` and `@latency` take effect at the next
+    compile — setting them marks the chain broken (as 2.4 does), so that is at once while audio
+    runs.
+  - **Reloads, attributes and messages** are unchanged: they take the GIL on the main or scheduler
+    thread, and the worker picks up a new binding at its next vector, as the audio thread does
+    now. An attribute change is heard *L* vectors later.
+  - **Tests.** Core battery (Linux, under TSan too): worker output equals direct output delayed by
+    *L* vectors, per sample and per vector, several channels; a worker stalled by a class that
+    sleeps underruns to silence, is reported once, and comes back at the same latency; reload
+    under a running worker; resizing in `prepare()`; destruction joins the thread. Runtime test in
+    Max: `@mode worker` against `delay~` of *L* vectors, a reload under audio, and
+    `@latencysamples`.
+  - **Decided:** latency in whole vectors, default 2; an underrun is silence with the latency kept;
+    one Python call per host vector — batching several per call would cut the per-call overhead
+    further (worker mode's other win) at more latency, a later option (`@block`) if measurements
+    show it pays.
+  - *(a) the core — done:* `core/include/tap/python/worker.h`. The ring is single producer, single
+    consumer, with a sequence number per slot: the audio thread queues a vector only into a slot
+    the worker has finished with, so a full ring drops the new vector rather than racing the
+    worker for an old one; the margin is a quarter of a second, at least 16 vectors. The audio
+    thread borrows the ring for each vector by taking an atomic pointer, so `start()` and `stop()`
+    — which a host may call while its old signal chain still runs — wait at most one vector, and
+    a vector arriving meanwhile is silence. Reports are once per load, by the processor's new
+    `load_count()`. Core battery: the output is the direct output *L* vectors later (per sample
+    and per vector, *L* = 1–3, two channels); the host's channels matched to the ring; a stall
+    goes silent, is reported once, comes back at the same latency, and is reported again after a
+    reload; a stall past the ring drops exactly the vectors beyond it; restart, stop, and stop
+    during a stall; ten reloads under an audio thread. Clean under TSan (locally, macOS) — the
+    Linux CI job runs it too. *(b) the Max object:* `@mode`, `@latency`, `@latencysamples`, the
+    ring sized in `dspsetup`; runtime test in Max — *done*. *Found in Max:* an ordinary worker thread was
+    late for vectors in 2 of 5 quiet seconds even with 32 vectors (21 ms) of latency, on a busy
+    machine (load average 6–11); the worker now gets the real-time scheduling of an audio thread —
+    a hook the core calls on the thread as it starts (`thread_setup`), where the wrapper sets
+    Mach's time-constraint policy (macOS: a period of one vector, half of it computation) or
+    `THREAD_PRIORITY_TIME_CRITICAL` (Windows). With it, at 96 kHz and 64-sample vectors, the seconds
+    with a late vector: 10 of 10 at 2 vectors (1.3 ms), 10 of 10 at 4, 3 of 10 at 8 (5.3 ms), none
+    at 16 (10.7 ms) — and a reload's hold on the GIL (2.6: about 3.5 ms) is longer than 2 vectors
+    there. Hence a latency in milliseconds, which stays the same delay whatever the vector size.
+    *Then:* Max computes a whole I/O vector of signal vectors back to back (here 512 samples, so 8
+    at a time), and the worker has only the latency beyond that burst to do them in — which is why
+    8 vectors (512 samples) failed and 16 did not. 10 ms (960 samples here, 4.7 ms beyond the
+    burst) still left late vectors in 2 of 11 seconds, and at 44.1 or 48 kHz with Max's usual
+    512-sample I/O vector it would leave nothing. Decided: `@latency` stays the whole delay,
+    default 30 ms, documented as having to exceed the I/O vector's duration (measuring the burst
+    and adding to it was the alternative). Fields as well as methods are now checked against the host's reserved names
+    (`mode`, `latency` and `latencysamples` among them).
+- [x] **2.6 Shorter reload stalls** — compile outside the swap and hold the GIL only for the swap.
+  *Measured first* (`core/bench/reload_bench.cpp`: an audio thread with Core Audio's real-time
+  scheduling computes 512-sample buffers of 64-sample vectors at 96 kHz while the main thread saves
+  and reloads the class every 100 ms): a reload of the allpass examples holds the GIL for about
+  3.5 ms, and with CPython's 5 ms switch interval the audio thread waited for all of it — late
+  buffers in most runs, the worst 45 ms (the reloading thread descheduled while holding the GIL).
+  *Done:* the runtime sets a 0.5 ms switch interval (`runtime_options::switch_interval`): no late
+  buffer in three runs, the 99th percentile 0.7–2 ms, the median unchanged. Splitting `load()` into
+  phases was not needed for files this size: what a switch cannot interrupt is a single C call —
+  compiling the file, above all — which is short for them; a very large class file would still
+  compile in one piece (2.5, worker mode, is the answer to that).
 
 ## Phase 3 — the type bridge and class contract
 
@@ -200,6 +308,51 @@ while audio ran segfaulted in 5 of 5 runs.
   ships — Min-API, the Max SDK, CPython's, and each installed package's own (PEP 639
   `dist-info/licenses/`, where numpy lists what it bundles) — with an index, collected from the
   package's actual contents; CI runs the collection on Linux.
+- [x] **4.7 uv for development and release tooling** — *Discussed (2026-09-30):* use uv where it
+  replaces work we do by hand; keep the shipped runtime a python-build-standalone archive pinned
+  by SHA256 in `runtime.lock`. For uv: `uv pip compile --universal --generate-hashes` in place of
+  most of `update-locks.py`'s PyPI handling; `uv pip install --python-platform <triple> --target …`
+  to install any platform's wheels from any machine (what 4.8 needs); `uv python install 3.13` for
+  the Linux fast loop's CPython with headers; `uv run` with inline script metadata for the
+  scripts. Against using it for the runtime: `uv python install` pins only through the uv
+  version, installs in its own layout, and may mark the interpreter externally managed (to
+  check) — and the work that matters (the `@rpath` install name, re-signing, the universal
+  libpython) is ours either way. Users never need uv; the ReadMe may mention
+  `uv pip install --python support/bin/python3 …` beside pip. *Evaluated (2026-10-01, uv 0.12.21),
+  and it came down to documentation:* `uv pip compile --generate-hashes` lists every distribution
+  of each pin — 68 hashes for attrs and numpy, every Python version and platform, even with
+  `--python-platform` — where `update-locks.py` pins exactly the 8 wheels we ship, so it stays;
+  4.8 can merge the platform builds CI already makes, so it needs no cross-platform install
+  (which does work: Windows' numpy wheels installed on a Mac against our lock, hashes enforced);
+  the scripts use only the standard library, so `uv run` adds nothing; and `uv python install`
+  marks its interpreter `EXTERNALLY-MANAGED` (pip then refuses to install into it) and installed
+  3.13.15 against our pinned 3.13.14 — confirming the runtime stays ours. What uv is good for here
+  is now documented: `uv python install 3.13` for the Linux loop's CPython with headers (ReadMe,
+  CLAUDE.md), and `uv pip install --python support/bin/python3` for users adding packages to the
+  runtime (it is not externally managed).
+- [x] **4.8 One package for every platform on each tag** — *Decided (2026-09-30):* a tag also
+  attaches a single `PythonTap-<version>.zip` holding every platform's external and runtime, and
+  v0.x tags publish as pre-releases automatically (1.0 and later stay drafts until signing
+  exists). Needs one runtime per platform side by side — `support/macos-arm64/`,
+  `support/macos-x86_64/`, `support/windows-x64/` (one folder cannot hold both: Windows' `Lib/`
+  and the Mac's `lib/` collide on a case-insensitive disk) — with the macOS external choosing by
+  the architecture it runs as (each slice of the universal binary can carry its own rpath) and the
+  Windows external loading `python313.dll` from its folder by full path before the first
+  delay-loaded call (Max adds only `support/` itself to the DLL search path); and a last
+  `release.yml` job that merges the platform builds into one `PythonTap/` and attaches it with
+  its checksum (about 130 MB, against 37–55 MB per platform zip today). *Done:* the external
+  takes `support/<runtime_platform()>` when it exists and `support/` otherwise
+  (`runtime_home()`, mock-tested); the universal macOS external carries an rpath per slice to
+  `support/macos-<arch>/lib` ahead of `support/lib` (`-Xarch_<arch>`, for each architecture
+  built); Windows already loaded the DLL by full path from the runtime folder.
+  `assemble-package.py --merge platform=zip …` unzips each release zip itself (backslash entry
+  names as folders; the macOS runtime's symlinks and executable bits kept), copies what must be
+  the same in all of them once (compared with line endings aside: a Windows checkout has CRLF),
+  every external, each runtime into `support/<platform>` and each platform's licenses into
+  `licenses/<platform>`; the `all platforms` job runs it on the three zips, and the release job
+  attaches the result, publishing 0.x tags as pre-releases. Checked in Max: a merged package
+  holding the Intel runtime as `support/macos-x86_64`, installed in Packages, passed the whole
+  runtime suite (including the sessions that move the runtime aside).
 
 ## Phase 5 — documentation and examples
 
@@ -240,8 +393,8 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
    only to check a universal build), then `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release &&
    cmake --build build && ctest --test-dir build`. The external lands in `externals/`. When Max
    loads an external newer than `docs/tap.python~.maxref.xml`, min rewrites the page from the
-   object's metadata; the committed one was generated against the mock kernel, so if Max's
-   differs, commit Max's. (A symlinked package works for externals, but Max loads a package's
+   object's metadata (6.8: the build dates the `.mxo` for it, and `run.py` says when it happened);
+   commit Max's page when it differs. (A symlinked package works for externals, but Max loads a package's
    *extensions* only from a real folder — why `run.py` installs the harness as a copy.)
 2. *5.2 — the help patcher.* Open `help/tap.python~.maxhelp`: its new boxes were added by hand
    (as JSON, in Max's layout), so check they sit sensibly and every message box works, then
@@ -329,6 +482,9 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
   ReadMe promises (`release.yml` fixed; the draft's added by hand); the external's bundle
   identifier is min's template, unexpanded — `com.74objects.${PRODUCT_NAME:rfc1034identifier}` —
   to fix before signing and notarizing; and `docs/PRODUCTION-PLAN.md` ships inside the package.
+  *Both fixed since:* max-sdk-base leaves the identifier for Xcode to expand, which no other
+  generator does (every sibling Max package ships it the same way), so the object's CMakeLists
+  expands it — `com.74objects.tap.python-tilde`; `assemble-package.py` leaves the plan out.
   *Observed, not explained:* with the release installed, Max's file database took 8–11 minutes to
   report ready at each launch (seconds with the linked checkout; Max had also just been updated to
   9.1.5 and rebuilt its database) — the runner no longer waits for it, as tests opened by name do
@@ -356,20 +512,36 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
   nothing, and the external's own reload line is gone. Errors particular to an instance are
   unchanged. Pinned by a core test (two processors, a change, an unchanged reload) and a runtime
   test (five objects in Max: the class's diagnostic once per run of the file).
-- [ ] **6.8 The reference page from Max** — runbook step 1 expects min to rewrite
+- [x] **6.8 The reference page from Max** — runbook step 1 expects min to rewrite
   `docs/tap.python~.maxref.xml` when Max loads an external newer than it; in the Mac sessions it
   did not. Max's standard output had "file not found" and "failed to get date modified" lines at
   start-up — probably min's `doc_update` failing to resolve a path, not yet shown to come from this
   object. Find out why, and whether the committed page (generated against the mock kernel) is the
-  one Max would write.
-- [ ] **6.9 The help patcher and `numpy_allpass.py`** — the help patcher points to the `numpy_gain`
+  one Max would write. *Done:* min's `doc_update` dates the external by its `.mxo` folder, and a
+  rebuild changes only the files inside it — the checkout's folder dated from its first build
+  (2026-08-05), older than the page, so the page never looked stale; a freshly unzipped release
+  has a new folder, which is why Max rewrote the installed package's page. The macOS build now
+  touches the folder after each link (a Windows `.mxe64` is one file, dated by its link already),
+  and `run.py` says when Max has rewritten the page, to commit it. Max's page matches the committed
+  one but for the description, which predated 2.4's text — now committed. The start-up lines are
+  not this object's: they still appear while its page is written.
+- [x] **6.9 The help patcher and `numpy_allpass.py`** — the help patcher points to the `numpy_gain`
   and `allpass` examples but not to `numpy_allpass`, the one that shows what the block path is for;
-  add it in Max (and re-save), perhaps with the measured comparison.
-- [ ] **6.10 One traceback per broken save** — a file that fails to load is not cached, so every
+  add it in Max (and re-save), perhaps with the measured comparison. *Done:* the examples note names
+  `numpy_allpass` as the same filter per vector, to swap in and watch the patcher's CPU meter (the
+  ReadMe's tables are the measured comparison); and a new note says what 2.4 made true —
+  `process()`'s parameters are the inlets, its return hint the outlets, `stereo_width` has two of
+  each, and a save that changes them changes the object. Checked open in Max 9.1.5.
+- [x] **6.10 One traceback per broken save** — a file that fails to load is not cached, so every
   object sharing it runs it and prints the traceback: 25 objects, 25 tracebacks. 6.7 left this
   alone, because the obvious fix — remember the failing source and stay quiet — would also hide
   the error from an object created later (a patch reopened with the file still broken). Needs a
-  rule that reports once per save without that.
+  rule that reports once per save without that. *Done:* the loader still runs the file on every
+  load, but marks a failure of the same source it reported less than two seconds ago
+  (`_REPORT_WINDOW`), and the processor stays quiet for a marked failure — a save, or a patch
+  opening many objects, reports once; an object made later reports again. Pinned by a core test
+  (two processors; another broken save; a later object) and the runtime test `announce-once` (a
+  broken save, five objects in Max, one report — five before the change).
 
 ## Phase 7 — plugin front ends (optional, post-1.0)
 
@@ -388,6 +560,7 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
 7. Phase 4.5–4.6 — release packaging and licenses.
 8. Phase 2.4–2.6 — multichannel, worker mode, reload stalls (features; may follow 1.0).
 9. Phase 6 — in-Max validation before tagging 1.0.
+10. Phase 4.7–4.8 — uv for the tooling, then one package for every platform on each tag.
 
 ## External prerequisites
 

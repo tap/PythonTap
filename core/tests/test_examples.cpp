@@ -169,3 +169,43 @@ SCENARIO("numpy_allpass.py computes exactly what allpass.py does, a vector at a 
     }
     CHECK(identical);
 }
+
+SCENARIO("stereo_width.py has two inputs and two outputs, and sets the width") {
+    ensure_runtime();
+    if (!importable("attrs") || !importable("numpy")) {
+        SKIP("attrs and numpy are not importable by the embedded interpreter");
+    }
+
+    processor p{"stereo_width"};
+    REQUIRE(p.load());
+    p.prepare(48000.0, 4);
+    CHECK(p.input_count() == 2);
+    CHECK(p.output_count() == 2);
+    CHECK(p.input_names() == std::vector<std::string>{"left", "right"});
+
+    std::vector<double> left{1.0, 0.5, 0.0, -0.5};
+    std::vector<double> right{0.0, 0.5, 1.0, 0.5};
+    std::vector<double> out_left(4);
+    std::vector<double> out_right(4);
+    const double*       in[2]  = {left.data(), right.data()};
+    double*             out[2] = {out_left.data(), out_right.data()};
+
+    WHEN("the width is 1") {
+        p.process(in, 2, out, 2, 4);
+        THEN("the pair passes as it was") {
+            CHECK(out_left == left);
+            CHECK(out_right == right);
+        }
+    }
+    WHEN("the width is 0") {
+        REQUIRE(p.set_attribute("width", 0.0));
+        p.process(in, 2, out, 2, 4);
+        THEN("both channels are the mono mix") {
+            CHECK(out_left == std::vector<double>{0.5, 0.5, 0.5, 0.0});
+            CHECK(out_right == out_left);
+        }
+    }
+    THEN("a negative width is refused") {
+        CHECK_FALSE(p.set_attribute("width", -1.0));
+    }
+}

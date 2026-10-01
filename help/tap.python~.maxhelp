@@ -10,7 +10,7 @@
 		}
 ,
 		"classnamespace" : "box",
-		"rect" : [ 100.0, 100.0, 780.0, 600.0 ],
+		"rect" : [ 100.0, 100.0, 780.0, 700.0 ],
 		"bglocked" : 0,
 		"openinpresentation" : 0,
 		"default_fontsize" : 13.0,
@@ -355,13 +355,39 @@
 , 			{
 				"box" : 				{
 					"fontsize" : 13.0,
-					"id" : "obj-37",
-					"linecount" : 6,
+					"id" : "obj-41",
+					"linecount" : 4,
 					"maxclass" : "comment",
 					"numinlets" : 1,
 					"numoutlets" : 0,
-					"patching_rect" : [ 20.0, 450.0, 235.0, 122.0 ],
-					"text" : "More examples in the python folder: [tap.python~ numpy_gain] processes a whole signal vector per call with numpy, the form to use when it has to run in real time; [tap.python~ allpass] is an allpass filter that sizes its delay line in prepare()."
+					"patching_rect" : [ 270.0, 510.0, 300.0, 76.0 ],
+					"text" : "process()'s parameters are the object's signal inlets and its return hint its outlets: [tap.python~ stereo_width] has two of each. A save that changes them changes the object's inlets and outlets."
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"fontsize" : 13.0,
+					"id" : "obj-42",
+					"linecount" : 3,
+					"maxclass" : "comment",
+					"numinlets" : 1,
+					"numoutlets" : 0,
+					"patching_rect" : [ 270.0, 595.0, 300.0, 62.0 ],
+					"text" : "@mode worker runs process() on a thread of its own, @latency milliseconds (30) behind, so a reload or a message never holds up the audio."
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"fontsize" : 13.0,
+					"id" : "obj-37",
+					"linecount" : 9,
+					"maxclass" : "comment",
+					"numinlets" : 1,
+					"numoutlets" : 0,
+					"patching_rect" : [ 20.0, 450.0, 235.0, 180.0 ],
+					"text" : "More examples in the python folder: [tap.python~ numpy_gain] processes a whole signal vector per call with numpy, the form to use when it has to run in real time; [tap.python~ allpass] is an allpass filter that sizes its delay line in prepare(), and [tap.python~ numpy_allpass] the same filter per vector: swap one for the other and watch the CPU meter."
 				}
 
 			}

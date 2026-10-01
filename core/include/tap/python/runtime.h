@@ -35,6 +35,11 @@ namespace tap::python {
         std::filesystem::path home;        ///< the CPython installation (PyConfig.home)
         std::filesystem::path scripts_dir; ///< the user's script folder, made importable
         log_function          console;     ///< where Python's stdout (info) and stderr (error) go
+        /// How long a thread holding the GIL keeps it from a thread waiting for it, in seconds
+        /// (sys.setswitchinterval). CPython's 5 ms lets a reload on the main thread keep the audio
+        /// thread waiting past an I/O buffer's deadline; 0.5 ms does not (plan 2.6: measured by
+        /// core/bench's tap_python_reload_bench) and is under one 64-sample vector at 96 kHz.
+        double switch_interval = 0.0005;
     };
 
     /// The outcome of initialize(): ok, or the reason the interpreter could not start.
@@ -168,7 +173,11 @@ namespace tap::python {
         // save — and executes it as a fresh module registered in sys.modules under module_name (typing
         // and attrs resolve annotations through sys.modules). Modules are cached by source: loading an
         // unchanged file returns the module already executed, so every instance of one file shares a
-        // single execution per save. On failure the previous module stays registered.
+        // single execution per save. On failure the previous module stays registered, and the file is
+        // run again by the next load (something it imports may have been fixed) — but a failure of the
+        // same source already reported within _REPORT_WINDOW seconds is marked _tap_python_reported,
+        // so that a save that breaks a file shared by many objects, or a patch opening many of them,
+        // reports it once, while an object created later still says why it is silent (plan 6.10).
         //
         // hint_kind(hint) -> str. The name the host maps a type hint by: 'int', 'float', 'bool', 'str',
         // 'ndarray', 'tuple', ... ('any' for no hint, 'ClassVar' for a class variable). Optional[X] and
@@ -182,12 +191,17 @@ namespace tap::python {
         // staticmethods — found without running descriptors, so a property getter never runs just
         // because the class was loaded. Each callable is bound: call it with the arguments only.
         //
-        // describe(callable) -> ([(name, kind, parameter_kind, has_default)], return_kind, error).
-        // parameter_kind is inspect.Parameter.kind as an int.
+        // describe(callable) -> ([(name, kind, parameter_kind, has_default)], return_kind, error,
+        // return_count, return_element_kind). parameter_kind is inspect.Parameter.kind as an int.
+        // return_count is how many values a return hint declares: 1, or n for tuple[a, b, ...] (-1
+        // when a tuple's length is not said: tuple, tuple[float, ...]); return_element_kind is the
+        // hint kind of the value, or of a tuple's first element.
         inline constexpr const char* k_support_source = R"(
-import inspect, re, sys, types, typing
+import inspect, re, sys, time, types, typing
 
 _cache = {}
+_failed = {}
+_REPORT_WINDOW = 2.0
 
 def load(module_name, path):
     with open(path, 'rb') as f:
@@ -195,19 +209,32 @@ def load(module_name, path):
     cached = _cache.get(module_name)
     if cached is not None and cached[0] == source:
         return cached[1], False
-    code = compile(source, path, 'exec', dont_inherit=True)
-    module = types.ModuleType(module_name)
-    module.__file__ = path
-    previous = sys.modules.get(module_name)
-    sys.modules[module_name] = module
     try:
-        exec(code, module.__dict__)
-    except BaseException:
-        if previous is not None:
-            sys.modules[module_name] = previous
+        code = compile(source, path, 'exec', dont_inherit=True)
+        module = types.ModuleType(module_name)
+        module.__file__ = path
+        previous = sys.modules.get(module_name)
+        sys.modules[module_name] = module
+        try:
+            exec(code, module.__dict__)
+        except BaseException:
+            if previous is not None:
+                sys.modules[module_name] = previous
+            else:
+                sys.modules.pop(module_name, None)
+            raise
+    except BaseException as error:
+        now = time.monotonic()
+        last = _failed.get(module_name)
+        if last is not None and last[0] == source and now - last[1] < _REPORT_WINDOW:
+            try:
+                error._tap_python_reported = True
+            except Exception:
+                pass
         else:
-            sys.modules.pop(module_name, None)
+            _failed[module_name] = (source, now)
         raise
+    _failed.pop(module_name, None)
     _cache[module_name] = (source, module)
     return module, True
 
@@ -278,7 +305,29 @@ def describe(fn):
          p.default is not inspect.Parameter.empty)
         for p in inspect.signature(fn).parameters.values()
     ]
-    return parameters, hint_kind(hints.get('return', inspect.Parameter.empty)), error
+    returned = hints.get('return', inspect.Parameter.empty)
+    return (parameters, hint_kind(returned), error) + return_shape(returned)
+
+def return_shape(hint):
+    if hint is inspect.Parameter.empty:
+        return 1, 'any'
+    if isinstance(hint, str):
+        text = hint.strip()
+        for prefix in ('typing.Tuple[', 'Tuple[', 'tuple['):
+            if text.startswith(prefix) and text.endswith(']'):
+                parts = [p.strip() for p in text[len(prefix):-1].split(',')]
+                if '...' in parts or parts == ['']:
+                    return -1, 'any'
+                return len(parts), hint_kind(parts[0])
+        if text in ('tuple', 'Tuple', 'typing.Tuple'):
+            return -1, 'any'
+        return 1, hint_kind(hint)
+    if hint is tuple or typing.get_origin(hint) is tuple:
+        args = typing.get_args(hint)
+        if not args or Ellipsis in args or args == ((),):
+            return -1, 'any'
+        return len(args), hint_kind(args[0])
+    return 1, hint_kind(hint)
 )";
 
         /// Create the support module (initialize() calls this with the GIL held).
@@ -386,6 +435,22 @@ def describe(fn):
     /// host process — so user code calling sys.exit() would quit Max. Here a SystemExit is reported
     /// like any other exception. It also leaves sys.last_exc unset, so a failed call does not keep
     /// its frames (and the objects they reference) alive.
+    /// True — clearing it — when the raised exception is a failure to load a file that was reported
+    /// moments ago by another processor loading the same source (see load() in the support module):
+    /// said once, not once per object sharing the file. False, leaving it raised, otherwise.
+    inline bool take_reported_load_failure() {
+        PyObject* exception = PyErr_GetRaisedException();
+        if (!exception) {
+            return false;
+        }
+        if (PyObject_HasAttrString(exception, "_tap_python_reported") == 1) {
+            Py_DECREF(exception);
+            return true;
+        }
+        PyErr_SetRaisedException(exception); // steals the reference
+        return false;
+    }
+
     inline void report_exception() {
         PyObject* exception = PyErr_GetRaisedException();
         if (!exception) {
@@ -497,6 +562,15 @@ def describe(fn):
             }
 
             detail::create_support();
+
+            // 2.6: hand the GIL to a waiting thread — the audio thread, above all — sooner
+            if (PyObject* set_interval = PySys_GetObject("setswitchinterval")) { // borrowed
+                PyObject* seconds = PyFloat_FromDouble(options.switch_interval);
+                PyObject* result  = seconds ? PyObject_CallOneArg(set_interval, seconds) : nullptr;
+                Py_XDECREF(result);
+                Py_XDECREF(seconds);
+            }
+            PyErr_Clear();
 
             // Route print() and tracebacks to the host console.
             // sys.stdout/sys.stderr are text streams (io.TextIOBase) so that libraries which probe them

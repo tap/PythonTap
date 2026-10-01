@@ -4,7 +4,68 @@ Changes to the Python class contract and to the object's behavior, newest first.
 breaking changes to the contract are allowed where they buy correctness (D5 in
 `docs/PRODUCTION-PLAN.md`); each is recorded here.
 
-## Unreleased
+## 0.10.0 — 2026-10-01
+
+### Added — one package for every platform
+
+- **Each release also has `PythonTap-<version>.zip`, for every platform at once**: the macOS and
+  Windows externals, and each platform's runtime in `support/<platform>/`. The external uses
+  `support/<platform>/` when its package has one — on macOS, each architecture its own — and
+  `support/` otherwise, so the per-platform packages and a checkout work as before. 0.x releases
+  are published as pre-releases rather than drafts. (Plan 4.8.)
+
+### Added — worker mode
+
+- **`@mode worker` runs `process()` on a thread of its own**, `@latency` milliseconds behind the
+  audio (30 by default, rounded up to whole signal vectors; it must exceed Max's I/O vector), so
+  that nothing else Python does — a
+  reload, a message, another instance — can hold up the audio thread, which only copies vectors to
+  and from it. Vectors the worker is late for are output as silence, reported once per load, and
+  the delay stays the same; the read-only `@latencysamples` gives it in samples. The worker thread
+  has the real-time scheduling of an audio thread. `@mode direct`, the default, is as before.
+  (Plan 2.5.) *Changed with it:* the object's own attributes `mode`, `latency` and
+  `latencysamples` are reserved — a class's field or method of one of those names is not exposed,
+  and the console says so (before, fields were never checked against reserved names).
+
+### Added — several inputs and outputs
+
+- **process() can take several signal inputs and return several outputs.** Its parameters are the
+  object's signal inlets and its return hint its outlets: `process(self, left: np.ndarray, right:
+  np.ndarray) -> tuple[np.ndarray, np.ndarray]` makes `[tap.python~ …]` with two of each, and
+  `process(self) -> float` a generator (with one inlet still, for messages). The inputs are all
+  `np.ndarray` or all per sample; a tuple return must say how many values it has. A return with the
+  wrong number of values is output as silence and reported once. New example: `stereo_width.py`.
+  A save that changes how many changes the object's inlets and outlets in place, keeping the patch
+  cords of those that stay. (Plan 2.4.) *Changed with it:*
+  `process()` taking `*args` is now reported and not bound (before, it was bound and its extra
+  arguments never arrived).
+
+### Changed — a broken file is reported once
+
+- **A save that breaks a class file is reported once, however many objects share it.** Every
+  object used to run the file and print its traceback: a syntax error with 25 objects printed 25
+  tracebacks. Now a failure of the same source already reported in the last two seconds — the
+  same save, or a patch opening many objects at once — is not reported again, while an object
+  created later with the file still broken says why it is silent. Every load still runs the file,
+  in case something it imports has been fixed. (Plan 6.10.)
+
+### Changed — reloads and the audio thread
+
+- **A reload no longer holds up the audio for its whole length.** The interpreter now hands itself
+  to a waiting thread after 0.5 ms instead of CPython's 5 ms, so the audio thread waits at most
+  about that long at a time while another thread — a reload, above all, which takes a few
+  milliseconds — runs Python. Measured at 96 kHz with 512-sample buffers and a save every 100 ms,
+  CPython's default made a buffer late in most runs (the worst took 45 ms); at 0.5 ms none was.
+  (Plan 2.6.)
+
+### Fixed — the package
+
+- **The macOS external's bundle identifier** is `com.74objects.tap.python-tilde`; it shipped as an
+  unexpanded template (`com.74objects.${PRODUCT_NAME:rfc1034identifier}`), which signing and
+  notarizing would have refused. The development plan no longer ships inside the package, and the
+  reference page now follows the object's descriptions (Max rewrites it from them).
+
+## 0.9.0 — 2026-09-30
 
 ### Changed — the console on reload
 

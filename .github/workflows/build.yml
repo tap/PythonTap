@@ -155,6 +155,14 @@ jobs:
               || { echo "ERROR: $bin is not universal"; exit 1; }
           done
 
+      # max-sdk-base leaves the identifier for Xcode to expand; the object's CMakeLists expands it
+      - name: Verify the bundle identifier is expanded
+        run: |
+          id=$(plutil -extract CFBundleIdentifier raw "externals/tap.python~.mxo/Contents/Info.plist")
+          echo "CFBundleIdentifier: $id"
+          [ "$id" = "com.74objects.tap.python-tilde" ] \
+            || { echo "ERROR: expected com.74objects.tap.python-tilde"; exit 1; }
+
       - name: Verify libpython resolves via a relative rpath only
         run: |
           bin="externals/tap.python~.mxo/Contents/MacOS/tap.python~"

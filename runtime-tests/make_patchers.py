@@ -557,11 +557,106 @@ def many_instances() -> Test:
     return t
 
 
+def channels() -> Test:
+    t = Test("tap.python~.channels.maxtest.maxpat",
+             "Several inputs and outputs (plan 2.4): process()'s parameters are the object's signal inlets "
+             "and its return hint its outlets — stereo_width's two of each, a generator's none (one inlet "
+             "still, for messages). A save that changes how many changes the object's inlets and outlets "
+             "in place, keeping the patch cords of those that stay: new ones take cords and carry signal, "
+             "and the cords of those removed go with them.")
+    left, right = t.signal(0.8), t.signal(0.2)
+    width = t.obj("tap.python~ stereo_width", inlets=2, outlets=2, signal=True)
+    t.patcher.connect(left, 0, width, 0)
+    t.patcher.connect(right, 0, width, 1)
+    generator = t.python("maxtest_generator")
+    a, b = t.signal(0.3), t.signal(0.6)
+    # named, so that thispatcher can connect cords to the inlet and outlet a save adds
+    shape = t.patcher.box("tap.python~ maxtest_shape", 2, 2, column=2, outlettype=["signal"] * 2, varname="shape")
+    t.patcher.connect(a, 0, shape, 0)
+    t.patcher.connect(b, 0, shape, 1)
+    t.patcher.box("sig~ 0.9", 1, 1, column=2, outlettype=["signal"], varname="third_input")
+    third_output = t.patcher.box("+~ 0.", inlets=2, column=3, outlettype=["signal"], varname="third_output")
+    scripting = t.obj("thispatcher")
+    editor = t.python("maxtest_editor", column=1)
+
+    def outlet(box: str, n: int) -> str:  # a box passing outlet n of `box` on, to sample
+        through = t.patcher.box("+~ 0.", inlets=2, column=3, outlettype=["signal"])
+        t.patcher.connect(box, n, through)
+        return through
+
+    width_left, width_right = outlet(width, 0), outlet(width, 1)
+    shape_first, shape_second = outlet(shape, 0), outlet(shape, 1)
+    t.step(t.sample_equals("stereo-left-at-width-1", width_left, 0.8),
+           t.sample_equals("stereo-right-at-width-1", width_right, 0.2),
+           t.sample_equals("generator-without-inputs", generator, 0.25),
+           t.sample_equals("second-input-to-second-output", shape_second, 0.6))
+    t.step(t.send("width 0", width), t.send("level 0.5", generator))
+    t.step(t.sample_equals("mono-left-at-width-0", width_left, 0.5),
+           t.sample_equals("mono-right-at-width-0", width_right, 0.5),
+           t.sample_equals("generator-takes-messages", generator, 0.5))
+    t.step(t.send("reshape maxtest_shape 3 3", editor), t.send("filechanged", shape))
+    t.step(t.sample_equals("grown-keeps-first-cords", shape_first, 0.3),
+           t.sample_equals("grown-keeps-second-cords", shape_second, 0.6))
+    t.step(t.send("script connect third_input 0 shape 2", scripting),
+           t.send("script connect shape 2 third_output 0", scripting))
+    t.step(t.sample_equals("added-inlet-to-added-outlet", third_output, 0.9))
+    t.step(t.send("reshape maxtest_shape 1 1", editor), t.send("filechanged", shape))
+    t.step(t.sample_equals("shrunk-keeps-first-cords", shape_first, 0.3),
+           t.sample_equals("removed-outlet-takes-its-cord", shape_second, 0.0),
+           t.sample_equals("removed-outlets-take-their-cords", third_output, 0.0),
+           t.errors_are("console-clean", "== 0"), wait=WATCH)
+    return t
+
+
+def worker(latency_ms: float | None = None, quiet_windows: int = 0) -> Test:
+    t = Test("tap.python~.worker.maxtest.maxpat",
+             "Worker mode (plan 2.5), at its default latency: with @mode worker the output is the input "
+             "delayed by @latencysamples, sample for sample what delay~ gives, and stays so through a "
+             "reload; a class that stalls for 0.2 s is late, reported once, and comes back at the same "
+             "latency; @mode direct takes the delay away.")
+    ramp = t.obj("phasor~ 50", signal=True)  # a new value every sample, so any delay shows
+    py = t.python("maxtest_stall @mode worker" + (f" @latency {latency_ms}" if latency_ms is not None else ""))
+    delay = t.obj("delay~ 48000 0", inlets=2, signal=True)
+    late = t.obj("-~", inlets=2, signal=True)  # the object's output less the input, delayed
+    now = t.obj("-~", inlets=2, signal=True)  # the object's output less the input
+    for source, destination in ((ramp, py), (ramp, delay), (py, late), (py, now)):
+        t.patcher.connect(source, 0, destination)
+    t.patcher.connect(delay, 0, late, 1)
+    t.patcher.connect(ramp, 0, now, 1)
+    delay_by_latency = t.patcher.box("getattr latencysamples @listen 0", outlets=3, column=3)
+    t.patcher.connect(delay_by_latency, 1, py)
+    t.patcher.connect(delay_by_latency, 0, delay, 1)
+    t.count_errors("late.for")
+
+    watch = t.no_change("delayed-by-latencysamples", late, 0.0)
+    after = t.no_change("same-latency-after-stall", late, 0.0)
+    windows = [t.no_change(f"quiet-window-{i}", late, 0.0) for i in range(quiet_windows)]
+    # each step waits, then acts (so a watch starts a step after what it depends on)
+    t.step(t.attribute_compare("latency-reported-in-samples", py, "latencysamples", "> 0"), delay_by_latency,
+           t.log_attribute("latencysamples", py, "latencysamples"))
+    t.step(watch[0])
+    t.step(watch[1], wait=1000)
+    for start, check in windows:  # (for measuring: none in the committed test)
+        t.step(start)
+        t.step(check, wait=1000)
+    t.step(t.send("stall 0.2", py))
+    t.step(t.errors_are("stall-reported-once", "== 1", "late.for"), after[0], wait=1000)
+    t.step(after[1], wait=1000)
+    t.step(t.send("filechanged", py))
+    t.step(t.sample_equals("delayed-after-reload", late, 0.0), wait=500)
+    t.step(t.send("mode direct", py))
+    t.step(t.attribute_equals("direct-reports-no-latency", py, "latencysamples", 0),
+           t.sample_equals("direct-has-no-delay", now, 0.0),
+           t.errors_are("console-only-the-stall", "== 1"), wait=500)
+    return t
+
+
 def announce_once() -> Test:
     t = Test("tap.python~.announce-once.maxtest.maxpat",
              "What is true of a class is said once per run of its file, however many objects share it "
              "(plan 6.7): five instances of a class with a reserved method name, reporting it once on "
-             "load, once more after the file changes, and not at all when an unchanged file reloads.",
+             "load, once more after the file changes, and not at all when an unchanged file reloads; "
+             "and a save that breaks the file is reported once, not by each (plan 6.10).",
              audio=False)
     host = t.host()  # loaded by the first step, so that what the objects print is caught
     editor = t.python("maxtest_editor", column=1)
@@ -573,6 +668,11 @@ def announce_once() -> Test:
     t.step(t.errors_are("said-once-more-after-a-change", "== 2", pattern))
     t.step(t.send("filechanged", host))
     t.step(t.errors_are("unchanged-reload-says-nothing", "== 2", pattern), wait=WATCH)
+    # 6.10: a save that breaks the file is reported once, not by each of the five
+    t.count_errors("Failed.to.load")
+    t.step(t.send("corrupt maxtest_reserved", editor))  # the file watcher reloads them all
+    t.step(t.errors_are("broken-save-reported-once-for-five-objects", "== 1", "Failed.to.load"), wait=WATCH)
+    t.step(t.send("restore maxtest_reserved", editor))
     return t
 
 
@@ -762,8 +862,9 @@ def without_runtime_restart() -> Test:
     return t
 
 
-TESTS_TO_WRITE = [load, attributes_and_messages, reload, reload_under_audio, many_instances, announce_once, faults,
-                  prepare,
+TESTS_TO_WRITE = [load, attributes_and_messages, reload, reload_under_audio, many_instances, channels, announce_once,
+                  faults,
+                  prepare, worker,
                   without_runtime, without_runtime_restart]
 
 
