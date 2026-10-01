@@ -150,8 +150,8 @@ while audio ran segfaulted in 5 of 5 runs.
   - **Underruns.** A slot not done when its outputs are due is output as silence and counted; the
     worker still processes it when it gets there (so the class's state stays continuous) and
     discards its outputs, catching up through the backlog, so the latency stays *L*. If it falls
-    a whole ring behind (the ring holds *L* + a margin), the oldest inputs are dropped, which the
-    class sees as a gap. Both are reported once per load from the main thread (`flush_reports()`),
+    a whole ring behind (the ring holds *L* + a margin), new inputs are dropped until it catches
+    up, which the class sees as a gap. Both are reported once per load from the main thread (`flush_reports()`),
     never printed on the audio thread.
   - **`prepare()` and the mode.** The ring is sized when the chain compiles (`dspsetup`: vector
     size, and the object's inlet and outlet counts), with the worker stopped and restarted around
@@ -171,6 +171,20 @@ while audio ran segfaulted in 5 of 5 runs.
     one Python call per host vector — batching several per call would cut the per-call overhead
     further (worker mode's other win) at more latency, a later option (`@block`) if measurements
     show it pays.
+  - *(a) the core — done:* `core/include/tap/python/worker.h`. The ring is single producer, single
+    consumer, with a sequence number per slot: the audio thread queues a vector only into a slot
+    the worker has finished with, so a full ring drops the new vector rather than racing the
+    worker for an old one; the margin is a quarter of a second, at least 16 vectors. The audio
+    thread borrows the ring for each vector by taking an atomic pointer, so `start()` and `stop()`
+    — which a host may call while its old signal chain still runs — wait at most one vector, and
+    a vector arriving meanwhile is silence. Reports are once per load, by the processor's new
+    `load_count()`. Core battery: the output is the direct output *L* vectors later (per sample
+    and per vector, *L* = 1–3, two channels); the host's channels matched to the ring; a stall
+    goes silent, is reported once, comes back at the same latency, and is reported again after a
+    reload; a stall past the ring drops exactly the vectors beyond it; restart, stop, and stop
+    during a stall; ten reloads under an audio thread. Clean under TSan (locally, macOS) — the
+    Linux CI job runs it too. *(b) the Max object:* `@mode`, `@latency`, `@latencysamples`, the
+    ring sized in `dspsetup`; runtime test in Max.
 - [x] **2.6 Shorter reload stalls** — compile outside the swap and hold the GIL only for the swap.
   *Measured first* (`core/bench/reload_bench.cpp`: an audio thread with Core Audio's real-time
   scheduling computes 512-sample buffers of 64-sample vectors at 96 kHz while the main thread saves

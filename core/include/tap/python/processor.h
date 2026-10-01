@@ -127,6 +127,10 @@ namespace tap::python {
         /// thread, after load().
         const std::vector<std::string>& input_names() const noexcept { return m_input_names; }
 
+        /// How many times load() has succeeded: what a host reporting once per load compares against
+        /// (worker mode does, plan 2.5). Any thread.
+        std::uint64_t load_count() const noexcept { return m_loads.load(std::memory_order_acquire); }
+
         /// The most inputs, and the most outputs, a process() may declare.
         static constexpr std::size_t k_max_channels = 64;
 
@@ -237,6 +241,7 @@ namespace tap::python {
             next.process_function     = nullptr;
             next.prepare_function     = nullptr;
             reset_warnings(); // each kind of audio-thread problem is reported once per load
+            m_loads.fetch_add(1, std::memory_order_release);
 
             release(previous); // may run finalizers, which may let other threads in: now safe
             if (executed) {
@@ -528,12 +533,13 @@ namespace tap::python {
         std::vector<attribute_info> m_attributes;
         std::vector<bound_message>  m_messages;
         // The rest of the binding and the block buffer: read and written only under the GIL.
-        PyObject*                m_prepare_function{}; // strong, or null
-        bool                     m_block_mode{};
-        std::size_t              m_inputs{1}; // the bound process()'s inputs and outputs
-        std::size_t              m_outputs{1};
-        std::vector<std::string> m_input_names;  // main thread only
-        bool                     m_announcing{}; // this load() ran the file: see announce()
+        PyObject*                  m_prepare_function{}; // strong, or null
+        bool                       m_block_mode{};
+        std::size_t                m_inputs{1}; // the bound process()'s inputs and outputs
+        std::size_t                m_outputs{1};
+        std::vector<std::string>   m_input_names;  // main thread only
+        bool                       m_announcing{}; // this load() ran the file: see announce()
+        std::atomic<std::uint64_t> m_loads{};      // successful load()s
         // The np.ndarray each input arrives in, reused every vector: strong, its buffer held so its
         // memory cannot move.
         struct block_buffer {
