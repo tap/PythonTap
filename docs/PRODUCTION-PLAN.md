@@ -660,7 +660,7 @@ down rather than discovered again. *This plan was itself audited before being ad
   passes on the worker. Release, ASan/UBSan and TSan clean. The `worker` runtime test gains `hang 1`
   → `mode direct` → `hang 0`, expecting one "interrupted" line and two errors in all — step timing
   to confirm in the Mac session (8.8), with the stack measurement the item asks for.
-- [ ] **8.4 Nothing of the user's prints on the audio thread either (A5).** `runtime_options`
+- [x] **8.4 Nothing of the user's prints on the audio thread either (A5).** `runtime_options`
   gains `is_main_thread` (the host's predicate — `systhread_ismainthread` in Max; the default,
   with no host predicate, is "always", which keeps the core battery's synchronous `console()`
   checks as they are) and `console_ready` (real-time safe; the object sets its `m_reports` qelem).
@@ -676,7 +676,18 @@ down rather than discovered again. *This plan was itself audited before being ad
   (`linecache` reads the file once). Tests: `print()` from an audio thread reaches the sink only on
   the nominated thread; two threads printing half-lines never produce a mixed line; a flood of
   10,000 lines drops with a count and never blocks the producer (timed). CHANGELOG: console output
-  from `process()` is deferred and coalesced.
+  from `process()` is deferred and coalesced. *Done:* `runtime_options` gained `is_main_thread` and
+  `console_ready` (and `set_console_threading()` for a test or a host that decides later);
+  `detail::console_queue` is Vyukov's bounded queue, 256 slots of 480 bytes (a longer line is cut
+  with an ellipsis), with a dropped count; lines are assembled in `thread_local` buffers and
+  dispatched whole; `flush_console()` drains to the sink in order and adds the dropped line. The
+  Max object nominates `systhread_ismainthread` and sets one process-wide qelem that calls
+  `flush_console()`. Four scenarios in the new `test_console.cpp`: a line from another thread
+  reaches the sink only through `flush_console()` (and a `flush=True` partial line queues whole);
+  two threads printing pieces give 80 unmixed lines at a 1 µs switch interval; a flood of 10,000
+  keeps 256 and counts 9,744 dropped, in bounded time; a 2,000-character line is cut. The
+  battery's other console checks run on the test's main thread with no predicate and stand as
+  they were.
 - [ ] **8.5 Helper modules follow the class file (A7b).** When a load *executes* the class file
   (the loader says so), it first drops from `sys.modules` every module whose `__file__` is a `.py`
   under `scripts_directory()` — *revised:* **except the class modules themselves**

@@ -6,6 +6,16 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ## Unreleased
 
+### Changed — nothing of yours posts from the audio thread
+
+- **What `process()` prints, or warns, is posted from Max's main thread.** A `print()` or a numpy
+  `RuntimeWarning` in `process()` used to post to the console from the audio thread (or the worker
+  thread), taking a lock on the way. Now a complete line printed on any thread but Max's main one
+  is queued, lock-free and without allocating, and posted from the main thread a moment later;
+  lines are assembled per thread, so two threads printing pieces of a line no longer mix them. A
+  flood is coalesced: 256 lines queue, the rest are dropped and counted in one line. Lines printed
+  on the main thread post at once, as before. (Plan 8.4, audit A5.)
+
 ### Changed — worker mode never waits forever
 
 - **A `process()` that does not return when the worker stops is interrupted, then abandoned.**

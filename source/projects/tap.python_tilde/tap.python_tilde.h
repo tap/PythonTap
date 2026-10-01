@@ -186,7 +186,13 @@ class python : public object<python>, public vector_operator<> {
             return;
         }
 
-        const auto status = runtime::initialize({home, m_scripts_dir, console_line});
+        runtime::runtime_options options;
+        options.home           = home;
+        options.scripts_dir    = m_scripts_dir;
+        options.console        = console_line;
+        options.is_main_thread = is_main_thread; // Python's output posts from Max's main thread only (8.4)
+        options.console_ready  = console_ready;
+        const auto status      = runtime::initialize(options);
         if (!status.ok) {
             cerr << "failed to start Python from '" << home.string() << "': " << status.error
                  << " (run scripts/install-runtime to install the runtime)" << endl;
@@ -501,6 +507,18 @@ class python : public object<python>, public vector_operator<> {
 #else
         (void)period; // Linux development builds: no host runs there
 #endif
+    }
+
+    /// Whether this is Max's main thread: where Python's output may be posted at once. On any other
+    /// thread — the audio thread, a worker, the scheduler — the core queues the line (plan 8.4).
+    static bool is_main_thread() { return c74::max::systhread_ismainthread() != 0; }
+
+    /// Called on the printing thread when the core queued a line: sets the process-wide qelem that
+    /// has the lines posted from the main thread. Real-time safe (qelem_set).
+    static void console_ready() {
+        static c74::max::t_qelem* s_flush =
+            c74::max::qelem_new(nullptr, reinterpret_cast<c74::max::method>(+[](void*) { runtime::flush_console(); }));
+        c74::max::qelem_set(s_flush);
     }
 
     /// Python's print() output and tracebacks, for every instance.

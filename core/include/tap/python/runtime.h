@@ -13,6 +13,12 @@
 #include <Python.h> // CPython must precede the standard headers
 
 // standard library
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <mutex>
@@ -26,8 +32,10 @@ namespace tap::python {
     /// Severity of a line of output, whether from Python's sys.stdout/sys.stderr or from the core.
     enum class log_level { info, error };
 
-    /// Receives complete lines (without the trailing newline). May be called from any thread,
-    /// including the audio thread, so an implementation must be thread-safe.
+    /// Receives complete lines (without the trailing newline). The console's sink is called on the
+    /// thread that printed when the host gave no is_main_thread predicate (runtime_options), and
+    /// only on the host's main thread when it did (plan 8.4); a processor's or worker's log is
+    /// called on the main thread, except where their constructors say otherwise.
     using log_function = std::function<void(log_level, std::string_view)>;
 
     /// What initialize() needs from the host.
@@ -40,6 +48,15 @@ namespace tap::python {
         /// thread waiting past an I/O buffer's deadline; 0.5 ms does not (plan 2.6: measured by
         /// core/bench's tap_python_reload_bench) and is under one 64-sample vector at 96 kHz.
         double switch_interval = 0.0005;
+        /// Whether the calling thread may post to the console at once (the host's main thread). On
+        /// any other thread a complete line is queued instead — lock-free, allocation-free, dropping
+        /// and counting when the queue is full — and console_ready is called; the host then calls
+        /// flush_console() from its main thread (plan 8.4). Without a predicate every thread posts
+        /// at once (the core battery's default). Both may be replaced by set_console_threading().
+        std::function<bool()> is_main_thread{};
+        /// Called on the printing thread when a line was queued: must be real-time safe (in Max,
+        /// qelem_set); idempotent, as one call may stand for several lines.
+        std::function<void()> console_ready{};
     };
 
     /// The outcome of initialize(): ok, or the reason the interpreter could not start.
@@ -135,18 +152,139 @@ namespace tap::python {
 
         // _maxconsole: a tiny built-in module that sys.stdout/sys.stderr are rebound to, so that
         // print() and tracebacks reach the host's console instead of disappearing. Output is
-        // buffered per stream and forwarded a line at a time.
+        // assembled into lines per thread and per stream (two threads writing half-lines never
+        // mix), and each complete line is posted at once on the host's main thread or queued from
+        // any other (plan 8.4).
+
+        /// A bounded, lock-free, multi-producer single-consumer queue of console lines (Vyukov's
+        /// bounded queue): a producer never blocks or allocates, and a line that finds it full is
+        /// dropped and counted. Lines longer than a slot are cut, with an ellipsis.
+        class console_queue {
+          public:
+            static constexpr std::size_t k_slots      = 256; // a power of two
+            static constexpr std::size_t k_line_bytes = 480;
+
+            console_queue() {
+                for (std::size_t i = 0; i < k_slots; ++i) {
+                    m_slots[i].sequence.store(i, std::memory_order_relaxed);
+                }
+            }
+
+            /// Queue `text` as one line; false, and counted, if the queue is full. Any thread.
+            bool push(const log_level level, const std::string_view text) noexcept {
+                auto  position = m_enqueue.load(std::memory_order_relaxed);
+                slot* cell     = nullptr;
+                for (;;) {
+                    cell                = &m_slots[position & (k_slots - 1)];
+                    const auto sequence = cell->sequence.load(std::memory_order_acquire);
+                    const auto gap      = static_cast<std::ptrdiff_t>(sequence) - static_cast<std::ptrdiff_t>(position);
+                    if (gap == 0) {
+                        if (m_enqueue.compare_exchange_weak(position, position + 1, std::memory_order_relaxed)) {
+                            break;
+                        }
+                    }
+                    else if (gap < 0) {
+                        m_dropped.fetch_add(1, std::memory_order_relaxed);
+                        return false;
+                    }
+                    else {
+                        position = m_enqueue.load(std::memory_order_relaxed);
+                    }
+                }
+                cell->level = level;
+                if (text.size() <= k_line_bytes) {
+                    cell->length = static_cast<std::uint16_t>(text.size());
+                    std::memcpy(cell->text.data(), text.data(), text.size());
+                }
+                else {
+                    constexpr std::string_view k_ellipsis = "\u2026";
+                    const auto                 kept       = k_line_bytes - k_ellipsis.size();
+                    std::memcpy(cell->text.data(), text.data(), kept);
+                    std::memcpy(cell->text.data() + kept, k_ellipsis.data(), k_ellipsis.size());
+                    cell->length = static_cast<std::uint16_t>(k_line_bytes);
+                }
+                cell->sequence.store(position + 1, std::memory_order_release);
+                return true;
+            }
+
+            /// Take the oldest line, if any. One consumer thread.
+            bool pop(log_level& level, std::string& text) {
+                auto  position = m_dequeue.load(std::memory_order_relaxed);
+                slot* cell     = nullptr;
+                for (;;) {
+                    cell                = &m_slots[position & (k_slots - 1)];
+                    const auto sequence = cell->sequence.load(std::memory_order_acquire);
+                    const auto gap = static_cast<std::ptrdiff_t>(sequence) - static_cast<std::ptrdiff_t>(position + 1);
+                    if (gap == 0) {
+                        if (m_dequeue.compare_exchange_weak(position, position + 1, std::memory_order_relaxed)) {
+                            break;
+                        }
+                    }
+                    else if (gap < 0) {
+                        return false;
+                    }
+                    else {
+                        position = m_dequeue.load(std::memory_order_relaxed);
+                    }
+                }
+                level = cell->level;
+                text.assign(cell->text.data(), cell->length);
+                cell->sequence.store(position + k_slots, std::memory_order_release);
+                return true;
+            }
+
+            /// Lines dropped since the last call.
+            std::uint64_t take_dropped() noexcept { return m_dropped.exchange(0, std::memory_order_relaxed); }
+
+          private:
+            struct slot {
+                std::atomic<std::size_t>       sequence{};
+                log_level                      level{};
+                std::uint16_t                  length{};
+                std::array<char, k_line_bytes> text{};
+            };
+            std::array<slot, k_slots>  m_slots;
+            std::atomic<std::size_t>   m_enqueue{0};
+            std::atomic<std::size_t>   m_dequeue{0};
+            std::atomic<std::uint64_t> m_dropped{0};
+        };
 
         struct console_state {
-            std::mutex   mutex;
-            log_function sink;
-            std::string  buffer_out;
-            std::string  buffer_err;
+            std::mutex            mutex; // guards sink, and the main thread's posting
+            log_function          sink;
+            std::function<bool()> is_main_thread; // set before any other thread prints
+            std::function<void()> ready;
+            console_queue         queue;
         };
 
         inline console_state& console() {
             static console_state s_console;
             return s_console;
+        }
+
+        /// The calling thread's partial line for one stream (plan 8.4: per thread, so two threads
+        /// writing pieces never share a buffer).
+        inline std::string& console_buffer(const log_level level) {
+            thread_local std::string s_out;
+            thread_local std::string s_err;
+            return level == log_level::error ? s_err : s_out;
+        }
+
+        /// Post one complete line: at once on the host's main thread (or on any thread, without a
+        /// predicate), queued for flush_console() from any other.
+        inline void console_dispatch(const log_level level, const std::string_view line) {
+            auto& state = console();
+            if (!state.is_main_thread || state.is_main_thread()) {
+                std::lock_guard<std::mutex> lock{state.mutex};
+                if (state.sink) {
+                    state.sink(level, line);
+                }
+                return;
+            }
+            state.queue.push(level, line); // a full queue drops and counts; never blocks
+            if (state.ready) {
+                state.ready();
+            }
         }
 
         inline std::filesystem::path& scripts_directory() {
@@ -361,28 +499,21 @@ def return_shape(hint):
         }
 
         inline void console_post(const std::string_view text, const log_level level) {
-            auto&                       state = console();
-            std::lock_guard<std::mutex> lock{state.mutex};
-            auto&                       buffer = (level == log_level::error) ? state.buffer_err : state.buffer_out;
+            auto& buffer = console_buffer(level);
             buffer.append(text);
             size_t pos;
             while ((pos = buffer.find('\n')) != std::string::npos) {
-                if (state.sink) {
-                    state.sink(level, std::string_view{buffer}.substr(0, pos));
-                }
+                console_dispatch(level, std::string_view{buffer}.substr(0, pos));
                 buffer.erase(0, pos + 1);
             }
         }
 
-        /// Forward a pending partial line (text without its newline yet) as a line of its own.
+        /// Forward this thread's pending partial line (text without its newline yet) as a line of
+        /// its own.
         inline void console_flush(const log_level level) {
-            auto&                       state = console();
-            std::lock_guard<std::mutex> lock{state.mutex};
-            auto&                       buffer = (level == log_level::error) ? state.buffer_err : state.buffer_out;
+            auto& buffer = console_buffer(level);
             if (!buffer.empty()) {
-                if (state.sink) {
-                    state.sink(level, buffer);
-                }
+                console_dispatch(level, buffer);
                 buffer.clear();
             }
         }
@@ -475,6 +606,38 @@ def return_shape(hint):
         state.sink = std::move(sink);
     }
 
+    /// Replace the console's main-thread predicate and the callback for queued lines (see
+    /// runtime_options). Main thread, before any other thread prints: the printing threads read
+    /// both without a lock.
+    inline void set_console_threading(std::function<bool()> is_main_thread, std::function<void()> console_ready) {
+        auto& state          = detail::console();
+        state.is_main_thread = std::move(is_main_thread);
+        state.ready          = std::move(console_ready);
+    }
+
+    /// Post the lines other threads queued since the last flush, in order, to the sink — and, if
+    /// the queue overflowed meanwhile, one more saying how many were dropped. The host's main
+    /// thread, when console_ready has been called (idempotent: cheap when there is nothing).
+    inline void flush_console() {
+        auto&       state = detail::console();
+        log_level   level{};
+        std::string text;
+        while (state.queue.pop(level, text)) {
+            std::lock_guard<std::mutex> lock{state.mutex};
+            if (state.sink) {
+                state.sink(level, text);
+            }
+        }
+        if (const auto dropped = state.queue.take_dropped(); dropped != 0) {
+            std::lock_guard<std::mutex> lock{state.mutex};
+            if (state.sink) {
+                state.sink(log_level::error, "\u2026 and " + std::to_string(dropped)
+                                                 + " console line(s) were dropped: printed faster than the main "
+                                                   "thread could post them");
+            }
+        }
+    }
+
     /// Load `<scripts_dir>/<name>.py` by path as the module `_tap_python_<name>` (see
     /// detail::k_support_source). Returns a new reference to the module, or nullptr with a Python
     /// error set; `executed` tells whether the source was (re)executed or the cached module reused.
@@ -522,6 +685,7 @@ def return_shape(hint):
 
         std::call_once(s_once, [&] {
             set_console(options.console);
+            set_console_threading(options.is_main_thread, options.console_ready);
             detail::scripts_directory() = options.scripts_dir;
             detail::init_thread()       = std::this_thread::get_id();
             PyImport_AppendInittab("_maxconsole", detail::console_module_init);
