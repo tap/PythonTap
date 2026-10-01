@@ -58,6 +58,8 @@ SCRIPTS_DIR = PACKAGE / "python"
 SUPPORT = PACKAGE / "support"
 SUPPORT_ASIDE = PACKAGE / "support.maxtest-aside"
 EXTERNAL = PACKAGE / "externals" / "tap.python~.mxo"
+# The reference page min rewrites from the object's descriptions (plan 6.8)
+REFPAGE = ROOT / "docs" / "tap.python~.maxref.xml"
 OSCAR = HARNESS / "extensions" / "oscar.mxo"
 
 # Must match misc/max-test-config.json: Max listens on one port and sends to the other.
@@ -556,6 +558,10 @@ def main() -> int:
             link.unlink(missing_ok=True)
 
     print()
+    if PACKAGE == ROOT and REFPAGE.exists() and subprocess.run(
+            ["git", "-C", str(ROOT), "diff", "--quiet", "--", str(REFPAGE)]).returncode == 1:
+        # min rewrites it when Max loads an external newer than it (plan 6.8)
+        print(f"Max rewrote {REFPAGE.relative_to(ROOT)} from the object's descriptions: review and commit it.")
     if failures:
         print(f"{len(failures)} failure(s):")
         for failure in failures:
