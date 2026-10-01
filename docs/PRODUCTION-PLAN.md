@@ -300,8 +300,8 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
    only to check a universal build), then `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release &&
    cmake --build build && ctest --test-dir build`. The external lands in `externals/`. When Max
    loads an external newer than `docs/tap.python~.maxref.xml`, min rewrites the page from the
-   object's metadata; the committed one was generated against the mock kernel, so if Max's
-   differs, commit Max's. (A symlinked package works for externals, but Max loads a package's
+   object's metadata (6.8: the build dates the `.mxo` for it, and `run.py` says when it happened);
+   commit Max's page when it differs. (A symlinked package works for externals, but Max loads a package's
    *extensions* only from a real folder — why `run.py` installs the harness as a copy.)
 2. *5.2 — the help patcher.* Open `help/tap.python~.maxhelp`: its new boxes were added by hand
    (as JSON, in Max's layout), so check they sit sensibly and every message box works, then
@@ -419,12 +419,19 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
   nothing, and the external's own reload line is gone. Errors particular to an instance are
   unchanged. Pinned by a core test (two processors, a change, an unchanged reload) and a runtime
   test (five objects in Max: the class's diagnostic once per run of the file).
-- [ ] **6.8 The reference page from Max** — runbook step 1 expects min to rewrite
+- [x] **6.8 The reference page from Max** — runbook step 1 expects min to rewrite
   `docs/tap.python~.maxref.xml` when Max loads an external newer than it; in the Mac sessions it
   did not. Max's standard output had "file not found" and "failed to get date modified" lines at
   start-up — probably min's `doc_update` failing to resolve a path, not yet shown to come from this
   object. Find out why, and whether the committed page (generated against the mock kernel) is the
-  one Max would write.
+  one Max would write. *Done:* min's `doc_update` dates the external by its `.mxo` folder, and a
+  rebuild changes only the files inside it — the checkout's folder dated from its first build
+  (2026-08-05), older than the page, so the page never looked stale; a freshly unzipped release
+  has a new folder, which is why Max rewrote the installed package's page. The macOS build now
+  touches the folder after each link (a Windows `.mxe64` is one file, dated by its link already),
+  and `run.py` says when Max has rewritten the page, to commit it. Max's page matches the committed
+  one but for the description, which predated 2.4's text — now committed. The start-up lines are
+  not this object's: they still appear while its page is written.
 - [ ] **6.9 The help patcher and `numpy_allpass.py`** — the help patcher points to the `numpy_gain`
   and `allpass` examples but not to `numpy_allpass`, the one that shows what the block path is for;
   add it in Max (and re-save), perhaps with the measured comparison.

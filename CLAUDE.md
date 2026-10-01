@@ -144,8 +144,9 @@ the secrets exist, and attaches zips + SHA256s to a draft release.
   C++17), as TapTools-Max does.
 - **Keep in sync when behavior changes:** `ReadMe.md`, the object's min metadata
   (`MIN_DESCRIPTION`, argument and message descriptions — min regenerates
-  `docs/tap.python~.maxref.xml` from them whenever the external is newer, so never hand-edit the
-  page; commit the regenerated one), `help/tap.python~.maxhelp`, the examples and their notebook
+  `docs/tap.python~.maxref.xml` from them when Max loads an external newer than the page, so never
+  hand-edit the page: rebuild, run Max once — `runtime-tests/run.py` says when the page was
+  rewritten — and commit it), `help/tap.python~.maxhelp`, the examples and their notebook
   (committed executed), and the plan.
 - **Implement from documentation and published sources only** — the CPython C-API docs, the Max SDK
   docs — never by reverse-engineering another product.

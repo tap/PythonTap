@@ -120,6 +120,12 @@ if (APPLE)
     string(REGEX REPLACE "[^A-Za-z0-9.-]" "-" BUNDLE_IDENTIFIER "${PROJECT_NAME}")
     set_target_properties(${PROJECT_NAME} PROPERTIES
                           XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${AUTHOR_DOMAIN}.${BUNDLE_IDENTIFIER}")
+
+    # min rewrites docs/tap.python~.maxref.xml when Max loads an external newer than the page, and
+    # dates the external by its .mxo folder — which a rebuild leaves alone (only files inside it
+    # change), so the page was never rewritten from a checkout (plan 6.8). Date the folder with
+    # each link.
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD COMMAND touch "$<TARGET_BUNDLE_DIR:${PROJECT_NAME}>")
 endif ()
 
 
