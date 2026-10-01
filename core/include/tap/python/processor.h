@@ -76,8 +76,9 @@ namespace tap::python {
         /// @param source_name       the module and class name (`<name>.py` defining `class <name>`)
         /// @param log               receives the processor's own diagnostics (may be called on the
         ///                          audio thread)
-        /// @param reserved_messages method names the host handles itself; a Python method with one
-        ///                          of these names is not exposed as a message (with a diagnostic)
+        /// @param reserved_messages names the host handles itself, as messages or attributes; a Python
+        ///                          method or annotated field with one of these names is not exposed
+        ///                          (with a diagnostic)
         /// @param report_ready      called on the audio thread when something needs reporting; the
         ///                          host must then call flush_reports() from its main thread. Must be
         ///                          real-time safe (no locks, no allocation).
@@ -1164,6 +1165,12 @@ namespace tap::python {
                 const std::string name  = utf8(PyTuple_GetItem(field, 0));
                 const std::string kind  = utf8(PyTuple_GetItem(field, 1));
                 if (name.empty() || name[0] == '_' || kind == "ClassVar") {
+                    continue;
+                }
+                if (is_reserved(name)) { // a host attribute or message has the name (plan 2.5)
+                    announce(log_level::error,
+                             "the field " + name
+                                 + " is reserved by the host and is not exposed as an attribute; rename the field");
                     continue;
                 }
                 b.attributes.push_back({name, value_type_from_hint(kind)});

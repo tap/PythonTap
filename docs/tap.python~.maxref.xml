@@ -7,7 +7,7 @@
 <c74object name='tap.python~' category='programming'>
 
 	<digest>Process audio with a Python class</digest>
-	<description>Process audio with a Python class. The argument names a file in the package's python folder, which must define a class of the same name. The class's type-annotated public fields become attributes (int, float, bool and str; Optional allowed), and its public methods become messages called according to their signatures, with methods named int, float, symbol and bang answering those standard messages. Its process() method runs on the signal: once per signal vector when annotated with numpy arrays, or once per sample when annotated with float; its parameters are the object's signal inlets, and its return hint its outlets (a tuple of values for more than one). An optional prepare(sample_rate, vector_size) method receives the audio settings before audio starts and whenever they change. The file is watched and reloaded when saved, keeping attribute values; a save that changes process()'s inputs or outputs changes the inlets and outlets to match, keeping the patch cords of those that stay. Errors are printed to the Max console and never take Max down. </description>
+	<description>Process audio with a Python class. The argument names a file in the package's python folder, which must define a class of the same name. The class's type-annotated public fields become attributes (int, float, bool and str; Optional allowed), and its public methods become messages called according to their signatures, with methods named int, float, symbol and bang answering those standard messages. Its process() method runs on the signal: once per signal vector when annotated with numpy arrays, or once per sample when annotated with float; its parameters are the object's signal inlets, and its return hint its outlets (a tuple of values for more than one). An optional prepare(sample_rate, vector_size) method receives the audio settings before audio starts and whenever they change. With <at>mode</at> worker, process() runs on a thread of its own, <at>latency</at> milliseconds behind the audio, so that nothing else Python does can hold the audio up. The file is watched and reloaded when saved, keeping attribute values; a save that changes process()'s inputs or outputs changes the inlets and outlets to match, keeping the patch cords of those that stay. Errors are printed to the Max console and never take Max down. </description>
 
 
 	<!--METADATA-->
@@ -45,6 +45,21 @@
 	<!--ATTRIBUTES-->
 
 	<attributelist>
+
+		<attribute name='latency' get='1' set='1' type='float64' size='1' >
+			<digest>The latency in worker mode, in milliseconds (0 to 1000), rounded up to whole signal vectors, at least one</digest>
+			<description>The latency in worker mode, in milliseconds (0 to 1000), rounded up to whole signal vectors, at least one. It must be longer than Max's I/O vector, which Max computes all at once: what is left over is the time Python has to keep up. More absorbs longer pauses, at the cost of delay. </description>
+		</attribute>
+
+		<attribute name='latencysamples' get='1' set='0' type='long' size='1' >
+			<digest>The delay worker mode adds, in samples (latency rounded up to whole signal vectors), for aligning other signal paths; 0 in direct mode or with audio off</digest>
+			<description>The delay worker mode adds, in samples (latency rounded up to whole signal vectors), for aligning other signal paths; 0 in direct mode or with audio off. </description>
+		</attribute>
+
+		<attribute name='mode' get='1' set='1' type='symbol' size='1' >
+			<digest>Where process() runs: direct, on the audio thread, with no latency; or worker, on a thread of its own, about latency milliseconds behind, so that nothing Python does elsewhere (a reload, a message, a garbage collection) can hold up the audio</digest>
+			<description>Where process() runs: direct, on the audio thread, with no latency; or worker, on a thread of its own, about latency milliseconds behind, so that nothing Python does elsewhere (a reload, a message, a garbage collection) can hold up the audio. </description>
+		</attribute>
 
 	</attributelist>
 

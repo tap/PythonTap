@@ -143,10 +143,11 @@ while audio ran segfaulted in 5 of 5 runs.
     matching — so the class contract does not change. Slot states are atomics (single producer,
     single consumer, no locks); the audio thread wakes the worker with a C++20 atomic notify, which
     never blocks. The worker's thread is created and joined on the main thread.
-  - **Latency** *L* is whole vectors, set by `@latency` (in vectors, default 2), and reported in
-    samples (*L* × vector size) by the read-only `@latencysamples`, which a patch can read to align
-    other paths. Max has no documented call for an MSP object to report latency to the host, so
-    none is used; the output is primed with *L* vectors of silence.
+  - **Latency** *L* is whole vectors, set by `@latency` in milliseconds (default 30, rounded up to
+    whole vectors, at least one — *revised twice after measuring, below: from "vectors, default 2",
+    then from 10 ms*), and reported in samples (*L* × vector size) by the read-only `@latencysamples`, which
+    a patch can read to align other paths. Max has no documented call for an MSP object to report
+    latency to the host, so none is used; the output is primed with *L* vectors of silence.
   - **Underruns.** A slot not done when its outputs are due is output as silence and counted; the
     worker still processes it when it gets there (so the class's state stays continuous) and
     discards its outputs, catching up through the backlog, so the latency stays *L*. If it falls
@@ -184,7 +185,23 @@ while audio ran segfaulted in 5 of 5 runs.
     reload; a stall past the ring drops exactly the vectors beyond it; restart, stop, and stop
     during a stall; ten reloads under an audio thread. Clean under TSan (locally, macOS) — the
     Linux CI job runs it too. *(b) the Max object:* `@mode`, `@latency`, `@latencysamples`, the
-    ring sized in `dspsetup`; runtime test in Max.
+    ring sized in `dspsetup`; runtime test in Max. *Found in Max:* an ordinary worker thread was
+    late for vectors in 2 of 5 quiet seconds even with 32 vectors (21 ms) of latency, on a busy
+    machine (load average 6–11); the worker now gets the real-time scheduling of an audio thread —
+    a hook the core calls on the thread as it starts (`thread_setup`), where the wrapper sets
+    Mach's time-constraint policy (macOS: a period of one vector, half of it computation) or
+    `THREAD_PRIORITY_TIME_CRITICAL` (Windows). With it, at 96 kHz and 64-sample vectors, the seconds
+    with a late vector: 10 of 10 at 2 vectors (1.3 ms), 10 of 10 at 4, 3 of 10 at 8 (5.3 ms), none
+    at 16 (10.7 ms) — and a reload's hold on the GIL (2.6: about 3.5 ms) is longer than 2 vectors
+    there. Hence a latency in milliseconds, which stays the same delay whatever the vector size.
+    *Then:* Max computes a whole I/O vector of signal vectors back to back (here 512 samples, so 8
+    at a time), and the worker has only the latency beyond that burst to do them in — which is why
+    8 vectors (512 samples) failed and 16 did not. 10 ms (960 samples here, 4.7 ms beyond the
+    burst) still left late vectors in 2 of 11 seconds, and at 44.1 or 48 kHz with Max's usual
+    512-sample I/O vector it would leave nothing. Decided: `@latency` stays the whole delay,
+    default 30 ms, documented as having to exceed the I/O vector's duration (measuring the burst
+    and adding to it was the alternative). Fields as well as methods are now checked against the host's reserved names
+    (`mode`, `latency` and `latencysamples` among them).
 - [x] **2.6 Shorter reload stalls** — compile outside the swap and hold the GIL only for the swap.
   *Measured first* (`core/bench/reload_bench.cpp`: an audio thread with Core Audio's real-time
   scheduling computes 512-sample buffers of 64-sample vectors at 96 kHz while the main thread saves

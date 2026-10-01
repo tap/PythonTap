@@ -152,6 +152,22 @@ SCENARIO("Methods named like reserved host messages are not exposed") {
     CHECK(p.has_process());
 }
 
+SCENARIO("Fields named like reserved host attributes are not exposed (plan 2.5)") {
+    ensure_runtime();
+    log_capture log;
+    processor   p{"reserved_field", log.sink(), {"mode", "latency"}};
+    REQUIRE(p.load());
+
+    std::vector<std::string> names;
+    for (const auto& a : p.attributes()) {
+        names.push_back(a.name);
+    }
+    CHECK(names == std::vector<std::string>{"level"});
+    CHECK(log.contains("the field mode is reserved", log_level::error));
+    CHECK(log.contains("the field latency is reserved", log_level::error));
+    CHECK(p.has_process());
+}
+
 // 1.4 — the audio thread keeps one Python thread state for its lifetime, rather than creating
 // and destroying one (with its allocations and interpreter-wide lock) every vector.
 

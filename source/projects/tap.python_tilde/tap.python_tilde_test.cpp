@@ -2,9 +2,11 @@
 /// @copyright  Copyright 2022-2026 Timothy Place. All rights reserved.
 /// @license    Use of this source code is governed by the MIT License found in the License.md file.
 
+#include <chrono>
 #include <cstdint>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "c74_min_unittest.h" // required unit-test header (defines main via Catch)
@@ -410,4 +412,47 @@ SCENARIO("A save that changes process()'s inputs or outputs changes the object's
 
     c74::max::object_free(wrapped);
     std::filesystem::remove(file);
+}
+
+SCENARIO("With @mode worker, process() runs on a thread of its own, @latency milliseconds behind (plan 2.5)") {
+    ext_main(nullptr);
+    test_wrapper<python> an_instance;
+    python&              my_object = an_instance;
+    REQUIRE(Py_IsInitialized());
+
+    my_object.m_mode    = c74::min::symbol("worker");
+    my_object.m_latency = 4.0;                        // three 64-sample vectors at 48 kHz
+    my_object.dspsetup(c74::min::atoms{48000.0, 64}); // as min does when the chain compiles
+    THEN("the delay it adds is reported in samples") {
+        CHECK(static_cast<int>(my_object.m_latencysamples) == 3 * 64);
+    }
+    THEN("the output is the input three vectors later, the first three silence") {
+        for (int k = 0; k < 6; ++k) {
+            const auto out = render(my_object, static_cast<double>(k + 1));
+            CHECK(all_equal(out, k < 3 ? 0.0 : static_cast<double>(k - 3 + 1)));
+            std::this_thread::sleep_for(std::chrono::milliseconds{50}); // the worker's turn
+        }
+    }
+    WHEN("the mode is set back to direct and the chain compiles") {
+        my_object.m_mode = c74::min::symbol("direct");
+        my_object.dspsetup(c74::min::atoms{48000.0, 64});
+        THEN("there is no delay") {
+            CHECK(static_cast<int>(my_object.m_latencysamples) == 0);
+            CHECK(all_equal(render(my_object, 0.5), 0.5));
+        }
+    }
+    WHEN("the mode is set to something else") {
+        my_object.m_mode = c74::min::symbol("fast");
+        THEN("it is direct") {
+            CHECK(my_object.m_mode.get() == c74::min::symbol("direct"));
+        }
+    }
+    WHEN("the latency is set below 0") {
+        my_object.m_latency = -1.0;
+        my_object.dspsetup(c74::min::atoms{48000.0, 64});
+        THEN("it is held to 0, which is one vector") {
+            CHECK(static_cast<double>(my_object.m_latency) == 0.0);
+            CHECK(static_cast<int>(my_object.m_latencysamples) == 64);
+        }
+    }
 }
