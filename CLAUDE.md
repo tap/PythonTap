@@ -60,7 +60,8 @@ its phases, and the audit findings behind them. Tick its items (with the PR) as 
 
 ## Build & test
 
-The fast loop is Linux, no Max and no runtime install needed — just a CPython 3.13 with headers:
+The fast loop is Linux, no Max and no runtime install needed — just a CPython 3.13 with headers
+(without one, `uv python install 3.13`, then `-DPython3_EXECUTABLE=$(uv python find 3.13)`):
 
 ```sh
 # the core battery

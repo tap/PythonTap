@@ -56,6 +56,7 @@ To add more Python packages to the bundled runtime:
 ./support/bin/python3 -m pip install <package>      # macOS, from the package folder
 .\support\python.exe -m pip install <package>       # Windows
 ```
+If you use [uv](https://docs.astral.sh/uv/), `uv pip install --python support/bin/python3 <package>` (or `support\python.exe` on Windows) does the same, faster; nothing in the package needs uv.
 
 ### From a clone of this repository
 
@@ -175,7 +176,7 @@ cmake --build build-core
 ctest --test-dir build-core --output-on-failure
 ```
 
-The example tests need `attrs` and `numpy` importable by that interpreter (or in a folder named by `TAP_PYTHON_TEST_SITE`); without them they are skipped. `-DTAP_PYTHON_SANITIZE=address,undefined` or `=thread` builds the battery under sanitizers, as CI does.
+Any CPython 3.13 with its headers will do; if you have no `python3.13`, `uv python install 3.13` gets one, and `$(uv python find 3.13)` names it. The example tests need `attrs` and `numpy` importable by that interpreter (or in a folder named by `TAP_PYTHON_TEST_SITE`); without them they are skipped. `-DTAP_PYTHON_SANITIZE=address,undefined` or `=thread` builds the battery under sanitizers, as CI does.
 
 The core's build also makes `core/bench`, which times `process()` as Max's audio thread calls it; `python3 scripts/update-perf-docs.py` builds it (Release), runs it, and rewrites the tables in [the performance note](#a-note-on-performance) — with `--max`, the table measured in Max too. Measure on an idle machine; never edit those tables by hand.
 
