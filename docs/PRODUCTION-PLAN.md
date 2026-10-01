@@ -131,7 +131,7 @@ while audio ran segfaulted in 5 of 5 runs.
   that `thispatcher` connects to the new inlet and outlet carry signal (this check fails against
   (b)); shrunk to one, the removed outlets' cords go with them.
 - [ ] **2.5 Worker mode (D1)** — `@mode worker`: Python on a worker thread, lock-free FIFO,
-  latency reported to Max, underrun → silence. *Design (proposed, 2026-09-30):*
+  latency reported to Max, underrun → silence. *Design (decided 2026-09-30):*
   - **What it buys.** In direct mode the audio thread takes the GIL, so anything else holding it —
     a reload compiling a large file (2.6's limit), a message handler, a GC pass — delays the
     buffer. In worker mode the audio thread never takes the GIL or calls CPython: it copies
@@ -167,9 +167,10 @@ while audio ran segfaulted in 5 of 5 runs.
     under a running worker; resizing in `prepare()`; destruction joins the thread. Runtime test in
     Max: `@mode worker` against `delay~` of *L* vectors, a reload under audio, and the `latency`
     attribute.
-  - **Open:** the worker calls Python once per host vector; batching several vectors per call
-    would cut the per-call overhead further (worker mode's other win) at more latency — a later
-    option, `@block`, if measurements show it pays.
+  - **Decided:** latency in whole vectors, default 2; an underrun is silence with the latency kept;
+    one Python call per host vector — batching several per call would cut the per-call overhead
+    further (worker mode's other win) at more latency, a later option (`@block`) if measurements
+    show it pays.
 - [x] **2.6 Shorter reload stalls** — compile outside the swap and hold the GIL only for the swap.
   *Measured first* (`core/bench/reload_bench.cpp`: an audio thread with Core Audio's real-time
   scheduling computes 512-sample buffers of 64-sample vectors at 96 kHz while the main thread saves
