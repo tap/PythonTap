@@ -744,7 +744,11 @@ down rather than discovered again. *This plan was itself audited before being ad
   repeat the runbook's step 4 on the release packages, and tag `v0.11.0`.
 
 *The 1.0 gate (revised):* 8.1–8.6 change what the ReadMe promises or what a class can rely on, so
-they land before 1.0, where D5 still allows them; 8.7 may follow it.
+they land before 1.0, where D5 still allows them; 8.7 may follow it. *Decided 2026-10-01 (the maintainer):*
+**1.0.0 is tagged with 8.1–8.7 merged (#35) and 8.8 outstanding** — the contract changes are in, and
+what 8.8 verifies in Max is behavior the core battery and the glue test already pin on Linux. 8.8,
+the Windows half of 6.4 and the unchecked zips of 6.5 are the first 1.0.x work; the release is a
+draft until signing exists, as `release.yml` has it.
 
 ## Phase 7 — plugin front ends (optional, post-1.0)
 
@@ -765,8 +769,8 @@ they land before 1.0, where D5 still allows them; 8.7 may follow it.
 9. Phase 6 — in-Max validation before tagging 1.0.
 10. Phase 4.7–4.8 — uv for the tooling, then one package for every platform on each tag.
 11. Phase 8 — the audit's findings, in the order above: 8.1 (docs and hardening, first, so the
-    ReadMe stops overclaiming while the fixes land), 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, then the Mac
-    session 8.8 — all before 1.0.
+    ReadMe stops overclaiming while the fixes land), 8.2, 8.3, 8.4, 8.5, 8.6, 8.7 (#35), then the
+    Mac session 8.8 — decided on 2026-10-01 to follow 1.0.0 rather than gate it.
 
 ## External prerequisites
 

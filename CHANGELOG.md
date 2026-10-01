@@ -1,10 +1,17 @@
 # Changelog
 
 Changes to the Python class contract and to the object's behavior, newest first. Before 1.0,
-breaking changes to the contract are allowed where they buy correctness (D5 in
-`docs/PRODUCTION-PLAN.md`); each is recorded here.
+breaking changes to the contract were allowed where they bought correctness (D5 in
+`docs/PRODUCTION-PLAN.md`); each is recorded here. From 1.0.0, a change to the class contract is
+a major version.
 
-## Unreleased
+## 1.0.0 — 2026-10-01
+
+The first stable release: the class contract as the ReadMe states it, the production plan's
+Phases 0–5 and 8 complete, and Phase 6 validated in Max on Intel. Still to run in a Max session
+(plan 8.8): the runtime-test steps added in this cycle, the Windows checks of 6.4, and the arm64 and
+Windows release zips of 6.5 — the first 1.0.x work. The packages are unsigned until signing
+credentials exist (ReadMe: clear the quarantine once on a Mac).
 
 ### Changed — type hints map as a reader expects
 
