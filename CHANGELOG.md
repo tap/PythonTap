@@ -4,7 +4,7 @@ Changes to the Python class contract and to the object's behavior, newest first.
 breaking changes to the contract are allowed where they buy correctness (D5 in
 `docs/PRODUCTION-PLAN.md`); each is recorded here.
 
-## Unreleased
+## 0.10.0 — 2026-10-01
 
 ### Added — one package for every platform
 
@@ -57,6 +57,15 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
   milliseconds — runs Python. Measured at 96 kHz with 512-sample buffers and a save every 100 ms,
   CPython's default made a buffer late in most runs (the worst took 45 ms); at 0.5 ms none was.
   (Plan 2.6.)
+
+### Fixed — the package
+
+- **The macOS external's bundle identifier** is `com.74objects.tap.python-tilde`; it shipped as an
+  unexpanded template (`com.74objects.${PRODUCT_NAME:rfc1034identifier}`), which signing and
+  notarizing would have refused. The development plan no longer ships inside the package, and the
+  reference page now follows the object's descriptions (Max rewrites it from them).
+
+## 0.9.0 — 2026-09-30
 
 ### Changed — the console on reload
 
