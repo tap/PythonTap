@@ -143,8 +143,8 @@ while audio ran segfaulted in 5 of 5 runs.
     matching — so the class contract does not change. Slot states are atomics (single producer,
     single consumer, no locks); the audio thread wakes the worker with a C++20 atomic notify, which
     never blocks. The worker's thread is created and joined on the main thread.
-  - **Latency** *L* is whole vectors, set by `@latency` (in vectors, default 2), reported by a
-    read-only `latency` attribute in samples (*L* × vector size) that a patch can read to align
+  - **Latency** *L* is whole vectors, set by `@latency` (in vectors, default 2), and reported in
+    samples (*L* × vector size) by the read-only `@latencysamples`, which a patch can read to align
     other paths. Max has no documented call for an MSP object to report latency to the host, so
     none is used; the output is primed with *L* vectors of silence.
   - **Underruns.** A slot not done when its outputs are due is output as silence and counted; the
@@ -165,8 +165,8 @@ while audio ran segfaulted in 5 of 5 runs.
     *L* vectors, per sample and per vector, several channels; a worker stalled by a class that
     sleeps underruns to silence, is reported once, and comes back at the same latency; reload
     under a running worker; resizing in `prepare()`; destruction joins the thread. Runtime test in
-    Max: `@mode worker` against `delay~` of *L* vectors, a reload under audio, and the `latency`
-    attribute.
+    Max: `@mode worker` against `delay~` of *L* vectors, a reload under audio, and
+    `@latencysamples`.
   - **Decided:** latency in whole vectors, default 2; an underrun is silence with the latency kept;
     one Python call per host vector — batching several per call would cut the per-call overhead
     further (worker mode's other win) at more latency, a later option (`@block`) if measurements
