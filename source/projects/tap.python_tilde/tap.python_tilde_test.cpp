@@ -456,3 +456,26 @@ SCENARIO("With @mode worker, process() runs on a thread of its own, @latency mil
         }
     }
 }
+
+SCENARIO("The runtime is support/<platform> in a package that carries every platform's, else support/ (plan 4.8)") {
+    const auto package = std::filesystem::temp_directory_path() / "tap-python-runtime-home-test";
+    std::filesystem::remove_all(package);
+    std::filesystem::create_directories(package / "support");
+
+    THEN("a single-platform package's runtime is support/") {
+        CHECK(runtime::runtime_home(package) == package / "support");
+    }
+    WHEN("support/ holds a folder for this platform") {
+        std::filesystem::create_directories(package / "support" / runtime::runtime_platform());
+        THEN("that is the runtime") {
+            CHECK(runtime::runtime_home(package) == package / "support" / runtime::runtime_platform());
+        }
+    }
+    WHEN("support/ holds only other platforms' folders") {
+        std::filesystem::create_directories(package / "support" / "another-platform");
+        THEN("the runtime is still support/") {
+            CHECK(runtime::runtime_home(package) == package / "support");
+        }
+    }
+    std::filesystem::remove_all(package);
+}

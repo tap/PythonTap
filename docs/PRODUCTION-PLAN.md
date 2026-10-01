@@ -330,7 +330,7 @@ while audio ran segfaulted in 5 of 5 runs.
   is now documented: `uv python install 3.13` for the Linux loop's CPython with headers (ReadMe,
   CLAUDE.md), and `uv pip install --python support/bin/python3` for users adding packages to the
   runtime (it is not externally managed).
-- [ ] **4.8 One package for every platform on each tag** — *Decided (2026-09-30):* a tag also
+- [x] **4.8 One package for every platform on each tag** — *Decided (2026-09-30):* a tag also
   attaches a single `PythonTap-<version>.zip` holding every platform's external and runtime, and
   v0.x tags publish as pre-releases automatically (1.0 and later stay drafts until signing
   exists). Needs one runtime per platform side by side — `support/macos-arm64/`,
@@ -340,7 +340,19 @@ while audio ran segfaulted in 5 of 5 runs.
   Windows external loading `python313.dll` from its folder by full path before the first
   delay-loaded call (Max adds only `support/` itself to the DLL search path); and a last
   `release.yml` job that merges the platform builds into one `PythonTap/` and attaches it with
-  its checksum (about 130 MB, against 37–55 MB per platform zip today).
+  its checksum (about 130 MB, against 37–55 MB per platform zip today). *Done:* the external
+  takes `support/<runtime_platform()>` when it exists and `support/` otherwise
+  (`runtime_home()`, mock-tested); the universal macOS external carries an rpath per slice to
+  `support/macos-<arch>/lib` ahead of `support/lib` (`-Xarch_<arch>`, for each architecture
+  built); Windows already loaded the DLL by full path from the runtime folder.
+  `assemble-package.py --merge platform=zip …` unzips each release zip itself (backslash entry
+  names as folders; the macOS runtime's symlinks and executable bits kept), copies what must be
+  the same in all of them once (compared with line endings aside: a Windows checkout has CRLF),
+  every external, each runtime into `support/<platform>` and each platform's licenses into
+  `licenses/<platform>`; the `all platforms` job runs it on the three zips, and the release job
+  attaches the result, publishing 0.x tags as pre-releases. Checked in Max: a merged package
+  holding the Intel runtime as `support/macos-x86_64`, installed in Packages, passed the whole
+  runtime suite (including the sessions that move the runtime aside).
 
 ## Phase 5 — documentation and examples
 

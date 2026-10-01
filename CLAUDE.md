@@ -94,7 +94,9 @@ clang-format, clang-tidy (a clang-tidy failure or crash fails the gate, not just
 run with `contents: read`, pin third-party actions by commit SHA (tag noted beside it), and cancel
 superseded runs. `release.yml`: on a `vX.Y.Z` tag, builds, tests, packages (macOS per architecture,
 on runners of that architecture — the runtime is per arch, only libpython is universal), signs when
-the secrets exist, and attaches zips + SHA256s to a draft release.
+the secrets exist, merges the three into one package for every platform (`assemble-package.py
+--merge`: each runtime in `support/<platform>`, where the external looks before `support/`), and
+attaches all the zips + SHA256s to a release — a pre-release for 0.x, a draft from 1.0.
 
 ## Threads and the GIL (load-bearing)
 

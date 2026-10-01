@@ -37,8 +37,9 @@ class default:
 
 ## Installation
 
-Download the package for your platform from the [releases page](https://github.com/tap/PythonTap/releases) — the Python runtime (CPython 3.13 with `attrs` and `numpy`) is included:
+Download a package from the [releases page](https://github.com/tap/PythonTap/releases) — the Python runtime (CPython 3.13 with `attrs` and `numpy`) is included:
 
+- `PythonTap-<version>.zip` — every platform at once: Apple Silicon and Intel Macs and Windows, each with its own runtime (in `support/macos-arm64`, `support/macos-x86_64` and `support/windows-x64`). The largest; the one to use when a patch travels between machines.
 - `PythonTap-<version>-macos-arm64.zip` — Apple Silicon Macs.
 - `PythonTap-<version>-macos-x86_64.zip` — Intel Macs, and Apple Silicon Macs running Max under Rosetta.
 - `PythonTap-<version>-windows-x64.zip` — Windows.
@@ -56,7 +57,7 @@ To add more Python packages to the bundled runtime:
 ./support/bin/python3 -m pip install <package>      # macOS, from the package folder
 .\support\python.exe -m pip install <package>       # Windows
 ```
-If you use [uv](https://docs.astral.sh/uv/), `uv pip install --python support/bin/python3 <package>` (or `support\python.exe` on Windows) does the same, faster; nothing in the package needs uv.
+In the package for every platform, the runtime is in `support/<platform>/` — `./support/macos-arm64/bin/python3`, say, or `.\support\windows-x64\python.exe` — and a package you add goes into that platform's runtime only. If you use [uv](https://docs.astral.sh/uv/), `uv pip install --python support/bin/python3 <package>` (or `support\python.exe` on Windows) does the same, faster; nothing in the package needs uv.
 
 ### From a clone of this repository
 
@@ -164,7 +165,7 @@ On Windows, configure with `cmake -S . -B build -A x64`.
 
 ### Making a release
 
-Push a tag `vMAJOR.MINOR.PATCH`: `.github/workflows/release.yml` builds and tests on each platform (both Mac architectures on their own runners), assembles the package with `scripts/assemble-package.py` (the platform's externals, help, docs, examples, the runtime, and `licenses/`), zips it with SHA256 checksums, and attaches everything to a **draft** release to review and publish. The package version comes from the tag (min reads it from git; the assembly checks they agree). Running the workflow by hand builds the zips as workflow artifacts without a release. It signs and notarizes the Mac packages and signs the Windows binaries when the signing secrets it lists are set, and skips signing, with a warning, when they are not.
+Push a tag `vMAJOR.MINOR.PATCH`: `.github/workflows/release.yml` builds and tests on each platform (both Mac architectures on their own runners), assembles the package with `scripts/assemble-package.py` (the platform's externals, help, docs, examples, the runtime, and `licenses/`), zips it with SHA256 checksums, merges the three into one package for every platform (`assemble-package.py --merge`: each runtime in `support/<platform>`, each platform's licenses in `licenses/<platform>`), and attaches everything to a release — published as a pre-release for a 0.x version, and a **draft** to review and publish from 1.0 on. The package version comes from the tag (min reads it from git; the assembly checks they agree). Running the workflow by hand builds the zips as workflow artifacts without a release. It signs and notarizes the Mac packages and signs the Windows binaries when the signing secrets it lists are set, and skips signing, with a warning, when they are not.
 
 ### The core, and testing it on Linux
 
