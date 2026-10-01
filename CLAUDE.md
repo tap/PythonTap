@@ -108,6 +108,12 @@ the secrets exist, and attaches zips + SHA256s to a draft release.
   (and copies) of what it uses before running anything that could yield. Keep it that way.
 - `gil_lock` gives each thread one long-lived Python thread state (`detail::thread_state_keeper`);
   don't call `PyGILState_Ensure` directly.
+- **Worker mode** (`@mode worker`, plan 2.5): `process()` runs on the worker's own thread instead,
+  and the audio thread only copies vectors through `worker`'s lock-free ring — no GIL, no
+  allocation, no Python. The worker thread must have audio-thread scheduling (the wrapper's
+  `audio_thread_scheduling`, through the core's `thread_setup` hook): an ordinary thread was late
+  even at 21 ms of latency on a busy machine. `worker::start()`/`stop()` join threads, so never call
+  them holding the GIL.
 - **Nothing prints on the audio thread.** Problems in `process()` are recorded (exception object,
   flags) and the host's `report_ready` callback fires — the external sets a `queue<>` — and
   `flush_reports()` prints them on the main thread. Anything new on the audio path follows suit.

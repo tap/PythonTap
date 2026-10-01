@@ -360,7 +360,8 @@ def check_prerequisites(max_app: Path, packages: Path) -> None:
         raise RunError("the external is not built — cmake -S . -B build && cmake --build build"
                        if PACKAGE == ROOT else f"no external in {PACKAGE}")
     binary = EXTERNAL / "Contents" / "MacOS" / "tap.python~"
-    sources = [f for folder in ("core/include", "source/projects") for f in (ROOT / folder).rglob("*") if f.is_file()]
+    sources = [f for folder in ("core/include", "source/projects") for f in (ROOT / folder).rglob("*")
+               if f.is_file() and not f.name.endswith("_test.cpp")]  # the mock test is not in the external
     newest = max(sources, key=lambda f: f.stat().st_mtime)
     built_here = EXTERNAL.resolve().is_relative_to(ROOT)  # not an installed release's
     if built_here and binary.exists() and newest.stat().st_mtime > binary.stat().st_mtime:  # after switching branches

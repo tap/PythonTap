@@ -608,6 +608,49 @@ def channels() -> Test:
     return t
 
 
+def worker(latency_ms: float | None = None, quiet_windows: int = 0) -> Test:
+    t = Test("tap.python~.worker.maxtest.maxpat",
+             "Worker mode (plan 2.5), at its default latency: with @mode worker the output is the input "
+             "delayed by @latencysamples, sample for sample what delay~ gives, and stays so through a "
+             "reload; a class that stalls for 0.2 s is late, reported once, and comes back at the same "
+             "latency; @mode direct takes the delay away.")
+    ramp = t.obj("phasor~ 50", signal=True)  # a new value every sample, so any delay shows
+    py = t.python("maxtest_stall @mode worker" + (f" @latency {latency_ms}" if latency_ms is not None else ""))
+    delay = t.obj("delay~ 48000 0", inlets=2, signal=True)
+    late = t.obj("-~", inlets=2, signal=True)  # the object's output less the input, delayed
+    now = t.obj("-~", inlets=2, signal=True)  # the object's output less the input
+    for source, destination in ((ramp, py), (ramp, delay), (py, late), (py, now)):
+        t.patcher.connect(source, 0, destination)
+    t.patcher.connect(delay, 0, late, 1)
+    t.patcher.connect(ramp, 0, now, 1)
+    delay_by_latency = t.patcher.box("getattr latencysamples @listen 0", outlets=3, column=3)
+    t.patcher.connect(delay_by_latency, 1, py)
+    t.patcher.connect(delay_by_latency, 0, delay, 1)
+    t.count_errors("late.for")
+
+    watch = t.no_change("delayed-by-latencysamples", late, 0.0)
+    after = t.no_change("same-latency-after-stall", late, 0.0)
+    windows = [t.no_change(f"quiet-window-{i}", late, 0.0) for i in range(quiet_windows)]
+    # each step waits, then acts (so a watch starts a step after what it depends on)
+    t.step(t.attribute_compare("latency-reported-in-samples", py, "latencysamples", "> 0"), delay_by_latency,
+           t.log_attribute("latencysamples", py, "latencysamples"))
+    t.step(watch[0])
+    t.step(watch[1], wait=1000)
+    for start, check in windows:  # (for measuring: none in the committed test)
+        t.step(start)
+        t.step(check, wait=1000)
+    t.step(t.send("stall 0.2", py))
+    t.step(t.errors_are("stall-reported-once", "== 1", "late.for"), after[0], wait=1000)
+    t.step(after[1], wait=1000)
+    t.step(t.send("filechanged", py))
+    t.step(t.sample_equals("delayed-after-reload", late, 0.0), wait=500)
+    t.step(t.send("mode direct", py))
+    t.step(t.attribute_equals("direct-reports-no-latency", py, "latencysamples", 0),
+           t.sample_equals("direct-has-no-delay", now, 0.0),
+           t.errors_are("console-only-the-stall", "== 1"), wait=500)
+    return t
+
+
 def announce_once() -> Test:
     t = Test("tap.python~.announce-once.maxtest.maxpat",
              "What is true of a class is said once per run of its file, however many objects share it "
@@ -821,7 +864,7 @@ def without_runtime_restart() -> Test:
 
 TESTS_TO_WRITE = [load, attributes_and_messages, reload, reload_under_audio, many_instances, channels, announce_once,
                   faults,
-                  prepare,
+                  prepare, worker,
                   without_runtime, without_runtime_restart]
 
 

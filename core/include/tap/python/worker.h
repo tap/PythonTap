@@ -48,18 +48,39 @@ namespace tap::python {
 
     class worker {
       public:
-        /// The latency, in vectors, unless the host says otherwise.
-        static constexpr std::size_t k_default_latency = 2;
+        /// The latency, in milliseconds, unless the host says otherwise (plan 2.5). A host that computes
+        /// several vectors at a time (Max: one I/O vector's worth, back to back) leaves the worker only
+        /// the latency beyond that burst to do them in, so this covers a 512-sample I/O vector at
+        /// 44.1 kHz (11.6 ms) with room to spare: measured in Max, 4.7 ms of room was not enough.
+        static constexpr double k_default_latency_ms = 30.0;
+
+        /// A latency in milliseconds as whole vectors of `vector_size` at `sample_rate`: rounded up,
+        /// and at least one.
+        static std::size_t latency_vectors(const double milliseconds, const double sample_rate,
+                                           const std::size_t vector_size) {
+            if (!(milliseconds > 0.0) || !(sample_rate > 0.0) || vector_size == 0 || !std::isfinite(milliseconds)
+                || !std::isfinite(sample_rate)) {
+                return 1;
+            }
+            const double vectors = milliseconds / 1000.0 * sample_rate / static_cast<double>(vector_size);
+            return std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(vectors - 1e-9)));
+        }
 
         /// @param target       the processor to run; it must outlive the worker
         /// @param log          receives the worker's reports (main thread)
         /// @param report_ready called on the audio thread when something needs reporting; the host
         ///                     must then call flush_reports() from its main thread. Must be
         ///                     real-time safe, as the processor's is (it may be the same callback).
-        explicit worker(processor& target, log_function log = {}, std::function<void()> report_ready = {})
+        /// @param thread_setup called on each worker thread as it starts, with the vector period in
+        ///                     seconds (0 if the sample rate is unknown): where the host gives the
+        ///                     thread the scheduling an audio thread has. Without it, a busy machine
+        ///                     can hold an ordinary thread off for longer than the latency.
+        explicit worker(processor& target, log_function log = {}, std::function<void()> report_ready = {},
+                        std::function<void(double)> thread_setup = {})
             : m_target{target}
             , m_log{std::move(log)}
-            , m_report_ready{std::move(report_ready)} {}
+            , m_report_ready{std::move(report_ready)}
+            , m_thread_setup{std::move(thread_setup)} {}
 
         ~worker() { stop(); }
 
@@ -69,7 +90,9 @@ namespace tap::python {
         /// Start the worker, or restart it with new settings: a ring for `inputs` and `outputs` host
         /// channels of `vector_size` frames, `latency` vectors deep (at least 1), with room for the
         /// worker to fall a quarter of a second behind at `sample_rate` (at least 16 vectors).
-        /// Whatever the previous worker had not processed is discarded. Main thread.
+        /// Whatever the previous worker had not processed is discarded. Returns once the new thread
+        /// is running with its Python thread state, which it takes the GIL to make: main thread,
+        /// never holding the GIL.
         void start(const std::size_t inputs, const std::size_t outputs, const std::size_t vector_size,
                    const std::size_t latency, const double sample_rate) {
             stop();
@@ -81,8 +104,21 @@ namespace tap::python {
                     : std::size_t{0};
             auto next =
                 std::make_unique<ring>(inputs, outputs, frames, vectors, vectors + std::max(k_min_backlog, backlog));
-            ring* r   = next.get();
-            r->thread = std::thread{[this, r] { run(*r); }};
+            ring*      r = next.get();
+            const auto period =
+                std::isfinite(sample_rate) && sample_rate > 0.0 ? static_cast<double>(frames) / sample_rate : 0.0;
+            r->thread = std::thread{[this, r, period] {
+                if (m_thread_setup) {
+                    m_thread_setup(period);
+                }
+                if (Py_IsInitialized()) {
+                    gil_lock lock; // the thread's Python thread state, made now rather than on its first vector
+                }
+                r->ready.store(true, std::memory_order_release);
+                r->ready.notify_one();
+                run(*r);
+            }};
+            r->ready.wait(false, std::memory_order_acquire); // ready before the audio thread can give it work
             m_owned   = std::move(next);
             m_latency = vectors * frames;
             m_ring.store(r, std::memory_order_release);
@@ -240,12 +276,14 @@ namespace tap::python {
             std::atomic<std::uint64_t> done{};    // vectors the worker has finished (or passed over)
             std::atomic<std::uint64_t> signal{};  // bumped to wake the worker
             std::atomic<bool>          stopping{};
+            std::atomic<bool>          ready{}; // the thread has started and has its Python thread state
             std::thread                thread;
         };
 
-        processor&            m_target;
-        log_function          m_log;
-        std::function<void()> m_report_ready;
+        processor&                  m_target;
+        log_function                m_log;
+        std::function<void()>       m_report_ready;
+        std::function<void(double)> m_thread_setup;
 
         std::atomic<ring*>    m_ring{};    // the running ring, while the audio thread is not using it
         std::unique_ptr<ring> m_owned;     // the running ring (main thread)
