@@ -680,10 +680,15 @@ def faults() -> Test:
     t = Test("tap.python~.faults.maxtest.maxpat",
              "sys.exit() in a message is reported, not obeyed; NaN from process() is output as 0 "
              "and reported once; an exception in process() is reported once, from the main "
-             "thread, and silences the object — ignoring messages — until the file is reloaded.")
+             "thread, and silences the object — ignoring messages — until the file is reloaded. Its "
+             "class also has methods named dspstate, patchlineupdate, inputchanged and fileusage, "
+             "which Max calls with C arguments (plan 8.2): they must not be exposed, so toggling DSP "
+             "and connecting a cord with it loaded must pass (fileusage is Build Collective's: by hand).")
     source = t.signal(1.0)
-    py = t.python("maxtest_faults")
+    py = t.patcher.box("tap.python~ maxtest_faults", 1, 1, column=2, outlettype=["signal"], varname="faults")
     t.patcher.connect(source, 0, py)
+    t.patcher.box("sig~ 1.", 1, 1, column=2, outlettype=["signal"], varname="second_source")
+    scripting = t.obj("thispatcher")
     for pattern in ("SystemExit", "non-finite", "audio.disabled"):
         t.count_errors(pattern)
     t.step(t.sample_equals("passes-signal", py, 1.0))
@@ -702,6 +707,11 @@ def faults() -> Test:
     t.step(t.sample_equals("messages-ignored-until-reload", py, 0.0))
     t.step(t.send("filechanged", py))
     t.step(t.sample_equals("reload-restores-audio", py, 1.0))
+    t.step(t.dsp(False))
+    t.step(t.dsp(True), wait=100)
+    t.step(t.sample_equals("survives-dsp-toggle-with-c-argument-names", py, 1.0), wait=1000)
+    t.step(t.send("script connect second_source 0 faults 0", scripting))
+    t.step(t.sample_equals("survives-a-new-cord-with-c-argument-names", py, 2.0))  # both sources summed
     return t
 
 

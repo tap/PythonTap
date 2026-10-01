@@ -152,6 +152,23 @@ SCENARIO("Methods named like reserved host messages are not exposed") {
     CHECK(p.has_process());
 }
 
+SCENARIO("A name the host object already answers is reserved too (plan 8.2)") {
+    ensure_runtime();
+    log_capture log;
+    // the host says it answers `allowed` itself (in Max: a method its class registered)
+    processor p{"reserved", log.sink(), {"filechanged"}, {}, [](const std::string& name) { return name == "allowed"; }};
+    REQUIRE(p.load());
+
+    std::vector<std::string> names;
+    for (const auto& m : p.messages()) {
+        names.push_back(m.name);
+    }
+    CHECK(names == std::vector<std::string>{"dsp64"}); // not in the list, not answered by the host
+    CHECK(log.contains("allowed() is reserved", log_level::error));
+    CHECK(log.contains("filechanged() is reserved", log_level::error));
+    CHECK(p.has_process()); // process() is never asked of the host
+}
+
 SCENARIO("Fields named like reserved host attributes are not exposed (plan 2.5)") {
     ensure_runtime();
     log_capture log;

@@ -4,6 +4,31 @@ Changes to the Python class contract and to the object's behavior, newest first.
 breaking changes to the contract are allowed where they buy correctness (D5 in
 `docs/PRODUCTION-PLAN.md`); each is recorded here.
 
+## Unreleased
+
+### Changed — more names are reserved
+
+- **A method or field named like a message Max sends with C arguments is not exposed**, with the
+  console saying so: `dspstate`, `fileusage`, `patchlineupdate`, `inputchanged`,
+  `multichanneloutputs`, `edclose`, `okclose`, `oksize`, `paint`, `dictionary`, `getplaystate`,
+  `key`, the mouse and focus messages, `mousewheel`, and the `*_setup` names — every message min
+  treats as `A_CANT`, plus Max's own — and, as a guard, any name the Max object already answers
+  itself. A Python method of such a name used to be registered as an ordinary message, which Max
+  then called with a `long` or a pointer: the crash that every save once caused through
+  `filechanged`, in its general form. (Plan 8.2, audit A3.)
+
+### Fixed
+
+- **Samples computed before `process()` raised are sanitized.** A `process()` that returned NaN for
+  part of a vector and then raised let those NaNs through; the contract says non-finite output is
+  replaced with 0.0, and now it is on that path too. (Plan 8.2, audit A2.)
+- **The documents say what the guards cover.** No Python exception, `sys.exit()` included, takes
+  Max down; what never reaches Python's exception machinery — `os._exit()`, a crash in a C
+  extension, code that never returns — is not caught, and the ReadMe now says so, as it says that
+  helper modules load once per Max session and that a second embedded CPython in the same Max is
+  unsupported. `assemble-package.py --merge` refuses a zip whose entries or symlinks would land
+  outside the package. (Plan 8.1.)
+
 ## 0.10.0 — 2026-10-01
 
 ### Added — one package for every platform

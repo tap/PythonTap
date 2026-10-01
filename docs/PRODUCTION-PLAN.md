@@ -577,7 +577,7 @@ down rather than discovered again. *This plan was itself audited before being ad
   an escaping link, a write through an escaping link), all refused, and an honest zip whose
   `bin/python3` link survives. The taphouse drift check stays pinned by release, with the reason
   beside the policy comment.
-- [ ] **8.2 Crash and contract fixes in the core and the glue (A2, A3).**
+- [x] **8.2 Crash and contract fixes in the core and the glue (A2, A3).**
   *A2:* `process_samples()` sanitizes the samples already written before each of its two early
   returns (input conversion failing; the call raising). Test first, in `test_realtime.cpp`: the
   audit's `nan_then_raise.py` (NaN until an input ≥ 0.75, then an exception) renders
@@ -598,7 +598,20 @@ down rather than discovered again. *This plan was itself audited before being ad
   registered and each is announced once; the `faults` runtime test gains a step that toggles DSP
   and connects a cord with such a class loaded (the crash 6.1 found, in its general form).
   `fileusage` is sent only by Build Collective/Application, so it is a runbook step by hand, not a
-  runtime test. CHANGELOG: the new reserved names.
+  runtime test. CHANGELOG: the new reserved names. *Done:* every path out of `process_samples()` goes through one
+  `sanitize(io, written, frame_count)`; the fixture renders `0 0 0 0 0 0` where it rendered three
+  NaNs, and reports both the exception and the non-finite output. The processor takes a
+  `host_answers` predicate beside the list; the object's `reserved_messages()` carries min's
+  `A_CANT` names plus `dspstate`, `inputchanged` and `multichanneloutputs`, and `answered_by_max()`
+  asks `object_getmethod()` — excluding the messages the object itself added for the previous
+  incarnation's methods, which are still registered while `load()` runs and must not reserve the
+  class's own names on a reload. Pinned by a core scenario for the predicate, the glue scenario
+  with `maxtest_mock_reserved` (the four C-argument names absent, `int`/`float`/`symbol`/`bang`/
+  `list`/`greet` present, audio bound), and the `faults` runtime test's new steps (DSP toggled, a
+  cord connected by `thispatcher`, with those methods in the class) — to run in the Mac session
+  (8.8), as is Build Collective for `fileusage`. In the mock kernel `object_getmethod()` always
+  answers null, so the guard's own effect is seen only in Max: the existing
+  `attributes-and-messages` runtime test is what would show it over-reserving.
 - [ ] **8.3 Worker mode never hangs Max (A1, A6 — `worker.h`).**
   *A1:* `stop()` bounds its join. The worker records its OS thread identifier
   (`PyThread_get_thread_ident()`, no GIL needed) as it starts; if the thread has not finished

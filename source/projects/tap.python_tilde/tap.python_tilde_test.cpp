@@ -414,6 +414,40 @@ SCENARIO("A save that changes process()'s inputs or outputs changes the object's
     std::filesystem::remove(file);
 }
 
+SCENARIO("Methods named like messages Max sends with C arguments are not exposed, and the promised ones are "
+         "(plan 8.2)") {
+    ext_main(nullptr);
+    const auto file = tap::python::package_root() / "python" / "maxtest_mock_reserved.py";
+    write_file(file, "class maxtest_mock_reserved:\n"
+                     // what Max calls with C arguments: a Python method of the name would crash Max
+                     "    def dspstate(self, on: int) -> None:\n        pass\n"
+                     "    def fileusage(self) -> None:\n        pass\n"
+                     "    def patchlineupdate(self) -> None:\n        pass\n"
+                     "    def inputchanged(self) -> None:\n        pass\n"
+                     // what the ReadMe promises stays a message, whatever the guard answers
+                     "    def int(self, n: int) -> None:\n        pass\n"
+                     "    def float(self, x: float) -> None:\n        pass\n"
+                     "    def symbol(self, s: str) -> None:\n        pass\n"
+                     "    def bang(self) -> None:\n        pass\n"
+                     "    def list(self, *args: float) -> None:\n        pass\n"
+                     "    def greet(self, name: str) -> None:\n        pass\n"
+                     "    def process(self, x: float) -> float:\n        return x\n");
+    const auto argument = symbol_atom("maxtest_mock_reserved");
+    auto*      wrapped  = c74::min::wrapper_new<python>(c74::min::symbol("dummy"), 1, &argument);
+    REQUIRE(wrapped);
+    python& my_object = wrapped->m_min_object;
+
+    THEN("the reserved names are not registered, and every promised name is") {
+        CHECK(my_object.python_message_names()
+              == std::vector<std::string>{"bang", "float", "greet", "int", "list", "symbol"});
+    }
+    THEN("audio is bound regardless") {
+        CHECK(all_equal(render(my_object, 0.5), 0.5));
+    }
+    c74::max::object_free(wrapped);
+    std::filesystem::remove(file);
+}
+
 SCENARIO("With @mode worker, process() runs on a thread of its own, @latency milliseconds behind (plan 2.5)") {
     ext_main(nullptr);
     test_wrapper<python> an_instance;

@@ -82,12 +82,18 @@ namespace tap::python {
         /// @param report_ready      called on the audio thread when something needs reporting; the
         ///                          host must then call flush_reports() from its main thread. Must be
         ///                          real-time safe (no locks, no allocation).
+        /// @param host_answers      true for a name the host object already answers (in Max, a method
+        ///                          its class registered), which a Python method or field must not
+        ///                          replace either: reserved like the list, with the same diagnostic.
+        ///                          Called on the main thread during load(), with the GIL held.
         explicit processor(std::string source_name, log_function log = {},
-                           std::vector<std::string> reserved_messages = {}, std::function<void()> report_ready = {})
+                           std::vector<std::string> reserved_messages = {}, std::function<void()> report_ready = {},
+                           std::function<bool(const std::string&)> host_answers = {})
             : m_source_name{std::move(source_name)}
             , m_log{std::move(log)}
             , m_reserved_messages{std::move(reserved_messages)}
-            , m_report_ready{std::move(report_ready)} {}
+            , m_report_ready{std::move(report_ready)}
+            , m_host_answers{std::move(host_answers)} {}
 
         ~processor() {
             if (!Py_IsInitialized()) {
@@ -562,18 +568,20 @@ namespace tap::python {
         bool        m_prepared{};
         // Reports recorded on the audio thread for flush_reports(), and whether each kind has
         // already been recorded since the last load().
-        std::function<void()>     m_report_ready;
-        std::atomic<PyObject*>    m_pending_exception{};   // strong
-        std::atomic<PyObject*>    m_pending_non_numeric{}; // strong: the returned object's type
-        std::atomic<bool>         m_pending_non_finite{};
-        std::atomic<std::int64_t> m_pending_bad_length{k_no_length};
-        std::atomic<std::int64_t> m_bad_length_expected{};
-        std::atomic<bool>         m_warned_non_numeric{};
-        std::atomic<bool>         m_warned_non_finite{};
-        std::atomic<bool>         m_warned_bad_length{};
-        std::atomic<std::int64_t> m_pending_bad_count{k_no_length};
-        std::atomic<std::int64_t> m_bad_count_expected{};
-        std::atomic<bool>         m_warned_bad_count{};
+        std::function<void()> m_report_ready;
+        // Names the host object answers itself (main thread; see the constructor).
+        std::function<bool(const std::string&)> m_host_answers;
+        std::atomic<PyObject*>                  m_pending_exception{};   // strong
+        std::atomic<PyObject*>                  m_pending_non_numeric{}; // strong: the returned object's type
+        std::atomic<bool>                       m_pending_non_finite{};
+        std::atomic<std::int64_t>               m_pending_bad_length{k_no_length};
+        std::atomic<std::int64_t>               m_bad_length_expected{};
+        std::atomic<bool>                       m_warned_non_numeric{};
+        std::atomic<bool>                       m_warned_non_finite{};
+        std::atomic<bool>                       m_warned_bad_length{};
+        std::atomic<std::int64_t>               m_pending_bad_count{k_no_length};
+        std::atomic<std::int64_t>               m_bad_count_expected{};
+        std::atomic<bool>                       m_warned_bad_count{};
 
         void log(const log_level level, const std::string& text) const {
             if (m_log) {
@@ -833,6 +841,15 @@ namespace tap::python {
             std::size_t          outputs;
         };
 
+        /// sanitize() the first `written` of the host's output channels: every path out of a vector,
+        /// including the early returns when process() raises, goes through here, so no sample the
+        /// class wrote reaches the host unchecked.
+        void sanitize(const channels& io, const std::size_t written, const std::size_t frame_count) {
+            for (std::size_t c = 0; c < written; ++c) {
+                sanitize(io.out[c], frame_count);
+            }
+        }
+
         /// Zero channels [first, end) of `out`, from `first_frame` to `frame_count`.
         static void silence(double* const* out, const std::size_t first, const std::size_t end,
                             const std::size_t first_frame, const std::size_t frame_count) {
@@ -856,6 +873,7 @@ namespace tap::python {
                         release_arguments(call_args, c);
                         record_exception();
                         silence(io.out, 0, written, i, frame_count);
+                        sanitize(io, written, frame_count); // the samples before this one are still the class's
                         return;
                     }
                 }
@@ -866,6 +884,7 @@ namespace tap::python {
                     record_exception();
                     unbind_process(function); // load() re-arms it
                     silence(io.out, 0, written, i, frame_count);
+                    sanitize(io, written, frame_count); // the samples before this one are still the class's
                     return;
                 }
                 if (io.outputs == 1) {
@@ -886,9 +905,7 @@ namespace tap::python {
                 }
                 Py_DECREF(result);
             }
-            for (std::size_t c = 0; c < written; ++c) {
-                sanitize(io.out[c], frame_count);
-            }
+            sanitize(io, written, frame_count);
         }
 
         /// Release the `count` input values after `call_args[0]`.
@@ -959,9 +976,7 @@ namespace tap::python {
                 silence(io.out, 0, written, 0, frame_count);
             }
             Py_DECREF(result);
-            for (std::size_t c = 0; c < written; ++c) {
-                sanitize(io.out[c], frame_count);
-            }
+            sanitize(io, written, frame_count);
         }
 
         static bool is_native_double(const Py_buffer& view) {
@@ -1116,7 +1131,8 @@ namespace tap::python {
         }
 
         bool is_reserved(const std::string& name) const {
-            return std::find(m_reserved_messages.begin(), m_reserved_messages.end(), name) != m_reserved_messages.end();
+            return std::find(m_reserved_messages.begin(), m_reserved_messages.end(), name) != m_reserved_messages.end()
+                   || (m_host_answers && m_host_answers(name));
         }
 
         /// A support-module call with one argument; a new reference, or nullptr with an error set.

@@ -212,9 +212,10 @@ class python : public object<python>, public vector_operator<> {
                 cout << std::string{text} << endl;
             }
         };
-        m_processor = std::make_unique<runtime::processor>(m_python_source, object_log, reserved_messages(),
-                                                           [this] { m_reports.set(); });
-        m_worker    = std::make_unique<runtime::worker>(
+        m_processor = std::make_unique<runtime::processor>(
+            m_python_source, object_log, reserved_messages(), [this] { m_reports.set(); },
+            [this](const std::string& name) { return answered_by_max(name); });
+        m_worker = std::make_unique<runtime::worker>(
             *m_processor, object_log, [this] { m_reports.set(); }, audio_thread_scheduling);
 
         update_source();
@@ -353,6 +354,17 @@ class python : public object<python>, public vector_operator<> {
         }
     }
 
+    /// The names of the Max messages made for the class's methods (for the tests).
+    std::vector<std::string> python_message_names() const {
+        std::vector<std::string> names;
+        names.reserve(m_python_messages.size());
+        for (const auto& element : m_python_messages) {
+            names.push_back(element.first);
+        }
+        std::sort(names.begin(), names.end());
+        return names;
+    }
+
   private:
     string                                 m_python_source{};
     std::filesystem::path                  m_scripts_dir{};
@@ -371,11 +383,80 @@ class python : public object<python>, public vector_operator<> {
     /// never replace: min's own class methods, the messages Max sends every object, this object's
     /// file watcher (a Python method named filechanged would silently disable hot reload), and its
     /// own attributes (worker mode's, plan 2.5).
+    ///
+    /// Above all, every message Max sends with C arguments (plan 8.2, audit A3): a Python method
+    /// of such a name would be registered with the A_GIMME trampoline, and Max calling it with a
+    /// long or a pointer reads them as a symbol and an atom list — the crash 6.1 found for
+    /// filechanged, in its general form. The names are those min treats as A_CANT
+    /// (c74_min_message.h, message_type::cant; the MIN_WRAPPER_ADDMETHOD table in
+    /// c74_min_object_wrapper.h) plus Max's own dspstate, inputchanged and multichanneloutputs.
+    /// Anything the Max class already answers is reserved as well: answered_by_max().
     static std::vector<std::string> reserved_messages() {
-        return {"anything", "appendtodictionary", "assist",      "dblclick",   "dsp",
-                "dsp64",    "dspsetup",           "filechanged", "getvalueof", "inletinfo",
-                "latency",  "latencysamples",     "loadbang",    "mode",       "notify",
-                "preset",   "savestate",          "setvalueof",  "signal"};
+        return {"anything",
+                "appendtodictionary",
+                "assist",
+                "dblclick",
+                "dictionary",
+                "dsp",
+                "dsp64",
+                "dspsetup",
+                "dspstate",
+                "edclose",
+                "filechanged",
+                "fileusage",
+                "focusgained",
+                "focuslost",
+                "getplaystate",
+                "getvalueof",
+                "inletinfo",
+                "inputchanged",
+                "jitclass_setup",
+                "key",
+                "latency",
+                "latencysamples",
+                "loadbang",
+                "maxclass_setup",
+                "maxob_setup",
+                "mode",
+                "mop_setup",
+                "mousedoubleclick",
+                "mousedown",
+                "mousedrag",
+                "mousedragdelta",
+                "mouseenter",
+                "mouseleave",
+                "mousemove",
+                "mouseup",
+                "mousewheel",
+                "mt_mousedown",
+                "mt_mousedrag",
+                "mt_mouseenter",
+                "mt_mouseleave",
+                "mt_mousemove",
+                "mt_mouseup",
+                "multichanneloutputs",
+                "notify",
+                "okclose",
+                "oksize",
+                "paint",
+                "patchlineupdate",
+                "preset",
+                "savestate",
+                "setup",
+                "setvalueof",
+                "signal"};
+    }
+
+    /// Whether the Max object already answers `name` itself — a method its class registered (min's
+    /// dsp64, assist, the ones above), which Max would call before anything added for a Python
+    /// method, or with C arguments. The messages this object added for the previous incarnation's
+    /// Python methods are its own, not Max's: still registered while load() runs, they must not
+    /// make the class's methods reserved on a reload. Main thread.
+    bool answered_by_max(const std::string& name) {
+        if (m_python_messages.find(name) != m_python_messages.end()) {
+            return false;
+        }
+        return c74::max::object_getmethod(maxobj(), c74::max::gensym(name.c_str())) != nullptr;
     }
 
     /// The worker thread's scheduling (plan 2.5): the real-time class an audio thread has, so that a
