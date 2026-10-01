@@ -14,7 +14,9 @@ name: Tap House Style
 on: [push, pull_request]
 
 # Least privilege: the jobs only read the repository. Third-party actions are pinned by
-# commit SHA (the tag each SHA was cut from is noted beside it).
+# commit SHA (the tag each SHA was cut from is noted beside it). The one reference by tag is the
+# family's own drift check (tap/taphouse, below): its `ref` input must name the same release of
+# the canonical files, and the family moves that tag together, so it is pinned by release, not SHA.
 permissions:
   contents: read
 

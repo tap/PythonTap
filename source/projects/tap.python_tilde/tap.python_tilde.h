@@ -176,7 +176,7 @@ class python : public object<python>, public vector_operator<> {
 #endif
 
         if (!std::filesystem::exists(home)) {
-            cerr << "No Python runtime found at " << home.string()
+            cerr << "No Python runtime found at " << runtime::detail::utf8(home)
                  << " — run scripts/install-runtime from the package root to install it." << endl;
             return;
         }
@@ -186,9 +186,15 @@ class python : public object<python>, public vector_operator<> {
             return;
         }
 
-        const auto status = runtime::initialize({home, m_scripts_dir, console_line});
+        runtime::runtime_options options;
+        options.home           = home;
+        options.scripts_dir    = m_scripts_dir;
+        options.console        = console_line;
+        options.is_main_thread = is_main_thread; // Python's output posts from Max's main thread only (8.4)
+        options.console_ready  = console_ready;
+        const auto status      = runtime::initialize(options);
         if (!status.ok) {
-            cerr << "failed to start Python from '" << home.string() << "': " << status.error
+            cerr << "failed to start Python from '" << runtime::detail::utf8(home) << "': " << status.error
                  << " (run scripts/install-runtime to install the runtime)" << endl;
             return;
         }
@@ -212,9 +218,10 @@ class python : public object<python>, public vector_operator<> {
                 cout << std::string{text} << endl;
             }
         };
-        m_processor = std::make_unique<runtime::processor>(m_python_source, object_log, reserved_messages(),
-                                                           [this] { m_reports.set(); });
-        m_worker    = std::make_unique<runtime::worker>(
+        m_processor = std::make_unique<runtime::processor>(
+            m_python_source, object_log, reserved_messages(), [this] { m_reports.set(); },
+            [this](const std::string& name) { return answered_by_max(name); });
+        m_worker = std::make_unique<runtime::worker>(
             *m_processor, object_log, [this] { m_reports.set(); }, audio_thread_scheduling);
 
         update_source();
@@ -226,8 +233,9 @@ class python : public object<python>, public vector_operator<> {
             return;
         }
         const auto watched_file = m_scripts_dir / (m_python_source + ".py");
+        const auto watched_utf8 = runtime::detail::utf8(watched_file); // Max's paths are UTF-8 (8.7)
         char       filename[c74::max::MAX_PATH_CHARS]{};
-        std::strncpy(filename, watched_file.string().c_str(), c74::max::MAX_PATH_CHARS - 1);
+        std::strncpy(filename, watched_utf8.c_str(), c74::max::MAX_PATH_CHARS - 1);
         short              path_id{};
         c74::max::t_fourcc filetype{};
         if (c74::max::locatefile_extended(filename, &path_id, &filetype, nullptr, 0) == 0) {
@@ -235,14 +243,28 @@ class python : public object<python>, public vector_operator<> {
             m_file_watch = std::make_unique<runtime::file_watch>(maxobj(), path_id, filename);
         }
         else {
-            cerr << "Unable to watch " << watched_file.string() << " for changes." << endl;
+            cerr << "Unable to watch " << watched_utf8 << " for changes." << endl;
         }
     }
 
     ~python() {
         m_file_watch.reset();
         m_use_worker = false;
-        m_worker.reset();    // joins the worker thread, before the processor it runs goes
+        if (m_worker) {
+            m_worker->stop(); // joins the worker thread, before the processor it runs goes
+            if (m_worker->has_abandoned_thread()) {
+                // a process() that never returned still runs on the thread stop() gave up on, through
+                // this worker and this processor: leak both rather than free what it may yet touch
+                // (plan 8.3); the process exits with the thread
+                cerr << "a stalled process() is still running on an abandoned thread; this object's Python "
+                        "state is kept alive for it until Max quits"
+                     << endl;
+                m_worker.release();
+                m_processor.release();
+                return;
+            }
+        }
+        m_worker.reset();
         m_processor.reset(); // releases the Python objects under the GIL
     }
 
@@ -353,6 +375,17 @@ class python : public object<python>, public vector_operator<> {
         }
     }
 
+    /// The names of the Max messages made for the class's methods (for the tests).
+    std::vector<std::string> python_message_names() const {
+        std::vector<std::string> names;
+        names.reserve(m_python_messages.size());
+        for (const auto& element : m_python_messages) {
+            names.push_back(element.first);
+        }
+        std::sort(names.begin(), names.end());
+        return names;
+    }
+
   private:
     string                                 m_python_source{};
     std::filesystem::path                  m_scripts_dir{};
@@ -371,11 +404,80 @@ class python : public object<python>, public vector_operator<> {
     /// never replace: min's own class methods, the messages Max sends every object, this object's
     /// file watcher (a Python method named filechanged would silently disable hot reload), and its
     /// own attributes (worker mode's, plan 2.5).
+    ///
+    /// Above all, every message Max sends with C arguments (plan 8.2, audit A3): a Python method
+    /// of such a name would be registered with the A_GIMME trampoline, and Max calling it with a
+    /// long or a pointer reads them as a symbol and an atom list — the crash 6.1 found for
+    /// filechanged, in its general form. The names are those min treats as A_CANT
+    /// (c74_min_message.h, message_type::cant; the MIN_WRAPPER_ADDMETHOD table in
+    /// c74_min_object_wrapper.h) plus Max's own dspstate, inputchanged and multichanneloutputs.
+    /// Anything the Max class already answers is reserved as well: answered_by_max().
     static std::vector<std::string> reserved_messages() {
-        return {"anything", "appendtodictionary", "assist",      "dblclick",   "dsp",
-                "dsp64",    "dspsetup",           "filechanged", "getvalueof", "inletinfo",
-                "latency",  "latencysamples",     "loadbang",    "mode",       "notify",
-                "preset",   "savestate",          "setvalueof",  "signal"};
+        return {"anything",
+                "appendtodictionary",
+                "assist",
+                "dblclick",
+                "dictionary",
+                "dsp",
+                "dsp64",
+                "dspsetup",
+                "dspstate",
+                "edclose",
+                "filechanged",
+                "fileusage",
+                "focusgained",
+                "focuslost",
+                "getplaystate",
+                "getvalueof",
+                "inletinfo",
+                "inputchanged",
+                "jitclass_setup",
+                "key",
+                "latency",
+                "latencysamples",
+                "loadbang",
+                "maxclass_setup",
+                "maxob_setup",
+                "mode",
+                "mop_setup",
+                "mousedoubleclick",
+                "mousedown",
+                "mousedrag",
+                "mousedragdelta",
+                "mouseenter",
+                "mouseleave",
+                "mousemove",
+                "mouseup",
+                "mousewheel",
+                "mt_mousedown",
+                "mt_mousedrag",
+                "mt_mouseenter",
+                "mt_mouseleave",
+                "mt_mousemove",
+                "mt_mouseup",
+                "multichanneloutputs",
+                "notify",
+                "okclose",
+                "oksize",
+                "paint",
+                "patchlineupdate",
+                "preset",
+                "savestate",
+                "setup",
+                "setvalueof",
+                "signal"};
+    }
+
+    /// Whether the Max object already answers `name` itself — a method its class registered (min's
+    /// dsp64, assist, the ones above), which Max would call before anything added for a Python
+    /// method, or with C arguments. The messages this object added for the previous incarnation's
+    /// Python methods are its own, not Max's: still registered while load() runs, they must not
+    /// make the class's methods reserved on a reload. Main thread.
+    bool answered_by_max(const std::string& name) {
+        if (m_python_messages.find(name) != m_python_messages.end()) {
+            return false;
+        }
+        return c74::max::object_getmethod(maxobj(), c74::max::gensym(name.c_str())) != nullptr;
     }
 
     /// The worker thread's scheduling (plan 2.5): the real-time class an audio thread has, so that a
@@ -406,6 +508,18 @@ class python : public object<python>, public vector_operator<> {
 #else
         (void)period; // Linux development builds: no host runs there
 #endif
+    }
+
+    /// Whether this is Max's main thread: where Python's output may be posted at once. On any other
+    /// thread — the audio thread, a worker, the scheduler — the core queues the line (plan 8.4).
+    static bool is_main_thread() { return c74::max::systhread_ismainthread() != 0; }
+
+    /// Called on the printing thread when the core queued a line: sets the process-wide qelem that
+    /// has the lines posted from the main thread. Real-time safe (qelem_set).
+    static void console_ready() {
+        static c74::max::t_qelem* s_flush =
+            c74::max::qelem_new(nullptr, reinterpret_cast<c74::max::method>(+[](void*) { runtime::flush_console(); }));
+        c74::max::qelem_set(s_flush);
     }
 
     /// Python's print() output and tracebacks, for every instance.

@@ -10,7 +10,11 @@ note the PR that closed them.
 ## The bar
 
 1. **User Python cannot take Max down.** No crash, no process exit, no hang from anything a user
-   script does (`sys.exit()`, exceptions, non-numeric returns, NaN, pathological names).
+   script does *that reaches Python's exception machinery* (`sys.exit()`, exceptions, non-numeric
+   returns, NaN, pathological names). What never reaches it is outside the guard and said so in the
+   ReadMe (8.1): a process exit below Python (`os._exit()`), a crash in a C extension, and code that
+   never returns — which freezes the thread it runs on (main for a message, audio for `process()`;
+   worker mode confines the latter to the worker thread and, since 8.3, stops it or abandons it).
 2. **The audio thread is protected.** No crash, no allocation or console posting on the hot path,
    and a defined, documented behavior (silence, not a stall) when Python misbehaves.
 3. **Every documented behavior is pinned by a test** — unit (mock kernel) where possible, in-Max
@@ -24,7 +28,7 @@ note the PR that closed them.
 |---|---|---|
 | D1 | Where `process()` runs | **Direct now, worker later.** A block path called once per vector on the audio thread (zero latency); the per-sample path stays as a documented slow path; an opt-in worker-thread mode (`@mode worker`, lock-free FIFO, ≥1 vector latency, audio thread never takes the GIL) follows. |
 | D1a | Opting into the block path | **By type hint.** `process(self, x: np.ndarray) -> np.ndarray` is called per vector; `process(self, x: float) -> float` per sample. Detected at bind time. |
-| D2 | How `[tap.python~ name]` loads code | **File-based.** `python/<name>.py` is loaded by path (`importlib.util.spec_from_file_location`) under a private module name (`_tap_python_user.<name>`); `name` must be an identifier; `python/` is *appended* to `sys.path` so sibling-helper imports keep working without shadowing the stdlib. |
+| D2 | How `[tap.python~ name]` loads code | **File-based.** `python/<name>.py` is loaded by path — its source compiled and executed by the loader in the support module (3.5), never imported, so no `.pyc` is read or written for it (3.6a) — as a fresh module registered in `sys.modules` as `_tap_python_<name>` (with `__file__` only: no `__spec__` or `__package__`, so no relative imports; the folder is flat by design); `name` must be an identifier; `python/` is *appended* to `sys.path` so sibling-helper imports keep working without shadowing the stdlib. *(Revised with 8.1: the first draft named `importlib.util.spec_from_file_location` and `_tap_python_user.<name>`.)* |
 | D3 | How users get the runtime | **Bundled in the release.** CI assembles a complete per-platform package (externals, `support/` with CPython + attrs + numpy, `python/`, help, docs, licenses). `scripts/install-runtime.*` stays for source builds. Signing/notarization steps are wired but **skip cleanly until credentials exist** (none yet). |
 | D4 | Python version policy | **Pin 3.13; upgrade deliberately.** One CPython minor per release; a move (e.g. to 3.14's deferred annotations) is its own PR with tests. No free-threaded or subinterpreter builds until numpy supports them. |
 | D5 | Compatibility before 1.0 | **Breaking changes to the class contract are allowed** where they buy correctness (reserved names, file-based loading, signature dispatch). Each is recorded in a `CHANGELOG.md`; the shipped examples are updated in the same PR. |
@@ -543,6 +547,205 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
   (two processors; another broken save; a later object) and the runtime test `announce-once` (a
   broken save, five objects in Max, one report — five before the change).
 
+## Phase 8 — the October 2026 audit's findings (before 1.0)
+
+`docs/AUDIT-2026-10.md` (findings A1–A12) read the shipped 0.10.0 adversarially: the design
+discipline held, the edges of the contract did not. This phase closes them, one PR each as below,
+highest severity first, each fix landing against a test that fails before it (the house rule), and
+each contract change recorded in `CHANGELOG.md` (D5). The honest limits that remain are written
+down rather than discovered again. *This plan was itself audited before being adopted
+(2026-10-01); what that changed is marked "revised".*
+
+- [x] **8.1 Say what is true (A4, A7a, A12 — docs and small hardening, no behavior change).**
+  ReadMe lines 17 and 101, and bar 1 above: *no Python exception*, `sys.exit()` included, takes
+  Max down or stops the object — what happens below Python (`os._exit()`, a C extension crashing)
+  or never returns to it (an endless loop in a message freezes Max's main thread; in `process()`
+  the audio thread, and until 8.3 the main thread too in worker mode) is not caught. Helper modules
+  in `python/` are imported once per Max session and are not reloaded by a save (until 8.5).
+  Another external that embeds its own CPython in the same Max is untested and unsupported. Add
+  these to CLAUDE.md's honest-limits rule. Correct D2 (the loader compiles and `exec`s the source
+  as `_tap_python_<name>`; `__file__` only, no `__spec__`, so no relative imports). Harden
+  `assemble-package.py`'s `extract()` against symlink zip-slip (A10: refuse a link target that is
+  absolute or resolves outside the destination, and check every written path), and pin the
+  taphouse drift workflow by SHA or note the exception beside the policy comment (A11). *Done
+  when:* the three documents agree with each other and with the code; `--merge` of a crafted zip
+  with a `../` symlink entry fails. *Done:* the ReadMe's two sentences and bar 1 now name what the
+  guards cover and what they cannot; helpers and a second interpreter are stated; D2 corrected;
+  CLAUDE.md carries the rule. `extract()` refuses an entry whose path leaves the destination
+  (through `..`, an absolute path, or a symlink an earlier entry made) and a symlink whose target
+  is absolute or resolves outside — checked with four crafted zips (a `..` name, an absolute link,
+  an escaping link, a write through an escaping link), all refused, and an honest zip whose
+  `bin/python3` link survives. The taphouse drift check stays pinned by release, with the reason
+  beside the policy comment.
+- [x] **8.2 Crash and contract fixes in the core and the glue (A2, A3).**
+  *A2:* `process_samples()` sanitizes the samples already written before each of its two early
+  returns (input conversion failing; the call raising). Test first, in `test_realtime.cpp`: the
+  audit's `nan_then_raise.py` (NaN until an input ≥ 0.75, then an exception) renders
+  `0 0 0 0 0 0`, not `nan nan nan 0 0 0`.
+  *A3:* one list of reserved names, in the object (`reserved_messages()`), extended with every
+  message min registers as `A_CANT` (`c74_min_message.h`'s `message_type::cant` names and the
+  `MIN_WRAPPER_ADDMETHOD` table: `dspstate`, `fileusage`, `patchlineupdate`, `edclose`, `okclose`,
+  `oksize`, `paint`, the mouse, focus and key messages, `mousewheel`, `getplaystate`, the `*_setup`
+  names, `setup`, `dictionary`) plus Max's mc-era `inputchanged` and `multichanneloutputs`; and a
+  general guard — a name the Max class already answers (`class_method(object_class(maxobj()),
+  gensym(name))` non-null) is reserved too, so min's own registrations never need listing by hand.
+  *Revised:* the guard must not take away what is promised: a glue test asserts `int`, `float`,
+  `symbol`, `bang`, `list` and an ordinary name stay exposed with the guard on (min registers
+  `int`/`float`/`bang` only for classes that declare them; this one does not — the test is the
+  proof, since Max's own class setup is not ours to read). Tests: the core's reserved-name scenario
+  stays (it takes any list); a glue test instantiates `[tap.python~ maxtest_mock_reserved]` whose
+  class defines `dspstate`, `fileusage`, `patchlineupdate` and `inputchanged`, and checks none is
+  registered and each is announced once; the `faults` runtime test gains a step that toggles DSP
+  and connects a cord with such a class loaded (the crash 6.1 found, in its general form).
+  `fileusage` is sent only by Build Collective/Application, so it is a runbook step by hand, not a
+  runtime test. CHANGELOG: the new reserved names. *Done:* every path out of `process_samples()` goes through one
+  `sanitize(io, written, frame_count)`; the fixture renders `0 0 0 0 0 0` where it rendered three
+  NaNs, and reports both the exception and the non-finite output. The processor takes a
+  `host_answers` predicate beside the list; the object's `reserved_messages()` carries min's
+  `A_CANT` names plus `dspstate`, `inputchanged` and `multichanneloutputs`, and `answered_by_max()`
+  asks `object_getmethod()` — excluding the messages the object itself added for the previous
+  incarnation's methods, which are still registered while `load()` runs and must not reserve the
+  class's own names on a reload. Pinned by a core scenario for the predicate, the glue scenario
+  with `maxtest_mock_reserved` (the four C-argument names absent, `int`/`float`/`symbol`/`bang`/
+  `list`/`greet` present, audio bound), and the `faults` runtime test's new steps (DSP toggled, a
+  cord connected by `thispatcher`, with those methods in the class) — to run in the Mac session
+  (8.8), as is Build Collective for `fileusage`. In the mock kernel `object_getmethod()` always
+  answers null, so the guard's own effect is seen only in Max: the existing
+  `attributes-and-messages` runtime test is what would show it over-reserving.
+- [x] **8.3 Worker mode never hangs Max (A1, A6 — `worker.h`).**
+  *A1:* `stop()` bounds its join. The worker records its OS thread identifier
+  (`PyThread_get_thread_ident()`, no GIL needed) as it starts; if the thread has not finished
+  within 100 ms of `stopping` being set, `stop()` takes the GIL briefly (the hung thread yields it
+  every 0.5 ms) and injects `PyThreadState_SetAsyncExc(ident, WorkerStopped)`, which raises at the
+  next bytecode of a pure-Python loop. *Revised, three ways.* (i) `WorkerStopped` derives from
+  **`BaseException`**, like `KeyboardInterrupt`, so a class's `except Exception:` does not swallow
+  it and keep looping; it is defined in the support module and looked up by name (no CPython data
+  symbols). (ii) The processor **recognizes `WorkerStopped` and does not unbind**: it is our
+  interruption, not the class's fault — a `process()` that was merely slow (a 200 ms numpy call
+  when the chain recompiled) loses that vector and carries on; it is reported once as "process()
+  was interrupted while the worker stopped". (iii) If the thread still has not finished after
+  another 250 ms (a blocking C call; `time.sleep`, which delivers the exception only when it
+  returns), `stop()` **detaches** it. The ring is then shared (`shared_ptr`, the thread holding one
+  reference), so a thread that wakes later frees it; the processor it runs stays owned by the
+  object — attributes, messages and a fixing save keep working, and the next `dspsetup` starts a
+  fresh worker — and the object's destructor hands the processor to a process-wide leak list
+  while a detached thread is still alive (an atomic count the thread decrements as it exits),
+  rather than destroy what the thread may still touch. The console says once that the class
+  stalled and was abandoned, and that it keeps costing a core until Max restarts (it still holds
+  the GIL in 0.5 ms slices). `stop()` thus holds Max's main thread for at most ~350 ms. Direct
+  mode is unchanged (8.1 documents it). Tests (`test_worker.cpp`): `never_returns.py`
+  (`while True: pass`, inside `try: … except Exception: pass`) — `stop()` returns within 1 s,
+  `flush_reports()` prints the interruption, audio is still bound and the next vector runs;
+  `time.sleep(5)` in `process()` — `stop()` returns within 1 s having detached, a new `start()`
+  works, and the test process exits cleanly (leaks are off under ASan already); a `process()` that
+  takes 50 ms — `stop()` waits for it and injects nothing. Runtime test (`worker`): the same
+  classes in Max, DSP toggled, patch closed.
+  *A6:* the worker thread is created with an explicit stack of 16 MiB (CPython's own
+  `THREAD_STACK_SIZE` on macOS) through `pthread_attr_setstacksize` / `_beginthreadex`, in a small
+  `native_thread` helper that keeps `std::thread`'s join/detach shape. Measure first on the Mac:
+  the secondary-thread default from a fresh `pthread_attr_t`, and the depth at which a fixture
+  recursing through a C boundary (`sorted(key=…)` calling itself) crashes on a `std::thread`
+  against a `threading.Thread`; then pin that fixture running to `sys.getrecursionlimit()` on the
+  worker. CHANGELOG: a stalled class in worker mode is interrupted or abandoned, never waited for. *Done:* as designed — `WorkerStopped(BaseException)` in the support module;
+  `processor::take_interruption()` recognizes it, records "interrupted" (once per load) and keeps
+  the binding; `worker::stop()` polls `finished` for 100 ms, injects with
+  `PyThreadState_SetAsyncExc` under a brief `gil_lock`, polls 250 ms more, then detaches; the ring
+  is a `shared_ptr` the thread also holds, `has_abandoned_thread()` prunes the finished ones, and the
+  Max object's destructor leaks the worker and processor while one lives. `detail::native_thread`
+  (pthread / `_beginthreadex`, 16 MiB) replaces `std::thread`. Four core scenarios: `hangs.py`
+  (`while self.forever` inside `except Exception`) — stop() in 0.5 s, interruption reported, audio
+  bound, the class runs on; `sleeps.py` (`time.sleep(3)`) — stop() in under a second, abandoned
+  and said so, a new worker runs the class (the harness is leaked, as a host must); `stalls.py` at
+  50 ms — waited for, nothing reported; `deep_recursion.py` (sorted's key recursing to the limit) —
+  passes on the worker. Release, ASan/UBSan and TSan clean. The `worker` runtime test gains `hang 1`
+  → `mode direct` → `hang 0`, expecting one "interrupted" line and two errors in all — step timing
+  to confirm in the Mac session (8.8), with the stack measurement the item asks for.
+- [x] **8.4 Nothing of the user's prints on the audio thread either (A5).** `runtime_options`
+  gains `is_main_thread` (the host's predicate — `systhread_ismainthread` in Max; the default,
+  with no host predicate, is "always", which keeps the core battery's synchronous `console()`
+  checks as they are) and `console_ready` (real-time safe; the object sets its `m_reports` qelem).
+  *Revised:* lines are assembled per thread in a `thread_local` buffer — today the two per-stream
+  buffers are shared under one mutex, so partial writes from two threads already interleave — and
+  only a *complete line* is dispatched: on a main thread straight to the sink; on any other thread
+  into a bounded lock-free MPSC queue (dropping and counting when full, never blocking), with
+  `console_ready` called. The host's `flush_console()`, from its main thread, drains the queue to
+  the sink in order and appends "… and N lines dropped" when it had to. The audio-thread tests call
+  `flush_console()`. Consequences to document: deferred lines arrive after main-thread lines
+  printed later (ordering across threads is not kept); the scheduler thread's prints are deferred
+  too (harmless); what still happens on the audio thread is Python's own formatting of a warning
+  (`linecache` reads the file once). Tests: `print()` from an audio thread reaches the sink only on
+  the nominated thread; two threads printing half-lines never produce a mixed line; a flood of
+  10,000 lines drops with a count and never blocks the producer (timed). CHANGELOG: console output
+  from `process()` is deferred and coalesced. *Done:* `runtime_options` gained `is_main_thread` and
+  `console_ready` (and `set_console_threading()` for a test or a host that decides later);
+  `detail::console_queue` is Vyukov's bounded queue, 256 slots of 480 bytes (a longer line is cut
+  with an ellipsis), with a dropped count; lines are assembled in `thread_local` buffers and
+  dispatched whole; `flush_console()` drains to the sink in order and adds the dropped line. The
+  Max object nominates `systhread_ismainthread` and sets one process-wide qelem that calls
+  `flush_console()`. Four scenarios in the new `test_console.cpp`: a line from another thread
+  reaches the sink only through `flush_console()` (and a `flush=True` partial line queues whole);
+  two threads printing pieces give 80 unmixed lines at a 1 µs switch interval; a flood of 10,000
+  keeps 256 and counts 9,744 dropped, in bounded time; a 2,000-character line is cut. The
+  battery's other console checks run on the test's main thread with no predicate and stand as
+  they were.
+- [x] **8.5 Helper modules follow the class file (A7b).** When a load *executes* the class file
+  (the loader says so), it first drops from `sys.modules` every module whose `__file__` is a `.py`
+  under `scripts_directory()` — *revised:* **except the class modules themselves**
+  (`_tap_python_*`, which `typing.get_type_hints` and the loader's cache depend on) and anything
+  that is not a source module (a compiled extension cannot be re-imported) — so the fresh
+  execution imports the helpers afresh; the runtime sets `sys.dont_write_bytecode = True` at
+  start-up, so no `.pyc` is written for anything under `python/` and 3.6a's hazard cannot return
+  for helpers (the shipped runtime and installed wheels carry their `.pyc` already, so nothing
+  slows). Two honest limits to state: a helper shared by two class files runs in two versions
+  until each class file has been re-executed (module-level state is not shared between them
+  meanwhile); and only a save that *changes* the class file re-executes it — an unchanged file hits
+  the source cache — so "edit the helper, then save the class file" works only if the class file
+  changed too. Decide in the PR whether `filechanged` sent by a patcher (as against the watcher's)
+  should force re-execution — the watcher would then send a distinct, undocumented message — or
+  whether the folder should be watched. Test: a class importing `helper.py`, the helper edited,
+  the class file changed and loaded → the new helper runs; edited alone → it does not, and the
+  ReadMe says so. CHANGELOG: helpers reload with the class file. *Done:* `forget_helpers()` in the support
+  module, called by `load()` before it executes a changed file, compares
+  `normcase(abspath(__file__))` against the scripts folder `initialize()` hands it (no file-system
+  calls per module), skips `_tap_python_*` and anything not a `.py`; `PyConfig.write_bytecode = 0`.
+  One scenario in `test_loading.cpp`: the helper's new value after a changed save, another class
+  file's module left in `sys.modules` and working, the old value after an unchanged save (the
+  documented limit), no `__pycache__`. *Decided:* the rule stands as documented — "save the class
+  file too" — rather than a forced reload on `filechanged` or a folder watch; revisit if users ask.
+- [x] **8.6 Type hints that map as a reader expects (A8).** In `hint_kind`: unwrap `Annotated`
+  and `Final` to their first argument; *revised:* a `Union` of several members other than `None`
+  maps to **`any`** — the atom passes as it is, as for an unannotated parameter — rather than to
+  one preferred member, since preferring `float` for `str | float` would silently lose strings as
+  preferring `str` loses numbers today (on the Max side an `any` attribute is a symbol attribute,
+  as now); a hint that is a *subclass* of `float`, `int`, `bool` or `str` maps to the base
+  (`np.float64` subclasses `float`), and the numpy scalar families that do not (`np.int64`,
+  `np.bool_`) are recognized by their `__mro__` names without the support module importing numpy.
+  In `return_shape`: see through `Optional[tuple[…]]` to the tuple. Test: `typed_more.py` in
+  `test_types.cpp` with the audit's table. CHANGELOG: the mapping changes (a `float | int` field
+  was a symbol attribute). *Done:* `_unwrap()` for `Annotated`/`Final` (objects and, by regex, strings);
+  unions of several kinds → `'any'` (`_one_kind`); `isinstance(hint, type)` then `issubclass`
+  against bool, int, float, str in that order, then numpy's abstract bases by `__mro__` name and
+  module; `return_shape` sees through `Optional`/`| None` (objects and strings). Fixtures
+  `typed_more.py`, `typed_strings.py` (hints that cannot resolve, read as written) and
+  `typed_numpy.py`; two scenarios in `test_types.cpp`.
+- [x] **8.7 Windows: paths meet Max as UTF-8 (A9).** Every `path.string()` handed to a Max call or
+  a console line (`locatefile_extended` in the constructor, the core's "No file …" and
+  "Failed to load …") goes through `u8string()` (C++20: `reinterpret_cast` its `c_str()`). Verify
+  in the runbook's Windows step with the package under a folder named with a non-ASCII character:
+  the watcher starts, a save reloads. A bug fix with no contract change: the one item here that
+  may follow 1.0. *Done (code):* `detail::utf8(path)` in `runtime.h` (`u8string()`), used for
+  the watcher's file name, the object's three runtime messages, and the core's two file
+  diagnostics; `path_to_unicode()` and `PyConfig` already took wide strings on Windows. The core
+  tests' `.string()` expectations are the same bytes on POSIX. *To verify* in the runbook's Windows
+  step (8.8): the package under a folder named with a non-ASCII character, the watcher starts, a
+  save reloads.
+- [ ] **8.8 The Mac session for this phase.** Runtime tests for 8.2 (`faults`) and 8.3 (`worker`);
+  8.3's stack measurement; the macOS half of 8.7 is not needed (POSIX paths are UTF-8). Then
+  repeat the runbook's step 4 on the release packages, and tag `v0.11.0`.
+
+*The 1.0 gate (revised):* 8.1–8.6 change what the ReadMe promises or what a class can rely on, so
+they land before 1.0, where D5 still allows them; 8.7 may follow it.
+
 ## Phase 7 — plugin front ends (optional, post-1.0)
 
 - [ ] **7.1** A CLAP (MIT, simpler) or VST3 wrapper over the core. Needs its own answer to fixed
@@ -561,6 +764,9 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
 8. Phase 2.4–2.6 — multichannel, worker mode, reload stalls (features; may follow 1.0).
 9. Phase 6 — in-Max validation before tagging 1.0.
 10. Phase 4.7–4.8 — uv for the tooling, then one package for every platform on each tag.
+11. Phase 8 — the audit's findings, in the order above: 8.1 (docs and hardening, first, so the
+    ReadMe stops overclaiming while the fixes land), 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, then the Mac
+    session 8.8 — all before 1.0.
 
 ## External prerequisites
 

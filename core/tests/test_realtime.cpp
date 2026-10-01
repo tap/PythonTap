@@ -119,6 +119,25 @@ SCENARIO("Non-finite output is replaced with 0.0 and reported once per load") {
     CHECK(h.log.lines().empty());
 }
 
+SCENARIO("Samples written before process() raises are still sanitized (plan 8.2)") {
+    ensure_runtime();
+    harness             h{"nan_then_raise"};
+    std::vector<double> in{0.1, 0.1, 0.1, 0.9, 0.1, 0.1}; // NaN, NaN, NaN, then an exception
+    std::vector<double> out(6, 12345.0);
+    REQUIRE(h.p.load());
+
+    h.p.process(in.data(), out.data(), out.size());
+    THEN("the NaNs before the exception are 0.0, as the contract says, and the rest is silence") {
+        CHECK(out == std::vector<double>{0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
+    }
+    THEN("both the exception and the non-finite output are reported") {
+        CHECK_FALSE(h.p.has_process());
+        h.p.flush_reports();
+        CHECK(h.log.contains("process() raised an exception", log_level::error));
+        CHECK(h.log.contains("non-finite sample (NaN or infinity)", log_level::error));
+    }
+}
+
 // 2.2 — the numpy block path
 
 SCENARIO("A process() hinted np.ndarray is called once per vector") {

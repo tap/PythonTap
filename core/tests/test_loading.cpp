@@ -121,6 +121,56 @@ SCENARIO("A reload starts from a fresh module: names deleted from the file are g
     CHECK(all_equal(render(p, 0.0), 0.0)); // importlib.reload would have kept OFFSET = 1.0
 }
 
+// 8.5 — helper modules follow the class file
+
+SCENARIO("A helper module is imported afresh when a class file that changed is executed (plan 8.5)") {
+    ensure_runtime();
+    write_script("helper_values", "VALUE = 1.0\n");
+    write_script("uses_helper", "import helper_values\n"
+                                "class uses_helper:\n"
+                                "    def process(self, x: float) -> float:\n"
+                                "        return helper_values.VALUE\n");
+    processor p{"uses_helper"};
+    REQUIRE(p.load());
+    CHECK(all_equal(render(p, 0.0), 1.0));
+
+    WHEN("the helper is edited and the class file is saved with a change") {
+        write_script("helper_values", "VALUE = 2.0\n");
+        write_script("uses_helper", "import helper_values\n"
+                                    "class uses_helper:\n"
+                                    "    def process(self, x: float) -> float:\n"
+                                    "        return helper_values.VALUE  # changed\n");
+        REQUIRE(p.load());
+        THEN("the class runs the helper's new code") {
+            CHECK(all_equal(render(p, 0.0), 2.0));
+        }
+        THEN("another class file's module is untouched") {
+            processor other{"gain"};
+            REQUIRE(other.load());
+            write_script("helper_values", "VALUE = 3.0\n");
+            write_script("uses_helper", "import helper_values\n"
+                                        "class uses_helper:\n"
+                                        "    def process(self, x: float) -> float:\n"
+                                        "        return helper_values.VALUE  # changed again\n");
+            REQUIRE(p.load());
+            CHECK(all_equal(render(p, 0.0), 3.0));
+            CHECK(run("import sys\nassert '_tap_python_gain' in sys.modules, 'the class module was dropped'"));
+            CHECK(all_equal(render(other, 0.5), 0.5));
+        }
+    }
+    WHEN("the helper is edited but the class file is saved unchanged") {
+        write_script("helper_values", "VALUE = 4.0\n");
+        REQUIRE(p.load());
+        THEN("the class is not re-executed, so the old helper stays: the documented limit") {
+            CHECK(all_equal(render(p, 0.0), 1.0));
+        }
+    }
+    THEN("no bytecode was written for the helper") {
+        CHECK_FALSE(std::filesystem::exists(scripts_dir() / "__pycache__"));
+        CHECK(run("import sys\nassert sys.dont_write_bytecode, 'bytecode writing is on'"));
+    }
+}
+
 // 3.4 — attribute values survive a reload
 
 SCENARIO("Attribute values carry over a reload") {

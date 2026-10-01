@@ -56,9 +56,9 @@ FOLDERS = ["help", "docs", "python"]
 
 # Never shipped from the copied folders.
 # maxtest_*.py: the runtime tests' fixtures, copied into python/ while runtime-tests/run.py runs
-# PRODUCTION-PLAN.md: the development roadmap in docs/, beside the reference page Max reads
+# PRODUCTION-PLAN.md, AUDIT-*.md: the development roadmap and audits in docs/, beside the reference page Max reads
 IGNORED = shutil.ignore_patterns("__pycache__", "*.pyc", ".ipynb_checkpoints", ".DS_Store", "maxtest_*",
-                                 "PRODUCTION-PLAN.md")
+                                 "PRODUCTION-PLAN.md", "AUDIT-*.md")
 
 
 # Each platform's folder for its runtime in a package for every platform (plan 4.8); the external
@@ -248,19 +248,34 @@ def same_content(a: Path, b: Path) -> bool:
 def extract(archive: Path, destination: Path) -> None:
     """Unzip a single-platform release zip as the platform that made it would: entries named with
     backslashes (as some Windows zip writers make them) as folders, and the macOS runtime's symlinks
-    and executable bits as they were — which Python's zipfile leaves out."""
+    and executable bits as they were — which Python's zipfile leaves out.
+
+    Nothing is written outside `destination`: an entry whose path leaves it (through `..`, or
+    through a symlink an earlier entry made) is refused, as is a symlink whose target is absolute
+    or resolves outside it — a crafted zip must fail, not write elsewhere."""
+    root = destination.resolve()
+
+    def inside(path: Path) -> bool:
+        return path.resolve().is_relative_to(root)  # resolve() follows the symlinks made so far
+
     with zipfile.ZipFile(archive) as zip_file:
         for info in zip_file.infolist():
             name = info.filename.replace("\\", "/")
-            if name.startswith("__MACOSX/") or ".." in Path(name).parts:
-                continue  # resource forks; and never a path out of the destination
+            if name.startswith("__MACOSX/"):
+                continue  # resource forks
             target = destination / name
+            if ".." in Path(name).parts or Path(name).is_absolute() or not inside(target):
+                raise AssemblyError(f"{archive.name}: entry {info.filename!r} would land outside {destination}")
             mode = info.external_attr >> 16 if info.create_system == 3 else 0  # Unix
             if name.endswith("/"):
                 target.mkdir(parents=True, exist_ok=True)
             elif stat.S_ISLNK(mode):
+                link = zip_file.read(info).decode("utf-8")
+                if Path(link).is_absolute() or not inside(target.parent / link):
+                    raise AssemblyError(f"{archive.name}: symlink {info.filename!r} -> {link!r} points outside "
+                                        f"{destination}")
                 target.parent.mkdir(parents=True, exist_ok=True)
-                os.symlink(zip_file.read(info).decode("utf-8"), target)
+                os.symlink(link, target)
             else:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(zip_file.read(info))

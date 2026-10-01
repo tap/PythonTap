@@ -13,6 +13,12 @@
 #include <Python.h> // CPython must precede the standard headers
 
 // standard library
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <mutex>
@@ -26,8 +32,10 @@ namespace tap::python {
     /// Severity of a line of output, whether from Python's sys.stdout/sys.stderr or from the core.
     enum class log_level { info, error };
 
-    /// Receives complete lines (without the trailing newline). May be called from any thread,
-    /// including the audio thread, so an implementation must be thread-safe.
+    /// Receives complete lines (without the trailing newline). The console's sink is called on the
+    /// thread that printed when the host gave no is_main_thread predicate (runtime_options), and
+    /// only on the host's main thread when it did (plan 8.4); a processor's or worker's log is
+    /// called on the main thread, except where their constructors say otherwise.
     using log_function = std::function<void(log_level, std::string_view)>;
 
     /// What initialize() needs from the host.
@@ -40,6 +48,15 @@ namespace tap::python {
         /// thread waiting past an I/O buffer's deadline; 0.5 ms does not (plan 2.6: measured by
         /// core/bench's tap_python_reload_bench) and is under one 64-sample vector at 96 kHz.
         double switch_interval = 0.0005;
+        /// Whether the calling thread may post to the console at once (the host's main thread). On
+        /// any other thread a complete line is queued instead — lock-free, allocation-free, dropping
+        /// and counting when the queue is full — and console_ready is called; the host then calls
+        /// flush_console() from its main thread (plan 8.4). Without a predicate every thread posts
+        /// at once (the core battery's default). Both may be replaced by set_console_threading().
+        std::function<bool()> is_main_thread{};
+        /// Called on the printing thread when a line was queued: must be real-time safe (in Max,
+        /// qelem_set); idempotent, as one call may stand for several lines.
+        std::function<void()> console_ready{};
     };
 
     /// The outcome of initialize(): ok, or the reason the interpreter could not start.
@@ -135,18 +152,140 @@ namespace tap::python {
 
         // _maxconsole: a tiny built-in module that sys.stdout/sys.stderr are rebound to, so that
         // print() and tracebacks reach the host's console instead of disappearing. Output is
-        // buffered per stream and forwarded a line at a time.
+        // assembled into lines per thread and per stream (two threads writing half-lines never
+        // mix), and each complete line is posted at once on the host's main thread or queued from
+        // any other (plan 8.4).
+
+        /// A bounded, lock-free, multi-producer single-consumer queue of console lines (Vyukov's
+        /// bounded queue): a producer never blocks or allocates, and a line that finds it full is
+        /// dropped and counted. Lines longer than a slot are cut, with an ellipsis.
+        class console_queue {
+          public:
+            static constexpr std::size_t k_slots      = 256; // a power of two
+            static constexpr std::size_t k_line_bytes = 480;
+
+            console_queue() {
+                for (std::size_t i = 0; i < k_slots; ++i) {
+                    m_slots[i].sequence.store(i, std::memory_order_relaxed);
+                }
+            }
+
+            /// Queue `text` as one line; false, and counted, if the queue is full. Any thread.
+            bool push(const log_level level, const std::string_view text) noexcept {
+                auto  position = m_enqueue.load(std::memory_order_relaxed);
+                slot* cell     = nullptr;
+                for (;;) {
+                    cell                = &m_slots[position & (k_slots - 1)];
+                    const auto sequence = cell->sequence.load(std::memory_order_acquire);
+                    const auto gap      = static_cast<std::ptrdiff_t>(sequence) - static_cast<std::ptrdiff_t>(position);
+                    if (gap == 0) {
+                        if (m_enqueue.compare_exchange_weak(position, position + 1, std::memory_order_relaxed)) {
+                            break;
+                        }
+                    }
+                    else if (gap < 0) {
+                        m_dropped.fetch_add(1, std::memory_order_relaxed);
+                        return false;
+                    }
+                    else {
+                        position = m_enqueue.load(std::memory_order_relaxed);
+                    }
+                }
+                cell->level = level;
+                if (text.size() <= k_line_bytes) {
+                    cell->length = static_cast<std::uint16_t>(text.size());
+                    std::memcpy(cell->text.data(), text.data(), text.size());
+                }
+                else {
+                    constexpr std::string_view k_ellipsis =
+                        "\xE2\x80\xA6"; // U+2026 as UTF-8 bytes, whatever the compiler's charset
+                    const auto kept = k_line_bytes - k_ellipsis.size();
+                    std::memcpy(cell->text.data(), text.data(), kept);
+                    std::memcpy(cell->text.data() + kept, k_ellipsis.data(), k_ellipsis.size());
+                    cell->length = static_cast<std::uint16_t>(k_line_bytes);
+                }
+                cell->sequence.store(position + 1, std::memory_order_release);
+                return true;
+            }
+
+            /// Take the oldest line, if any. One consumer thread.
+            bool pop(log_level& level, std::string& text) {
+                auto  position = m_dequeue.load(std::memory_order_relaxed);
+                slot* cell     = nullptr;
+                for (;;) {
+                    cell                = &m_slots[position & (k_slots - 1)];
+                    const auto sequence = cell->sequence.load(std::memory_order_acquire);
+                    const auto gap = static_cast<std::ptrdiff_t>(sequence) - static_cast<std::ptrdiff_t>(position + 1);
+                    if (gap == 0) {
+                        if (m_dequeue.compare_exchange_weak(position, position + 1, std::memory_order_relaxed)) {
+                            break;
+                        }
+                    }
+                    else if (gap < 0) {
+                        return false;
+                    }
+                    else {
+                        position = m_dequeue.load(std::memory_order_relaxed);
+                    }
+                }
+                level = cell->level;
+                text.assign(cell->text.data(), cell->length);
+                cell->sequence.store(position + k_slots, std::memory_order_release);
+                return true;
+            }
+
+            /// Lines dropped since the last call.
+            std::uint64_t take_dropped() noexcept { return m_dropped.exchange(0, std::memory_order_relaxed); }
+
+          private:
+            struct slot {
+                std::atomic<std::size_t>       sequence{};
+                log_level                      level{};
+                std::uint16_t                  length{};
+                std::array<char, k_line_bytes> text{};
+            };
+            std::array<slot, k_slots>  m_slots;
+            std::atomic<std::size_t>   m_enqueue{0};
+            std::atomic<std::size_t>   m_dequeue{0};
+            std::atomic<std::uint64_t> m_dropped{0};
+        };
 
         struct console_state {
-            std::mutex   mutex;
-            log_function sink;
-            std::string  buffer_out;
-            std::string  buffer_err;
+            std::mutex            mutex; // guards sink, and the main thread's posting
+            log_function          sink;
+            std::function<bool()> is_main_thread; // set before any other thread prints
+            std::function<void()> ready;
+            console_queue         queue;
         };
 
         inline console_state& console() {
             static console_state s_console;
             return s_console;
+        }
+
+        /// The calling thread's partial line for one stream (plan 8.4: per thread, so two threads
+        /// writing pieces never share a buffer).
+        inline std::string& console_buffer(const log_level level) {
+            thread_local std::string s_out;
+            thread_local std::string s_err;
+            return level == log_level::error ? s_err : s_out;
+        }
+
+        /// Post one complete line: at once on the host's main thread (or on any thread, without a
+        /// predicate), queued for flush_console() from any other.
+        inline void console_dispatch(const log_level level, const std::string_view line) {
+            auto& state = console();
+            if (!state.is_main_thread || state.is_main_thread()) {
+                std::lock_guard<std::mutex> lock{state.mutex};
+                if (state.sink) {
+                    state.sink(level, line);
+                }
+                return;
+            }
+            state.queue.push(level, line); // a full queue drops and counts; never blocks
+            if (state.ready) {
+                state.ready();
+            }
         }
 
         inline std::filesystem::path& scripts_directory() {
@@ -179,9 +318,22 @@ namespace tap::python {
         // so that a save that breaks a file shared by many objects, or a patch opening many of them,
         // reports it once, while an object created later still says why it is silent (plan 6.10).
         //
+        // Before a class file is executed, every helper module imported from the scripts folder — a
+        // source module whose __file__ is under _scripts_dir, other than the class modules
+        // themselves — is dropped from sys.modules, so that the fresh execution imports the helpers
+        // afresh (plan 8.5). A helper saved on its own is not watched: it is picked up by the next
+        // save that changes a class file importing it. Compiled extension modules are left alone
+        // (they cannot be imported twice), and no bytecode is written for anything (initialize()
+        // sets write_bytecode off), so the stale-.pyc hazard 3.6a closed for class files cannot
+        // return for helpers.
+        //
         // hint_kind(hint) -> str. The name the host maps a type hint by: 'int', 'float', 'bool', 'str',
-        // 'ndarray', 'tuple', ... ('any' for no hint, 'ClassVar' for a class variable). Optional[X] and
-        // X | None are X; an unresolved hint written as a string is read by name.
+        // 'ndarray', 'tuple', ... ('any' for no hint, 'ClassVar' for a class variable). Optional[X],
+        // X | None, Annotated[X, ...] and Final[X] are X; a union of several kinds is 'any' (the value
+        // passes as the atom carried it: preferring one member would lose the others, plan 8.6); a
+        // subclass of float, int, bool or str is its base, and numpy's scalar types map by their
+        // abstract bases (floating, integer, bool) without numpy being imported here; an unresolved
+        // hint written as a string is read by name, with the same unwrapping.
         //
         // class_hints(cls) -> ([(name, kind)], error). The class's annotated fields, base classes
         // first. If typing.get_type_hints fails (e.g. a name imported only under TYPE_CHECKING), falls
@@ -196,12 +348,39 @@ namespace tap::python {
         // return_count is how many values a return hint declares: 1, or n for tuple[a, b, ...] (-1
         // when a tuple's length is not said: tuple, tuple[float, ...]); return_element_kind is the
         // hint kind of the value, or of a tuple's first element.
+        //
+        // WorkerStopped: raised into a process() that has not returned when its worker is stopped
+        // (plan 8.3; worker.h). A BaseException, like KeyboardInterrupt, so that a class's
+        // `except Exception:` cannot swallow it and keep looping; the processor recognizes it and
+        // keeps the class's audio bound — it is the host's interruption, not the class's fault.
         inline constexpr const char* k_support_source = R"(
-import inspect, re, sys, time, types, typing
+import inspect, os, re, sys, time, types, typing
+
+class WorkerStopped(BaseException):
+    """tap.python~ stopped the worker thread while process() had not returned."""
 
 _cache = {}
 _failed = {}
 _REPORT_WINDOW = 2.0
+_scripts_dir = None  # set by initialize(): the folder the helpers live in
+
+def forget_helpers():
+    """Drop from sys.modules every source module imported from the scripts folder, other than the
+    class modules (_tap_python_*), so the next import runs its current source (plan 8.5)."""
+    if not _scripts_dir:
+        return []
+    root = os.path.normcase(os.path.abspath(_scripts_dir)) + os.sep
+    forgotten = []
+    for name, module in list(sys.modules.items()):
+        if name.startswith('_tap_python_'):
+            continue
+        file = getattr(module, '__file__', None)
+        if not isinstance(file, str) or not file.endswith('.py'):
+            continue
+        if os.path.normcase(os.path.abspath(file)).startswith(root):
+            del sys.modules[name]
+            forgotten.append(name)
+    return forgotten
 
 def load(module_name, path):
     with open(path, 'rb') as f:
@@ -211,6 +390,7 @@ def load(module_name, path):
         return cached[1], False
     try:
         code = compile(source, path, 'exec', dont_inherit=True)
+        forget_helpers()
         module = types.ModuleType(module_name)
         module.__file__ = path
         previous = sys.modules.get(module_name)
@@ -239,6 +419,47 @@ def load(module_name, path):
     return module, True
 
 _OPTIONAL = re.compile(r'(?:typing\.)?Optional\[(.*)\]')
+_WRAPPED = re.compile(r'(?:typing\.)?(?:Annotated|Final)\[(.*)\]')
+_NUMPY_KINDS = {'floating': 'float', 'integer': 'int', 'bool': 'bool', 'bool_': 'bool', 'str_': 'str'}
+
+def _first_argument(text):
+    """The first of a hint's comma-separated arguments, as written: 'float' of 'float, "meta"'."""
+    depth = 0
+    for i, c in enumerate(text):
+        if c in '[(':
+            depth += 1
+        elif c in '])':
+            depth -= 1
+        elif c == ',' and depth == 0:
+            return text[:i].strip()
+    return text.strip()
+
+def _split_union(text):
+    """The members of 'a | b | None' other than None, as written."""
+    parts, depth, start = [], 0, 0
+    for i, c in enumerate(text):
+        if c in '[(':
+            depth += 1
+        elif c in '])':
+            depth -= 1
+        elif c == '|' and depth == 0:
+            parts.append(text[start:i])
+            start = i + 1
+    parts.append(text[start:])
+    return [p.strip() for p in parts if p.strip() not in ('None', '')]
+
+def _unwrap(hint):
+    """Annotated[X, ...] and Final[X] are X, however deep."""
+    while True:
+        origin = typing.get_origin(hint)
+        if origin is typing.Annotated or origin is typing.Final:
+            hint = typing.get_args(hint)[0]
+        else:
+            return hint
+
+def _one_kind(kinds):
+    kinds = set(kinds)
+    return kinds.pop() if len(kinds) == 1 else 'any'
 
 def hint_kind(hint):
     if hint is inspect.Parameter.empty:
@@ -248,18 +469,32 @@ def hint_kind(hint):
         match = _OPTIONAL.fullmatch(text)
         if match:
             return hint_kind(match.group(1))
-        parts = [p.strip() for p in text.split('|') if p.strip() != 'None']
+        match = _WRAPPED.fullmatch(text)
+        if match:
+            return hint_kind(_first_argument(match.group(1)))
+        parts = _split_union(text)
         if len(parts) == 1 and parts[0] != text:
             return hint_kind(parts[0])
+        if len(parts) > 1:
+            return _one_kind(hint_kind(p) for p in parts)
         return text.split('[')[0].split('.')[-1]
+    hint = _unwrap(hint)
     origin = typing.get_origin(hint)
     if origin is typing.ClassVar:
         return 'ClassVar'
     if origin is typing.Union or origin is types.UnionType:
         args = [a for a in typing.get_args(hint) if a is not type(None)]
-        return hint_kind(args[0]) if len(args) == 1 else 'str'
+        return hint_kind(args[0]) if len(args) == 1 else _one_kind(hint_kind(a) for a in args)
     if origin is not None:
         return getattr(origin, '__name__', 'str')
+    if isinstance(hint, type):
+        for base, kind in ((bool, 'bool'), (int, 'int'), (float, 'float'), (str, 'str')):
+            if issubclass(hint, base):
+                return kind
+        for cls in hint.__mro__:  # numpy's scalars, by their abstract bases, without importing numpy
+            kind = _NUMPY_KINDS.get(cls.__name__)
+            if kind is not None and cls.__module__.startswith('numpy'):
+                return kind
     return getattr(hint, '__name__', 'str')
 
 def class_hints(cls):
@@ -313,6 +548,12 @@ def return_shape(hint):
         return 1, 'any'
     if isinstance(hint, str):
         text = hint.strip()
+        match = _OPTIONAL.fullmatch(text)
+        if match:
+            return return_shape(match.group(1))
+        parts = _split_union(text)
+        if len(parts) == 1 and parts[0] != text:
+            return return_shape(parts[0])
         for prefix in ('typing.Tuple[', 'Tuple[', 'tuple['):
             if text.startswith(prefix) and text.endswith(']'):
                 parts = [p.strip() for p in text[len(prefix):-1].split(',')]
@@ -322,6 +563,11 @@ def return_shape(hint):
         if text in ('tuple', 'Tuple', 'typing.Tuple'):
             return -1, 'any'
         return 1, hint_kind(hint)
+    hint = _unwrap(hint)
+    if typing.get_origin(hint) is typing.Union or typing.get_origin(hint) is types.UnionType:
+        args = [a for a in typing.get_args(hint) if a is not type(None)]
+        if len(args) == 1:
+            return return_shape(args[0])  # Optional[tuple[...]] is the tuple
     if hint is tuple or typing.get_origin(hint) is tuple:
         args = typing.get_args(hint)
         if not args or Ellipsis in args or args == ((),):
@@ -353,28 +599,21 @@ def return_shape(hint):
         }
 
         inline void console_post(const std::string_view text, const log_level level) {
-            auto&                       state = console();
-            std::lock_guard<std::mutex> lock{state.mutex};
-            auto&                       buffer = (level == log_level::error) ? state.buffer_err : state.buffer_out;
+            auto& buffer = console_buffer(level);
             buffer.append(text);
             size_t pos;
             while ((pos = buffer.find('\n')) != std::string::npos) {
-                if (state.sink) {
-                    state.sink(level, std::string_view{buffer}.substr(0, pos));
-                }
+                console_dispatch(level, std::string_view{buffer}.substr(0, pos));
                 buffer.erase(0, pos + 1);
             }
         }
 
-        /// Forward a pending partial line (text without its newline yet) as a line of its own.
+        /// Forward this thread's pending partial line (text without its newline yet) as a line of
+        /// its own.
         inline void console_flush(const log_level level) {
-            auto&                       state = console();
-            std::lock_guard<std::mutex> lock{state.mutex};
-            auto&                       buffer = (level == log_level::error) ? state.buffer_err : state.buffer_out;
+            auto& buffer = console_buffer(level);
             if (!buffer.empty()) {
-                if (state.sink) {
-                    state.sink(level, buffer);
-                }
+                console_dispatch(level, buffer);
                 buffer.clear();
             }
         }
@@ -416,6 +655,14 @@ def return_shape(hint):
 
         inline PyObject* console_module_init() {
             return PyModule_Create(&s_console_moduledef);
+        }
+
+        /// A path as UTF-8 text, for a console line or a host API that takes UTF-8 (Max's do). On
+        /// Windows std::filesystem::path::string() gives the ANSI code page instead, which broke the
+        /// file watcher for a package under a folder with a non-ASCII name (plan 8.7, audit A9).
+        inline std::string utf8(const std::filesystem::path& path) {
+            const auto text = path.u8string();
+            return std::string{text.begin(), text.end()};
         }
 
         inline PyObject* path_to_unicode(const std::filesystem::path& path) {
@@ -467,6 +714,38 @@ def return_shape(hint):
         state.sink = std::move(sink);
     }
 
+    /// Replace the console's main-thread predicate and the callback for queued lines (see
+    /// runtime_options). Main thread, before any other thread prints: the printing threads read
+    /// both without a lock.
+    inline void set_console_threading(std::function<bool()> is_main_thread, std::function<void()> console_ready) {
+        auto& state          = detail::console();
+        state.is_main_thread = std::move(is_main_thread);
+        state.ready          = std::move(console_ready);
+    }
+
+    /// Post the lines other threads queued since the last flush, in order, to the sink — and, if
+    /// the queue overflowed meanwhile, one more saying how many were dropped. The host's main
+    /// thread, when console_ready has been called (idempotent: cheap when there is nothing).
+    inline void flush_console() {
+        auto&       state = detail::console();
+        log_level   level{};
+        std::string text;
+        while (state.queue.pop(level, text)) {
+            std::lock_guard<std::mutex> lock{state.mutex};
+            if (state.sink) {
+                state.sink(level, text);
+            }
+        }
+        if (const auto dropped = state.queue.take_dropped(); dropped != 0) {
+            std::lock_guard<std::mutex> lock{state.mutex};
+            if (state.sink) {
+                state.sink(log_level::error, "\xE2\x80\xA6 and " + std::to_string(dropped)
+                                                 + " console line(s) were dropped: printed faster than the main "
+                                                   "thread could post them");
+            }
+        }
+    }
+
     /// Load `<scripts_dir>/<name>.py` by path as the module `_tap_python_<name>` (see
     /// detail::k_support_source). Returns a new reference to the module, or nullptr with a Python
     /// error set; `executed` tells whether the source was (re)executed or the cached module reused.
@@ -514,6 +793,7 @@ def return_shape(hint):
 
         std::call_once(s_once, [&] {
             set_console(options.console);
+            set_console_threading(options.is_main_thread, options.console_ready);
             detail::scripts_directory() = options.scripts_dir;
             detail::init_thread()       = std::this_thread::get_id();
             PyImport_AppendInittab("_maxconsole", detail::console_module_init);
@@ -533,6 +813,7 @@ def return_shape(hint):
             PyConfig_InitIsolatedConfig(&config); // ignore environment variables and user site-packages
             config.install_signal_handlers = 0;   // we are a plugin: never steal signal handling from the host
             config.parse_argv              = 0;
+            config.write_bytecode          = 0; // no .pyc for the user's helpers (plan 8.5); the runtime has its own
 
 #ifdef _WIN32
             PyStatus status = PyConfig_SetString(&config, &config.home, options.home.wstring().c_str());
@@ -562,6 +843,12 @@ def return_shape(hint):
             }
 
             detail::create_support();
+            if (detail::support_globals()) { // where the helpers live, for forget_helpers()
+                if (PyObject* dir = detail::path_to_unicode(options.scripts_dir)) {
+                    PyDict_SetItemString(detail::support_globals(), "_scripts_dir", dir);
+                    Py_DECREF(dir);
+                }
+            }
 
             // 2.6: hand the GIL to a waiting thread — the audio thread, above all — sooner
             if (PyObject* set_interval = PySys_GetObject("setswitchinterval")) { // borrowed

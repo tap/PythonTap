@@ -4,6 +4,80 @@ Changes to the Python class contract and to the object's behavior, newest first.
 breaking changes to the contract are allowed where they buy correctness (D5 in
 `docs/PRODUCTION-PLAN.md`); each is recorded here.
 
+## Unreleased
+
+### Changed — type hints map as a reader expects
+
+- **`Annotated[X, …]` and `Final[X]` fields are `X`; a union of several kinds passes the atom as
+  it is; numpy scalar types map to the kinds they hold; `Optional[tuple[…]]` names its outputs.**
+  A `float | int` field used to become a symbol attribute that stored `""` for any number; now it
+  takes the value as the atom carried it (an `int`, `float` or `str`), as an unannotated parameter
+  does. `Annotated` and `Final` used to be symbols; `np.float64` and friends too; and
+  `-> tuple[float, float] | None` bound one output and then reported every sample as not a number.
+  The same holds for hints read as written. (Plan 8.6, audit A8.)
+
+### Changed — helper modules follow the class file
+
+- **A helper module in `python/` is imported afresh when a class file that changed is saved.**
+  Before each execution of a class file the loader drops from `sys.modules` every source module
+  imported from the folder (not the class modules themselves, nor compiled extensions), so the
+  fresh class imports the helper's current source; and the interpreter writes no bytecode, so the
+  stale-`.pyc` hazard fixed for class files in 0.9.0 cannot return for helpers. A save of the
+  helper alone is still not watched. Helpers used to load once per Max session. (Plan 8.5, audit
+  A7.)
+
+### Changed — nothing of yours posts from the audio thread
+
+- **What `process()` prints, or warns, is posted from Max's main thread.** A `print()` or a numpy
+  `RuntimeWarning` in `process()` used to post to the console from the audio thread (or the worker
+  thread), taking a lock on the way. Now a complete line printed on any thread but Max's main one
+  is queued, lock-free and without allocating, and posted from the main thread a moment later;
+  lines are assembled per thread, so two threads printing pieces of a line no longer mix them. A
+  flood is coalesced: 256 lines queue, the rest are dropped and counted in one line. Lines printed
+  on the main thread post at once, as before. (Plan 8.4, audit A5.)
+
+### Changed — worker mode never waits forever
+
+- **A `process()` that does not return when the worker stops is interrupted, then abandoned.**
+  Stopping the worker — DSP off, a chain rebuild, the object deleted — waits up to 100 ms, then
+  raises `WorkerStopped` (a `BaseException`) into the thread: a pure-Python loop ends, that vector
+  is silence, the console says so once per load, and the class's audio stays bound. If it still has
+  not returned 250 ms later it is blocked in a call Python cannot interrupt, and the thread is
+  abandoned: audio continues on a new worker, the console says the thread keeps costing a core
+  until Max quits, and the object keeps its Python state alive for it. Before, stopping the worker
+  waited for `process()` to return, so such a class froze Max when DSP toggled or the patch closed.
+  The worker thread also runs on a 16 MiB stack, what CPython gives its own threads on macOS, where
+  the default 512 KiB was too little for Python that recurses through a C boundary. (Plan 8.3,
+  audit A1 and A6.)
+
+### Changed — more names are reserved
+
+- **A method or field named like a message Max sends with C arguments is not exposed**, with the
+  console saying so: `dspstate`, `fileusage`, `patchlineupdate`, `inputchanged`,
+  `multichanneloutputs`, `edclose`, `okclose`, `oksize`, `paint`, `dictionary`, `getplaystate`,
+  `key`, the mouse and focus messages, `mousewheel`, and the `*_setup` names — every message min
+  treats as `A_CANT`, plus Max's own — and, as a guard, any name the Max object already answers
+  itself. A Python method of such a name used to be registered as an ordinary message, which Max
+  then called with a `long` or a pointer: the crash that every save once caused through
+  `filechanged`, in its general form. (Plan 8.2, audit A3.)
+
+### Fixed
+
+- **Windows: a package under a folder with a non-ASCII name is watched.** The path handed to Max's
+  file watcher, and the paths in the console's "No file" and "Failed to load" lines, were converted
+  with the ANSI code page on Windows, where Max expects UTF-8; for a user whose `Documents` folder
+  has an accented character the watcher failed and hot reload was silently off. Every path shown
+  to Max or the console is UTF-8 now. (Plan 8.7, audit A9.)
+- **Samples computed before `process()` raised are sanitized.** A `process()` that returned NaN for
+  part of a vector and then raised let those NaNs through; the contract says non-finite output is
+  replaced with 0.0, and now it is on that path too. (Plan 8.2, audit A2.)
+- **The documents say what the guards cover.** No Python exception, `sys.exit()` included, takes
+  Max down; what never reaches Python's exception machinery — `os._exit()`, a crash in a C
+  extension, code that never returns — is not caught, and the ReadMe now says so, as it says that
+  helper modules load once per Max session and that a second embedded CPython in the same Max is
+  unsupported. `assemble-package.py --merge` refuses a zip whose entries or symlinks would land
+  outside the package. (Plan 8.1.)
+
 ## 0.10.0 — 2026-10-01
 
 ### Added — one package for every platform

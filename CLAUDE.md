@@ -145,7 +145,11 @@ attaches all the zips + SHA256s to a release — a pre-release for 0.x, a draft 
 
 - **Honest limits are pinned, not hidden.** A known bug or limit gets a test that states it (named
   for the promise, with the plan item that will change it); fixes land against a test that reproduces
-  the bug first. The core battery is where that happens.
+  the bug first. The core battery is where that happens. Limits no test can pin are written in the
+  ReadMe's errors paragraph and stay there: the guards catch every Python *exception*, not a
+  process exit below Python (`os._exit()`), a crash in a C extension, or code that never returns;
+  helper modules load once per session; a second embedded CPython in the same Max is unsupported.
+  Never let a document claim more than that.
 - **Style:** `STYLE.md`, `.clang-format`, `.clang-tidy`, `.pre-commit-config.yaml`, `scripts/tidy.sh`
   and the SessionStart hook are canonical TapHouse copies — never hand-edit them (CI drift-checks).
   New files use the STYLE.md §3 SPDX banner. clang-tidy compiles with a clang front end; treat it as a
