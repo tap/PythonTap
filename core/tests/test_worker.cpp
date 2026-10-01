@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <string>
 #include <thread>
 #include <utility>
@@ -122,6 +123,17 @@ SCENARIO("In worker mode the output is the direct output, the latency later (pla
         }
     }
     CHECK(h.notified.load() == 0);
+}
+
+SCENARIO("A latency in milliseconds is whole vectors, rounded up, at least one (plan 2.5)") {
+    CHECK(worker::latency_vectors(10.0, 96000.0, 64) == 15);
+    CHECK(worker::latency_vectors(10.0, 44100.0, 64) == 7);  // 6.9
+    CHECK(worker::latency_vectors(10.0, 48000.0, 512) == 1); // 0.94
+    CHECK(worker::latency_vectors(4.0, 48000.0, 64) == 3);   // exactly 3, despite rounding error
+    CHECK(worker::latency_vectors(0.0, 48000.0, 64) == 1);
+    CHECK(worker::latency_vectors(-5.0, 48000.0, 64) == 1);
+    CHECK(worker::latency_vectors(10.0, 0.0, 64) == 1);
+    CHECK(worker::latency_vectors(std::numeric_limits<double>::quiet_NaN(), 48000.0, 64) == 1);
 }
 
 SCENARIO("The host's channels are matched to the worker's ring (plan 2.5)") {

@@ -6,6 +6,19 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ## Unreleased
 
+### Added — worker mode
+
+- **`@mode worker` runs `process()` on a thread of its own**, `@latency` milliseconds behind the
+  audio (30 by default, rounded up to whole signal vectors; it must exceed Max's I/O vector), so
+  that nothing else Python does — a
+  reload, a message, another instance — can hold up the audio thread, which only copies vectors to
+  and from it. Vectors the worker is late for are output as silence, reported once per load, and
+  the delay stays the same; the read-only `@latencysamples` gives it in samples. The worker thread
+  has the real-time scheduling of an audio thread. `@mode direct`, the default, is as before.
+  (Plan 2.5.) *Changed with it:* the object's own attributes `mode`, `latency` and
+  `latencysamples` are reserved — a class's field or method of one of those names is not exposed,
+  and the console says so (before, fields were never checked against reserved names).
+
 ### Added — several inputs and outputs
 
 - **process() can take several signal inputs and return several outputs.** Its parameters are the
