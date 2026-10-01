@@ -61,6 +61,29 @@ namespace tap::python {
 #endif
     }
 
+    /// This build's folder name for its runtime in a package that carries every platform's (plan
+    /// 4.8): support/macos-arm64, support/macos-x86_64 or support/windows-x64. Each slice of the
+    /// universal macOS external names its own architecture.
+    inline const char* runtime_platform() {
+#if defined(WIN_VERSION)
+        return "windows-x64";
+#elif defined(__aarch64__) || defined(__arm64__)
+        return "macos-arm64";
+#else
+        return "macos-x86_64";
+#endif
+    }
+
+    /// The runtime this external uses: <package>/support/<platform> in a package that carries every
+    /// platform's runtime (plan 4.8), or <package>/support in one made for a single platform — a
+    /// per-platform release, or a checkout with scripts/install-runtime.* run in it.
+    inline std::filesystem::path runtime_home(const std::filesystem::path& package) {
+        const auto      support = package / "support";
+        const auto      own     = support / runtime_platform();
+        std::error_code ec;
+        return std::filesystem::is_directory(own, ec) ? own : support;
+    }
+
     /// Whether the CPython library the external was built against can be used, asked before the
     /// first Python call. The external links it weakly on macOS and delay-loads it on Windows (see
     /// this object's CMakeLists.txt), so that it loads without a runtime and can say what is

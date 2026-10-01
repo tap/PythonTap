@@ -1,10 +1,14 @@
 name: release
 
 # Builds the release packages (plan 4.5, D3): the Max package with the runtime bundled, per
-# platform, zipped with SHA256 checksums, and attached to a *draft* GitHub release for a tag
-# vMAJOR.MINOR.PATCH — publishing it stays a deliberate act. Run by hand (workflow_dispatch), it
-# builds and uploads the packages as workflow artifacts without making a release.
+# platform and for every platform at once (plan 4.8), zipped with SHA256 checksums, and attached
+# to a GitHub release for a tag vMAJOR.MINOR.PATCH: published as a pre-release for 0.x versions,
+# and a *draft* from 1.0 on — publishing those stays a deliberate act until the packages are
+# signed. Run by hand (workflow_dispatch), it builds and uploads the packages as workflow artifacts
+# without making a release.
 #
+#   PythonTap-<version>.zip               every platform: both externals, and each runtime in
+#                                         support/<platform>, where the external looks first
 #   PythonTap-<version>-macos-arm64.zip   universal external + the Apple Silicon runtime
 #   PythonTap-<version>-macos-x86_64.zip  universal external + the Intel runtime (and for Max
 #                                         running under Rosetta)
@@ -194,12 +198,50 @@ jobs:
           path: dist/*.zip*
           if-no-files-found: error
 
-  release:
-    if: github.ref_type == 'tag'
+  # One package for every platform (plan 4.8), merged from the three just built: each runtime in
+  # support/<platform>, each platform's licenses in licenses/<platform>, the rest once.
+  all-platforms:
+    name: all platforms
     needs: [macos, windows]
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: package-*
+          path: platforms
+          merge-multiple: true
+
+      - name: Merge
+        run: |
+          set -euo pipefail
+          args=()
+          version=""
+          for zip in platforms/PythonTap-*.zip; do
+            [[ "$(basename "$zip")" =~ ^PythonTap-([0-9][0-9.]*)-(macos-arm64|macos-x86_64|windows-x64)\.zip$ ]] \
+              || { echo "::error::unexpected package $zip"; exit 1; }
+            version="${BASH_REMATCH[1]}"
+            args+=("${BASH_REMATCH[2]}=$zip")
+          done
+          [[ ${#args[@]} -eq 3 ]] || { echo "::error::expected 3 platform packages, found ${#args[@]}"; exit 1; }
+          python3 scripts/assemble-package.py --merge "${args[@]}" --output dist
+          name="PythonTap-$version.zip"
+          (cd dist && zip -qry "$name" PythonTap && sha256sum "$name" > "$name.sha256")
+          ls -la dist
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: package-all
+          path: dist/*.zip*
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [macos, windows, all-platforms]
+    runs-on: ubuntu-latest
     permissions:
-      contents: write # create the draft release; nothing else in this workflow can write
+      contents: write # create the release; nothing else in this workflow can write
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -215,10 +257,13 @@ jobs:
           sha256sum *.zip > SHA256SUMS
           for f in *.zip.sha256; do sha256sum -c "$f"; done
 
-      - name: Create the draft release
+      # 0.x: published at once, as a pre-release (plan 4.8); from 1.0, a draft to publish by hand
+      - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ "$version" == 0.* ]]; then kind=(--prerelease); else kind=(--draft); fi
           gh release create "$GITHUB_REF_NAME" dist/*.zip dist/*.zip.sha256 dist/SHA256SUMS \
-            --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "PythonTap ${GITHUB_REF_NAME#v}" \
-            --notes "See CHANGELOG.md for what changed. Unzip into Documents/Max 9/Packages; the Python runtime is included. On a Mac, choose arm64 for Apple Silicon or x86_64 for Intel (or for Max running under Rosetta)."
+            --repo "$GITHUB_REPOSITORY" "${kind[@]}" --verify-tag --title "PythonTap $version" \
+            --notes "See CHANGELOG.md for what changed. Unzip into Documents/Max 9/Packages; the Python runtime is included. PythonTap-$version.zip works on every platform; the others are smaller, one platform each — on a Mac, arm64 for Apple Silicon or x86_64 for Intel (or for Max running under Rosetta)."

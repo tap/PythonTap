@@ -172,7 +172,7 @@ class python : public object<python>, public vector_operator<> {
         // (see this object's CMakeLists.txt)
         const std::filesystem::path home{TAP_PYTHON_HOME};
 #else
-        const auto home = package / "support";
+        const auto home = runtime::runtime_home(package); // support/, or support/<platform> (plan 4.8)
 #endif
 
         if (!std::filesystem::exists(home)) {

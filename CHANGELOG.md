@@ -6,6 +6,14 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ## Unreleased
 
+### Added — one package for every platform
+
+- **Each release also has `PythonTap-<version>.zip`, for every platform at once**: the macOS and
+  Windows externals, and each platform's runtime in `support/<platform>/`. The external uses
+  `support/<platform>/` when its package has one — on macOS, each architecture its own — and
+  `support/` otherwise, so the per-platform packages and a checkout work as before. 0.x releases
+  are published as pre-releases rather than drafts. (Plan 4.8.)
+
 ### Added — worker mode
 
 - **`@mode worker` runs `process()` on a thread of its own**, `@latency` milliseconds behind the
