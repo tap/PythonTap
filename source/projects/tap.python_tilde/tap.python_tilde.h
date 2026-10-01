@@ -176,7 +176,7 @@ class python : public object<python>, public vector_operator<> {
 #endif
 
         if (!std::filesystem::exists(home)) {
-            cerr << "No Python runtime found at " << home.string()
+            cerr << "No Python runtime found at " << runtime::detail::utf8(home)
                  << " — run scripts/install-runtime from the package root to install it." << endl;
             return;
         }
@@ -194,7 +194,7 @@ class python : public object<python>, public vector_operator<> {
         options.console_ready  = console_ready;
         const auto status      = runtime::initialize(options);
         if (!status.ok) {
-            cerr << "failed to start Python from '" << home.string() << "': " << status.error
+            cerr << "failed to start Python from '" << runtime::detail::utf8(home) << "': " << status.error
                  << " (run scripts/install-runtime to install the runtime)" << endl;
             return;
         }
@@ -233,8 +233,9 @@ class python : public object<python>, public vector_operator<> {
             return;
         }
         const auto watched_file = m_scripts_dir / (m_python_source + ".py");
+        const auto watched_utf8 = runtime::detail::utf8(watched_file); // Max's paths are UTF-8 (8.7)
         char       filename[c74::max::MAX_PATH_CHARS]{};
-        std::strncpy(filename, watched_file.string().c_str(), c74::max::MAX_PATH_CHARS - 1);
+        std::strncpy(filename, watched_utf8.c_str(), c74::max::MAX_PATH_CHARS - 1);
         short              path_id{};
         c74::max::t_fourcc filetype{};
         if (c74::max::locatefile_extended(filename, &path_id, &filetype, nullptr, 0) == 0) {
@@ -242,7 +243,7 @@ class python : public object<python>, public vector_operator<> {
             m_file_watch = std::make_unique<runtime::file_watch>(maxobj(), path_id, filename);
         }
         else {
-            cerr << "Unable to watch " << watched_file.string() << " for changes." << endl;
+            cerr << "Unable to watch " << watched_utf8 << " for changes." << endl;
         }
     }
 

@@ -656,6 +656,14 @@ def return_shape(hint):
             return PyModule_Create(&s_console_moduledef);
         }
 
+        /// A path as UTF-8 text, for a console line or a host API that takes UTF-8 (Max's do). On
+        /// Windows std::filesystem::path::string() gives the ANSI code page instead, which broke the
+        /// file watcher for a package under a folder with a non-ASCII name (plan 8.7, audit A9).
+        inline std::string utf8(const std::filesystem::path& path) {
+            const auto text = path.u8string();
+            return std::string{text.begin(), text.end()};
+        }
+
         inline PyObject* path_to_unicode(const std::filesystem::path& path) {
 #ifdef _WIN32
             return PyUnicode_FromWideChar(path.wstring().c_str(), -1);

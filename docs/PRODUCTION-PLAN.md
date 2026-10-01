@@ -728,12 +728,17 @@ down rather than discovered again. *This plan was itself audited before being ad
   module; `return_shape` sees through `Optional`/`| None` (objects and strings). Fixtures
   `typed_more.py`, `typed_strings.py` (hints that cannot resolve, read as written) and
   `typed_numpy.py`; two scenarios in `test_types.cpp`.
-- [ ] **8.7 Windows: paths meet Max as UTF-8 (A9).** Every `path.string()` handed to a Max call or
+- [x] **8.7 Windows: paths meet Max as UTF-8 (A9).** Every `path.string()` handed to a Max call or
   a console line (`locatefile_extended` in the constructor, the core's "No file …" and
   "Failed to load …") goes through `u8string()` (C++20: `reinterpret_cast` its `c_str()`). Verify
   in the runbook's Windows step with the package under a folder named with a non-ASCII character:
   the watcher starts, a save reloads. A bug fix with no contract change: the one item here that
-  may follow 1.0.
+  may follow 1.0. *Done (code):* `detail::utf8(path)` in `runtime.h` (`u8string()`), used for
+  the watcher's file name, the object's three runtime messages, and the core's two file
+  diagnostics; `path_to_unicode()` and `PyConfig` already took wide strings on Windows. The core
+  tests' `.string()` expectations are the same bytes on POSIX. *To verify* in the runbook's Windows
+  step (8.8): the package under a folder named with a non-ASCII character, the watcher starts, a
+  save reloads.
 - [ ] **8.8 The Mac session for this phase.** Runtime tests for 8.2 (`faults`) and 8.3 (`worker`);
   8.3's stack measurement; the macOS half of 8.7 is not needed (POSIX paths are UTF-8). Then
   repeat the runbook's step 4 on the release packages, and tag `v0.11.0`.

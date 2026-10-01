@@ -175,7 +175,7 @@ namespace tap::python {
             }
             std::error_code ec;
             if (!std::filesystem::is_regular_file(path, ec)) {
-                log(log_level::error, "No file " + path.string());
+                log(log_level::error, "No file " + detail::utf8(path));
                 release_binding();
                 return false;
             }
@@ -188,7 +188,7 @@ namespace tap::python {
             if (!module) {
                 if (!take_reported_load_failure()) { // 6.10: once per failing save, not per object
                     report_exception();
-                    log(log_level::error, "Failed to load " + path.string());
+                    log(log_level::error, "Failed to load " + detail::utf8(path));
                 }
                 release_binding();
                 return false;

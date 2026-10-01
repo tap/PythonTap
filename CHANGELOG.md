@@ -63,6 +63,11 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ### Fixed
 
+- **Windows: a package under a folder with a non-ASCII name is watched.** The path handed to Max's
+  file watcher, and the paths in the console's "No file" and "Failed to load" lines, were converted
+  with the ANSI code page on Windows, where Max expects UTF-8; for a user whose `Documents` folder
+  has an accented character the watcher failed and hot reload was silently off. Every path shown
+  to Max or the console is UTF-8 now. (Plan 8.7, audit A9.)
 - **Samples computed before `process()` raised are sanitized.** A `process()` that returned NaN for
   part of a vector and then raised let those NaNs through; the contract says non-finite output is
   replaced with 0.0, and now it is on that path too. (Plan 8.2, audit A2.)

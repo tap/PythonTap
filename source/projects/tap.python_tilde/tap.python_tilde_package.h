@@ -90,13 +90,14 @@ namespace tap::python {
     /// missing — instead of Max refusing to load it at all. On failure `error` says what to do.
     inline bool runtime_library_loadable([[maybe_unused]] const std::filesystem::path& home,
                                          [[maybe_unused]] std::string&                 error) {
+        using detail::utf8; // paths in console text as UTF-8 (plan 8.7)
 #if defined(WIN_VERSION) && defined(TAP_PYTHON_DLL)
         // Load it from the package by full path (its own dependencies from its folder); the
         // delay-load helper then finds the loaded module by name on the first Python call. A runtime
         // installed while Max is running is picked up by the next object created.
         const auto dll = home / TAP_PYTHON_DLL;
         if (LoadLibraryExW(dll.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH) == nullptr) {
-            error = "could not load " + dll.string() + " (Windows error " + std::to_string(GetLastError())
+            error = "could not load " + utf8(dll) + " (Windows error " + std::to_string(GetLastError())
                     + ") — run scripts/install-runtime.ps1 from the package root to install the runtime";
             return false;
         }
@@ -106,7 +107,7 @@ namespace tap::python {
         // through a volatile, so the compiler cannot assume a function's address is non-null.)
         auto* volatile entry = &Py_InitializeFromConfig;
         if (entry == nullptr) {
-            error = "the Python runtime was not found in " + (home / "lib").string()
+            error = "the Python runtime was not found in " + utf8(home / "lib")
                     + " when Max loaded tap.python~ — run scripts/install-runtime.sh from the package root, "
                       "then restart Max";
             return false;
