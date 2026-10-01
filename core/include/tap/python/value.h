@@ -63,7 +63,7 @@ namespace tap::python {
             }
             if (const auto* d = std::get_if<double>(&v)) {
                 constexpr auto k_lowest  = static_cast<double>(std::numeric_limits<std::int64_t>::lowest());
-                constexpr auto k_highest = static_cast<double>(std::numeric_limits<std::int64_t>::max());
+                constexpr auto k_highest = static_cast<double>((std::numeric_limits<std::int64_t>::max)());
                 if (!std::isfinite(*d)) {
                     return std::int64_t{0};
                 }
@@ -71,7 +71,7 @@ namespace tap::python {
                     return std::numeric_limits<std::int64_t>::lowest();
                 }
                 if (*d >= k_highest) {
-                    return std::numeric_limits<std::int64_t>::max();
+                    return (std::numeric_limits<std::int64_t>::max)();
                 }
                 return static_cast<std::int64_t>(*d);
             }

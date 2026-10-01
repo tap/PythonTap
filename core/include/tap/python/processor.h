@@ -890,7 +890,7 @@ namespace tap::python {
         /// `function` and `instance`.
         void process_samples(PyObject* function, PyObject* instance, const channels& io,
                              const std::size_t frame_count) {
-            const std::size_t written = std::min(io.outputs, io.host_outputs);
+            const std::size_t written = (std::min)(io.outputs, io.host_outputs);
             PyObject*         call_args[1 + k_max_channels]{instance};
             for (std::size_t i = 0; i < frame_count; ++i) {
                 // every input of this sample is read before any output of it is written (in place)
@@ -960,7 +960,7 @@ namespace tap::python {
         /// a tuple of as many arrays as it declares outputs. Caller holds the GIL and references to
         /// `function` and `instance`.
         void process_block(PyObject* function, PyObject* instance, const channels& io, const std::size_t frame_count) {
-            const std::size_t written = std::min(io.outputs, io.host_outputs);
+            const std::size_t written = (std::min)(io.outputs, io.host_outputs);
             // allocates only when the vector size differs from the one prepare() announced
             if (!ensure_block_buffers(frame_count, io.inputs)) {
                 silence(io.out, 0, written, 0, frame_count);
@@ -1086,7 +1086,7 @@ namespace tap::python {
             if (m_block_size == size && m_block_inputs.size() >= count) {
                 return true;
             }
-            const auto wanted = std::max(count, m_block_size == size ? m_block_inputs.size() : std::size_t{0});
+            const auto wanted = (std::max)(count, m_block_size == size ? m_block_inputs.size() : std::size_t{0});
 
             std::vector<block_buffer> arrays;
             arrays.reserve(wanted);

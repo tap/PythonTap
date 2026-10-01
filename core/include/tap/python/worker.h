@@ -58,7 +58,12 @@
 #include <vector>
 
 #ifdef _WIN32
+#include <cerrno>
+
 #include <process.h>
+#ifndef NOMINMAX
+#define NOMINMAX // windows.h's min/max macros would break std::min/std::max in every header after this
+#endif
 #include <windows.h>
 #else
 #include <pthread.h>
@@ -242,7 +247,7 @@ namespace tap::python {
                     ? static_cast<std::size_t>(std::ceil(k_backlog_seconds * sample_rate / static_cast<double>(frames)))
                     : std::size_t{0};
             auto next =
-                std::make_shared<ring>(inputs, outputs, frames, vectors, vectors + std::max(k_min_backlog, backlog));
+                std::make_shared<ring>(inputs, outputs, frames, vectors, vectors + (std::max)(k_min_backlog, backlog));
             ring*      r = next.get();
             const auto period =
                 std::isfinite(sample_rate) && sample_rate > 0.0 ? static_cast<double>(frames) / sample_rate : 0.0;
@@ -337,7 +342,7 @@ namespace tap::python {
                 silence(outputs, output_count, 0, frame_count);
                 return;
             }
-            const auto frames = std::min(frame_count, r->vector_size);
+            const auto frames = (std::min)(frame_count, r->vector_size);
 
             // this vector's inputs, unless the worker is a whole ring behind
             const auto k = r->written.load(std::memory_order_relaxed); // written only here
@@ -369,7 +374,7 @@ namespace tap::python {
                 const auto index = m % r->slot_count;
                 auto&      slot  = r->slots[index];
                 if (r->done.load(std::memory_order_acquire) > m && slot.out_seq.load(std::memory_order_acquire) == m) {
-                    given = std::min(slot.frames.load(std::memory_order_relaxed), frame_count);
+                    given = (std::min)(slot.frames.load(std::memory_order_relaxed), frame_count);
                     for (std::size_t c = 0; c < output_count; ++c) {
                         if (c < r->outputs) {
                             std::copy_n(r->output(index, c), given, outputs[c]);
@@ -405,7 +410,8 @@ namespace tap::python {
         }
 
       private:
-        static constexpr std::uint64_t k_none            = std::numeric_limits<std::uint64_t>::max();
+        // (parenthesized, as every min/max here: a windows.h included before this header defines them as macros)
+        static constexpr std::uint64_t k_none            = (std::numeric_limits<std::uint64_t>::max)();
         static constexpr double        k_backlog_seconds = 0.25;
         static constexpr std::size_t   k_min_backlog     = 16;
 

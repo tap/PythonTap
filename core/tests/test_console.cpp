@@ -126,5 +126,5 @@ SCENARIO("A line longer than a queue slot is cut with an ellipsis, not lost (pla
     const auto lines = console().lines();
     REQUIRE(lines.size() == 1);
     CHECK(lines[0].text.size() == detail::console_queue::k_line_bytes);
-    CHECK(lines[0].text.ends_with("\u2026"));
+    CHECK(lines[0].text.ends_with("\xE2\x80\xA6")); // U+2026 in UTF-8
 }

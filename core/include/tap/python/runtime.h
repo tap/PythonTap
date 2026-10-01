@@ -197,8 +197,9 @@ namespace tap::python {
                     std::memcpy(cell->text.data(), text.data(), text.size());
                 }
                 else {
-                    constexpr std::string_view k_ellipsis = "\u2026";
-                    const auto                 kept       = k_line_bytes - k_ellipsis.size();
+                    constexpr std::string_view k_ellipsis =
+                        "\xE2\x80\xA6"; // U+2026 as UTF-8 bytes, whatever the compiler's charset
+                    const auto kept = k_line_bytes - k_ellipsis.size();
                     std::memcpy(cell->text.data(), text.data(), kept);
                     std::memcpy(cell->text.data() + kept, k_ellipsis.data(), k_ellipsis.size());
                     cell->length = static_cast<std::uint16_t>(k_line_bytes);
@@ -738,7 +739,7 @@ def return_shape(hint):
         if (const auto dropped = state.queue.take_dropped(); dropped != 0) {
             std::lock_guard<std::mutex> lock{state.mutex};
             if (state.sink) {
-                state.sink(log_level::error, "\u2026 and " + std::to_string(dropped)
+                state.sink(log_level::error, "\xE2\x80\xA6 and " + std::to_string(dropped)
                                                  + " console line(s) were dropped: printed faster than the main "
                                                    "thread could post them");
             }
