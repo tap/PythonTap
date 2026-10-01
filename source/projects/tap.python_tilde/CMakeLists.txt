@@ -102,6 +102,18 @@ else ()
 endif ()
 
 if (APPLE)
+    # In a package that carries every platform's runtime (plan 4.8), each architecture's is in
+    # support/macos-<arch>: give each slice of the universal binary an rpath to its own, ahead of
+    # support/lib, where a single-platform package or a checkout has it. (SHELL: keeps CMake from
+    # merging the repeated -Xarch_ flags.)
+    set(_rpath_archs "${CMAKE_OSX_ARCHITECTURES}")
+    if (NOT _rpath_archs)
+        set(_rpath_archs "${CMAKE_HOST_SYSTEM_PROCESSOR}")
+    endif ()
+    foreach (_arch IN LISTS _rpath_archs)
+        target_link_options(${PROJECT_NAME} PRIVATE
+                            "SHELL:-Xarch_${_arch} -Wl,-rpath,@loader_path/../../../../support/macos-${_arch}/lib")
+    endforeach ()
     target_link_options(${PROJECT_NAME} PRIVATE "-Wl,-rpath,@loader_path/../../../../support/lib")
     # Only that relative rpath: without this CMake also embeds the absolute path of
     # the build machine's support/lib, which would leak into every shipped binary.

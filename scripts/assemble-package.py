@@ -17,6 +17,14 @@ It fails, rather than producing an incomplete package, if anything required is m
 
 collects just the licenses (how CI exercises it on Linux, against any installed runtime).
 
+    python3 scripts/assemble-package.py --merge macos-arm64=PythonTap-1.0.0-macos-arm64.zip \
+        macos-x86_64=PythonTap-1.0.0-macos-x86_64.zip windows-x64=PythonTap-1.0.0-windows-x64.zip \
+        --output dist
+
+makes one package for every platform (plan 4.8) from single-platform ones: every platform's
+externals, each runtime in support/<platform> (where the external looks first), each platform's
+licenses in licenses/<platform>, and the rest — which must be the same in all of them — once.
+
 Standard library only, so the runtime's own interpreter can run it.
 """
 
@@ -24,8 +32,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
+import stat
 import sys
+import tempfile
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,6 +59,14 @@ FOLDERS = ["help", "docs", "python"]
 # PRODUCTION-PLAN.md: the development roadmap in docs/, beside the reference page Max reads
 IGNORED = shutil.ignore_patterns("__pycache__", "*.pyc", ".ipynb_checkpoints", ".DS_Store", "maxtest_*",
                                  "PRODUCTION-PLAN.md")
+
+
+# Each platform's folder for its runtime in a package for every platform (plan 4.8); the external
+# names its own (runtime_platform() in tap.python_tilde_package.h).
+RUNTIME_PLATFORMS = ["macos-arm64", "macos-x86_64", "windows-x64"]
+
+# What differs between single-platform packages, and is merged rather than copied once.
+PER_PLATFORM = {"externals", "support", "licenses"}
 
 
 class AssemblyError(Exception):
@@ -214,6 +234,106 @@ def assemble(platform: str, output: Path, expected_version: str | None) -> Path:
     return package
 
 
+def same_content(a: Path, b: Path) -> bool:
+    """Whether two files or folders hold the same files with the same contents, line endings aside
+    (a Windows checkout has CRLF where a Mac's has LF)."""
+    if a.is_file() or b.is_file():
+        return a.is_file() and b.is_file() and \
+            a.read_bytes().replace(b"\r\n", b"\n") == b.read_bytes().replace(b"\r\n", b"\n")
+    files_a = sorted(p.relative_to(a) for p in a.rglob("*") if p.is_file())
+    files_b = sorted(p.relative_to(b) for p in b.rglob("*") if p.is_file())
+    return files_a == files_b and all(same_content(a / f, b / f) for f in files_a)
+
+
+def extract(archive: Path, destination: Path) -> None:
+    """Unzip a single-platform release zip as the platform that made it would: entries named with
+    backslashes (as some Windows zip writers make them) as folders, and the macOS runtime's symlinks
+    and executable bits as they were — which Python's zipfile leaves out."""
+    with zipfile.ZipFile(archive) as zip_file:
+        for info in zip_file.infolist():
+            name = info.filename.replace("\\", "/")
+            if name.startswith("__MACOSX/") or ".." in Path(name).parts:
+                continue  # resource forks; and never a path out of the destination
+            target = destination / name
+            mode = info.external_attr >> 16 if info.create_system == 3 else 0  # Unix
+            if name.endswith("/"):
+                target.mkdir(parents=True, exist_ok=True)
+            elif stat.S_ISLNK(mode):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                os.symlink(zip_file.read(info).decode("utf-8"), target)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(zip_file.read(info))
+                if mode & 0o777:
+                    target.chmod(mode & 0o777)
+
+
+def merge(packages: dict[str, Path], output: Path) -> Path:
+    """One package for every platform (plan 4.8) from single-platform ones, each a PythonTap/ folder
+    or a release zip holding one, keyed by its runtime platform."""
+    with tempfile.TemporaryDirectory() as unpacked:
+        folders: dict[str, Path] = {}
+        for platform, source in packages.items():
+            if source.suffix == ".zip":
+                extract(source, Path(unpacked) / platform)
+                source = Path(unpacked) / platform / PACKAGE_NAME
+            folders[platform] = source
+        return merge_folders(folders, output)
+
+
+def merge_folders(packages: dict[str, Path], output: Path) -> Path:
+    unknown = sorted(set(packages) - set(RUNTIME_PLATFORMS))
+    if unknown:
+        raise AssemblyError(f"unknown platform(s) {', '.join(unknown)}; expected {', '.join(RUNTIME_PLATFORMS)}")
+    for platform, source in packages.items():
+        if not (source / "support").is_dir() or not (source / "externals").is_dir():
+            raise AssemblyError(f"{source} is not a single-platform package (no support/ or externals/)")
+    # the shared content comes from a Mac package where there is one: its text has LF line endings
+    order = sorted(packages, key=lambda platform: not platform.startswith("macos"))
+    base = packages[order[0]]
+
+    package = output / PACKAGE_NAME
+    if package.exists():
+        shutil.rmtree(package)
+    package.mkdir(parents=True)
+
+    for entry in sorted(base.iterdir()):
+        if entry.name in PER_PLATFORM:
+            continue
+        for platform in order[1:]:
+            if not same_content(entry, packages[platform] / entry.name):
+                raise AssemblyError(f"{entry.name} differs between the {order[0]} and {platform} packages")
+        if entry.is_dir():
+            shutil.copytree(entry, package / entry.name, symlinks=True)
+        else:
+            shutil.copy2(entry, package / entry.name)
+
+    (package / "externals").mkdir()
+    for platform in order:
+        for external in sorted((packages[platform] / "externals").iterdir()):
+            destination = package / "externals" / external.name
+            if destination.exists():
+                continue  # the same universal macOS external, built on each Mac's runner: one is enough
+            if external.is_dir():
+                shutil.copytree(external, destination, symlinks=True)
+            else:
+                shutil.copy2(external, destination)
+
+    lines = ["# Third-party licenses", "",
+             "This package carries a runtime for each platform, so each platform's licenses are",
+             "collected separately — what ships for it:", ""]
+    for platform in RUNTIME_PLATFORMS:
+        if platform not in packages:
+            continue
+        shutil.copytree(packages[platform] / "support", package / "support" / platform, symlinks=True)
+        shutil.copytree(packages[platform] / "licenses", package / "licenses" / platform)
+        lines.append(f"- [{platform}]({platform}/README.md)")
+    (package / "licenses" / "README.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    print(f"merged {package} ({', '.join(p for p in RUNTIME_PLATFORMS if p in packages)})")
+    return package
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--platform", choices=sorted(EXTERNALS), help="the platform whose externals to package")
@@ -222,10 +342,21 @@ def main() -> int:
     parser.add_argument("--licenses-only", action="store_true", help="only collect the licenses")
     parser.add_argument("--support", type=Path, default=PACKAGE_ROOT / "support",
                         help="the runtime to collect licenses from (with --licenses-only)")
+    parser.add_argument("--merge", nargs="+", metavar="PLATFORM=PATH",
+                        help="merge single-platform packages (PythonTap/ folders or release zips) into one "
+                             f"for every platform (platforms: {', '.join(RUNTIME_PLATFORMS)})")
     args = parser.parse_args()
 
     try:
-        if args.licenses_only:
+        if args.merge:
+            packages: dict[str, Path] = {}
+            for item in args.merge:
+                platform, _, path = item.partition("=")
+                if not path:
+                    parser.error(f"--merge takes PLATFORM=PATH, not {item!r}")
+                packages[platform] = Path(path)
+            merge(packages, args.output)
+        elif args.licenses_only:
             licenses = collect_licenses(args.support, args.output / "licenses")
             print(f"collected {len(licenses)} license files into {args.output / 'licenses'}")
         else:
