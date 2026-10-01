@@ -549,7 +549,8 @@ passed; a third ran the soak (6.2) and measured performance (6.3). To continue:
 discipline held, the edges of the contract did not. This phase closes them, one PR each as below,
 highest severity first, each fix landing against a test that fails before it (the house rule), and
 each contract change recorded in `CHANGELOG.md` (D5). The honest limits that remain are written
-down rather than discovered again.
+down rather than discovered again. *This plan was itself audited before being adopted
+(2026-10-01); what that changed is marked "revised".*
 
 - [ ] **8.1 Say what is true (A4, A7a, A12 — docs and small hardening, no behavior change).**
   ReadMe lines 17 and 101, and bar 1 above: *no Python exception*, `sys.exit()` included, takes
@@ -575,27 +576,46 @@ down rather than discovered again.
   `MIN_WRAPPER_ADDMETHOD` table: `dspstate`, `fileusage`, `patchlineupdate`, `edclose`, `okclose`,
   `oksize`, `paint`, the mouse, focus and key messages, `mousewheel`, `getplaystate`, the `*_setup`
   names, `setup`, `dictionary`) plus Max's mc-era `inputchanged` and `multichanneloutputs`; and a
-  general guard — a name the Max class already answers (`class_method(c, gensym(name))` non-null)
-  is reserved too, so min's own registrations never need listing by hand. Tests: the core's
-  reserved-name scenario stays (it takes any list); a glue test instantiates
-  `[tap.python~ maxtest_mock_reserved]` whose class defines `dspstate`, `fileusage`,
-  `patchlineupdate` and `inputchanged`, and checks none is registered and each is announced once;
-  the `faults` runtime test gains a step that toggles DSP and connects a cord with such a class
-  loaded (the crash 6.1 found, in its general form). CHANGELOG: the new reserved names.
+  general guard — a name the Max class already answers (`class_method(object_class(maxobj()),
+  gensym(name))` non-null) is reserved too, so min's own registrations never need listing by hand.
+  *Revised:* the guard must not take away what is promised: a glue test asserts `int`, `float`,
+  `symbol`, `bang`, `list` and an ordinary name stay exposed with the guard on (min registers
+  `int`/`float`/`bang` only for classes that declare them; this one does not — the test is the
+  proof, since Max's own class setup is not ours to read). Tests: the core's reserved-name scenario
+  stays (it takes any list); a glue test instantiates `[tap.python~ maxtest_mock_reserved]` whose
+  class defines `dspstate`, `fileusage`, `patchlineupdate` and `inputchanged`, and checks none is
+  registered and each is announced once; the `faults` runtime test gains a step that toggles DSP
+  and connects a cord with such a class loaded (the crash 6.1 found, in its general form).
+  `fileusage` is sent only by Build Collective/Application, so it is a runbook step by hand, not a
+  runtime test. CHANGELOG: the new reserved names.
 - [ ] **8.3 Worker mode never hangs Max (A1, A6 — `worker.h`).**
-  *A1:* `stop()` bounds its join. The worker records its thread identifier
-  (`PyThread_get_thread_ident()`) as it starts; if the thread has not finished within 100 ms of
-  `stopping` being set, `stop()` injects `PyThreadState_SetAsyncExc(ident, WorkerStopped)` — a
-  `RuntimeError` subclass defined in the support module, looked up by name (no CPython data
-  symbols) — which raises at the next bytecode of a pure-Python loop; `process()` returns raising,
-  the processor records it and unbinds as for any exception, and the join completes. If it still
-  has not finished after another 250 ms (a blocking C call, `time.sleep`), `stop()` detaches the
-  thread, releases the ring and the processor to it (leaked on purpose: the thread may yet wake and
-  use them), and logs once that the class stalled and was abandoned; the object then runs a fresh
-  processor. Tests (`test_worker.cpp`): `never_returns.py` (`while True: pass`) — `stop()` returns
-  within 1 s, `flush_reports()` prints `WorkerStopped`, a `load()` re-arms audio; `time.sleep(5)`
-  in `process()` — `stop()` returns within 1 s having detached, and the test process still exits
-  cleanly. Runtime test (`worker`): the same two classes in Max, DSP toggled, patch closed.
+  *A1:* `stop()` bounds its join. The worker records its OS thread identifier
+  (`PyThread_get_thread_ident()`, no GIL needed) as it starts; if the thread has not finished
+  within 100 ms of `stopping` being set, `stop()` takes the GIL briefly (the hung thread yields it
+  every 0.5 ms) and injects `PyThreadState_SetAsyncExc(ident, WorkerStopped)`, which raises at the
+  next bytecode of a pure-Python loop. *Revised, three ways.* (i) `WorkerStopped` derives from
+  **`BaseException`**, like `KeyboardInterrupt`, so a class's `except Exception:` does not swallow
+  it and keep looping; it is defined in the support module and looked up by name (no CPython data
+  symbols). (ii) The processor **recognizes `WorkerStopped` and does not unbind**: it is our
+  interruption, not the class's fault — a `process()` that was merely slow (a 200 ms numpy call
+  when the chain recompiled) loses that vector and carries on; it is reported once as "process()
+  was interrupted while the worker stopped". (iii) If the thread still has not finished after
+  another 250 ms (a blocking C call; `time.sleep`, which delivers the exception only when it
+  returns), `stop()` **detaches** it. The ring is then shared (`shared_ptr`, the thread holding one
+  reference), so a thread that wakes later frees it; the processor it runs stays owned by the
+  object — attributes, messages and a fixing save keep working, and the next `dspsetup` starts a
+  fresh worker — and the object's destructor hands the processor to a process-wide leak list
+  while a detached thread is still alive (an atomic count the thread decrements as it exits),
+  rather than destroy what the thread may still touch. The console says once that the class
+  stalled and was abandoned, and that it keeps costing a core until Max restarts (it still holds
+  the GIL in 0.5 ms slices). `stop()` thus holds Max's main thread for at most ~350 ms. Direct
+  mode is unchanged (8.1 documents it). Tests (`test_worker.cpp`): `never_returns.py`
+  (`while True: pass`, inside `try: … except Exception: pass`) — `stop()` returns within 1 s,
+  `flush_reports()` prints the interruption, audio is still bound and the next vector runs;
+  `time.sleep(5)` in `process()` — `stop()` returns within 1 s having detached, a new `start()`
+  works, and the test process exits cleanly (leaks are off under ASan already); a `process()` that
+  takes 50 ms — `stop()` waits for it and injects nothing. Runtime test (`worker`): the same
+  classes in Max, DSP toggled, patch closed.
   *A6:* the worker thread is created with an explicit stack of 16 MiB (CPython's own
   `THREAD_STACK_SIZE` on macOS) through `pthread_attr_setstacksize` / `_beginthreadex`, in a small
   `native_thread` helper that keeps `std::thread`'s join/detach shape. Measure first on the Mac:
@@ -604,43 +624,62 @@ down rather than discovered again.
   against a `threading.Thread`; then pin that fixture running to `sys.getrecursionlimit()` on the
   worker. CHANGELOG: a stalled class in worker mode is interrupted or abandoned, never waited for.
 - [ ] **8.4 Nothing of the user's prints on the audio thread either (A5).** `runtime_options`
-  gains `is_main_thread` (the host's predicate: `systhread_ismainthread` in Max) and
-  `console_ready` (real-time safe; the object sets its `m_reports` qelem). `console_post()` on a
-  thread the host does not call main appends the line to a bounded lock-free queue (MPSC, or one
-  SPSC ring per thread state through the keeper) and calls `console_ready`; it never blocks on the
-  console mutex (`try_lock`; a full queue or a contended lock drops the line and counts it). The
-  host's `flush_console()`, from its main thread, drains the queue to the sink in order and
-  appends "… and N lines dropped" when it had to. Lines from the main thread keep posting at once,
-  so the core battery's synchronous `console()` checks stand; the audio-thread tests call
-  `flush_console()`. In Max, `print()` in `process()` and numpy's `RuntimeWarning`s then reach the
-  console from the main thread; what remains on the audio thread is Python's own formatting of a
-  warning (`linecache` reads the file once), which the ReadMe names. Tests: `print()` from an audio
-  thread reaches the sink only on the nominated thread; a flood of 10,000 lines drops with a count
-  and never blocks the producer (timed). CHANGELOG: console output from `process()` is deferred and
-  coalesced.
+  gains `is_main_thread` (the host's predicate — `systhread_ismainthread` in Max; the default,
+  with no host predicate, is "always", which keeps the core battery's synchronous `console()`
+  checks as they are) and `console_ready` (real-time safe; the object sets its `m_reports` qelem).
+  *Revised:* lines are assembled per thread in a `thread_local` buffer — today the two per-stream
+  buffers are shared under one mutex, so partial writes from two threads already interleave — and
+  only a *complete line* is dispatched: on a main thread straight to the sink; on any other thread
+  into a bounded lock-free MPSC queue (dropping and counting when full, never blocking), with
+  `console_ready` called. The host's `flush_console()`, from its main thread, drains the queue to
+  the sink in order and appends "… and N lines dropped" when it had to. The audio-thread tests call
+  `flush_console()`. Consequences to document: deferred lines arrive after main-thread lines
+  printed later (ordering across threads is not kept); the scheduler thread's prints are deferred
+  too (harmless); what still happens on the audio thread is Python's own formatting of a warning
+  (`linecache` reads the file once). Tests: `print()` from an audio thread reaches the sink only on
+  the nominated thread; two threads printing half-lines never produce a mixed line; a flood of
+  10,000 lines drops with a count and never blocks the producer (timed). CHANGELOG: console output
+  from `process()` is deferred and coalesced.
 - [ ] **8.5 Helper modules follow the class file (A7b).** When a load *executes* the class file
-  (the loader says so), it first drops from `sys.modules` every module whose `__file__` is under
-  `scripts_directory()`, so the fresh execution imports the helpers afresh; the runtime sets
-  `sys.dont_write_bytecode = True` at start-up, so no `.pyc` is written for anything under
-  `python/` and 3.6a's hazard cannot return for helpers. A helper saved on its own is still not
-  watched — decide then whether the watcher should cover the folder (Max's file watcher watches a
-  file; a folder watch is a `t_filewatcher` per file or a poll) or whether "save the class file to
-  pick up a helper" is the rule the ReadMe states. Test: a class importing `helper.py`, the helper
-  edited, the class file saved → the new helper runs; edited alone → it does not, and the ReadMe
-  says so.
+  (the loader says so), it first drops from `sys.modules` every module whose `__file__` is a `.py`
+  under `scripts_directory()` — *revised:* **except the class modules themselves**
+  (`_tap_python_*`, which `typing.get_type_hints` and the loader's cache depend on) and anything
+  that is not a source module (a compiled extension cannot be re-imported) — so the fresh
+  execution imports the helpers afresh; the runtime sets `sys.dont_write_bytecode = True` at
+  start-up, so no `.pyc` is written for anything under `python/` and 3.6a's hazard cannot return
+  for helpers (the shipped runtime and installed wheels carry their `.pyc` already, so nothing
+  slows). Two honest limits to state: a helper shared by two class files runs in two versions
+  until each class file has been re-executed (module-level state is not shared between them
+  meanwhile); and only a save that *changes* the class file re-executes it — an unchanged file hits
+  the source cache — so "edit the helper, then save the class file" works only if the class file
+  changed too. Decide in the PR whether `filechanged` sent by a patcher (as against the watcher's)
+  should force re-execution — the watcher would then send a distinct, undocumented message — or
+  whether the folder should be watched. Test: a class importing `helper.py`, the helper edited,
+  the class file changed and loaded → the new helper runs; edited alone → it does not, and the
+  ReadMe says so. CHANGELOG: helpers reload with the class file.
 - [ ] **8.6 Type hints that map as a reader expects (A8).** In `hint_kind`: unwrap `Annotated`
-  and `Final` to their first argument; for a `Union` of several members other than `None`, prefer
-  `float`, then `int`, then `bool`, else symbol; map numpy scalar types (`np.floating` → `float`,
-  `np.integer` → `int`, `np.bool_` → `bool`). In `return_shape`: see through `Optional[tuple[…]]`
-  to the tuple. Test: `typed_more.py` in `test_types.cpp` with the audit's table. CHANGELOG: the
-  mapping changes (a `float | int` field was a symbol attribute).
+  and `Final` to their first argument; *revised:* a `Union` of several members other than `None`
+  maps to **`any`** — the atom passes as it is, as for an unannotated parameter — rather than to
+  one preferred member, since preferring `float` for `str | float` would silently lose strings as
+  preferring `str` loses numbers today (on the Max side an `any` attribute is a symbol attribute,
+  as now); a hint that is a *subclass* of `float`, `int`, `bool` or `str` maps to the base
+  (`np.float64` subclasses `float`), and the numpy scalar families that do not (`np.int64`,
+  `np.bool_`) are recognized by their `__mro__` names without the support module importing numpy.
+  In `return_shape`: see through `Optional[tuple[…]]` to the tuple. Test: `typed_more.py` in
+  `test_types.cpp` with the audit's table. CHANGELOG: the mapping changes (a `float | int` field
+  was a symbol attribute).
 - [ ] **8.7 Windows: paths meet Max as UTF-8 (A9).** Every `path.string()` handed to a Max call or
   a console line (`locatefile_extended` in the constructor, the core's "No file …" and
-  "Failed to load …") goes through `u8string()`. Verify in the runbook's Windows step with the
-  package under a folder named with a non-ASCII character: the watcher starts, a save reloads.
+  "Failed to load …") goes through `u8string()` (C++20: `reinterpret_cast` its `c_str()`). Verify
+  in the runbook's Windows step with the package under a folder named with a non-ASCII character:
+  the watcher starts, a save reloads. A bug fix with no contract change: the one item here that
+  may follow 1.0.
 - [ ] **8.8 The Mac session for this phase.** Runtime tests for 8.2 (`faults`) and 8.3 (`worker`);
   8.3's stack measurement; the macOS half of 8.7 is not needed (POSIX paths are UTF-8). Then
-  repeat the runbook's step 4 on the release packages, and tag.
+  repeat the runbook's step 4 on the release packages, and tag `v0.11.0`.
+
+*The 1.0 gate (revised):* 8.1–8.6 change what the ReadMe promises or what a class can rely on, so
+they land before 1.0, where D5 still allows them; 8.7 may follow it.
 
 ## Phase 7 — plugin front ends (optional, post-1.0)
 
