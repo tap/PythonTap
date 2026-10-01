@@ -6,6 +6,20 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ## Unreleased
 
+### Changed — worker mode never waits forever
+
+- **A `process()` that does not return when the worker stops is interrupted, then abandoned.**
+  Stopping the worker — DSP off, a chain rebuild, the object deleted — waits up to 100 ms, then
+  raises `WorkerStopped` (a `BaseException`) into the thread: a pure-Python loop ends, that vector
+  is silence, the console says so once per load, and the class's audio stays bound. If it still has
+  not returned 250 ms later it is blocked in a call Python cannot interrupt, and the thread is
+  abandoned: audio continues on a new worker, the console says the thread keeps costing a core
+  until Max quits, and the object keeps its Python state alive for it. Before, stopping the worker
+  waited for `process()` to return, so such a class froze Max when DSP toggled or the patch closed.
+  The worker thread also runs on a 16 MiB stack, what CPython gives its own threads on macOS, where
+  the default 512 KiB was too little for Python that recurses through a C boundary. (Plan 8.3,
+  audit A1 and A6.)
+
 ### Changed — more names are reserved
 
 - **A method or field named like a message Max sends with C arguments is not exposed**, with the

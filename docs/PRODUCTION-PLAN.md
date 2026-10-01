@@ -612,7 +612,7 @@ down rather than discovered again. *This plan was itself audited before being ad
   (8.8), as is Build Collective for `fileusage`. In the mock kernel `object_getmethod()` always
   answers null, so the guard's own effect is seen only in Max: the existing
   `attributes-and-messages` runtime test is what would show it over-reserving.
-- [ ] **8.3 Worker mode never hangs Max (A1, A6 — `worker.h`).**
+- [x] **8.3 Worker mode never hangs Max (A1, A6 — `worker.h`).**
   *A1:* `stop()` bounds its join. The worker records its OS thread identifier
   (`PyThread_get_thread_ident()`, no GIL needed) as it starts; if the thread has not finished
   within 100 ms of `stopping` being set, `stop()` takes the GIL briefly (the hung thread yields it
@@ -646,7 +646,20 @@ down rather than discovered again. *This plan was itself audited before being ad
   the secondary-thread default from a fresh `pthread_attr_t`, and the depth at which a fixture
   recursing through a C boundary (`sorted(key=…)` calling itself) crashes on a `std::thread`
   against a `threading.Thread`; then pin that fixture running to `sys.getrecursionlimit()` on the
-  worker. CHANGELOG: a stalled class in worker mode is interrupted or abandoned, never waited for.
+  worker. CHANGELOG: a stalled class in worker mode is interrupted or abandoned, never waited for. *Done:* as designed — `WorkerStopped(BaseException)` in the support module;
+  `processor::take_interruption()` recognizes it, records "interrupted" (once per load) and keeps
+  the binding; `worker::stop()` polls `finished` for 100 ms, injects with
+  `PyThreadState_SetAsyncExc` under a brief `gil_lock`, polls 250 ms more, then detaches; the ring
+  is a `shared_ptr` the thread also holds, `has_abandoned_thread()` prunes the finished ones, and the
+  Max object's destructor leaks the worker and processor while one lives. `detail::native_thread`
+  (pthread / `_beginthreadex`, 16 MiB) replaces `std::thread`. Four core scenarios: `hangs.py`
+  (`while self.forever` inside `except Exception`) — stop() in 0.5 s, interruption reported, audio
+  bound, the class runs on; `sleeps.py` (`time.sleep(3)`) — stop() in under a second, abandoned
+  and said so, a new worker runs the class (the harness is leaked, as a host must); `stalls.py` at
+  50 ms — waited for, nothing reported; `deep_recursion.py` (sorted's key recursing to the limit) —
+  passes on the worker. Release, ASan/UBSan and TSan clean. The `worker` runtime test gains `hang 1`
+  → `mode direct` → `hang 0`, expecting one "interrupted" line and two errors in all — step timing
+  to confirm in the Mac session (8.8), with the stack measurement the item asks for.
 - [ ] **8.4 Nothing of the user's prints on the audio thread either (A5).** `runtime_options`
   gains `is_main_thread` (the host's predicate — `systhread_ismainthread` in Max; the default,
   with no host predicate, is "always", which keeps the core battery's synchronous `console()`

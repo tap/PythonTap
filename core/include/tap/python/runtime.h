@@ -196,8 +196,16 @@ namespace tap::python {
         // return_count is how many values a return hint declares: 1, or n for tuple[a, b, ...] (-1
         // when a tuple's length is not said: tuple, tuple[float, ...]); return_element_kind is the
         // hint kind of the value, or of a tuple's first element.
+        //
+        // WorkerStopped: raised into a process() that has not returned when its worker is stopped
+        // (plan 8.3; worker.h). A BaseException, like KeyboardInterrupt, so that a class's
+        // `except Exception:` cannot swallow it and keep looping; the processor recognizes it and
+        // keeps the class's audio bound — it is the host's interruption, not the class's fault.
         inline constexpr const char* k_support_source = R"(
 import inspect, re, sys, time, types, typing
+
+class WorkerStopped(BaseException):
+    """tap.python~ stopped the worker thread while process() had not returned."""
 
 _cache = {}
 _failed = {}

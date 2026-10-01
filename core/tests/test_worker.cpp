@@ -295,6 +295,99 @@ SCENARIO("A worker can be restarted with new settings, and stopped (plan 2.5)") 
     }
 }
 
+// 8.3 — a worker never hangs the host
+
+SCENARIO("A process() that never returns is interrupted when the worker stops, and audio stays bound (plan 8.3)") {
+    ensure_runtime();
+    harness h{"hangs"};
+    REQUIRE(h.p.load());
+    h.w.start(1, 1, k_frames, 2, 48000.0);
+    h.push({1.0}, 1); // the worker enters process() and never leaves it
+    std::this_thread::sleep_for(std::chrono::milliseconds{50});
+    REQUIRE(h.w.processed() == 0);
+
+    const auto before = std::chrono::steady_clock::now();
+    h.w.stop();
+    const auto took = std::chrono::steady_clock::now() - before;
+    THEN("stop() returns within a second, having joined the thread") {
+        CHECK(took < std::chrono::seconds{1});
+        CHECK_FALSE(h.w.running());
+        CHECK_FALSE(h.w.has_abandoned_thread());
+    }
+    THEN("the interruption is reported, from the main thread, and the class's audio is still bound") {
+        CHECK(h.notified.load() == 1);
+        h.p.flush_reports();
+        CHECK(h.log.contains("interrupted", log_level::error));
+        CHECK_FALSE(h.log.contains("audio disabled", log_level::error));
+        CHECK(h.p.has_process());
+    }
+    THEN("the same class runs again once it returns") {
+        REQUIRE(h.p.set_attribute("forever", std::int64_t{0}));
+        h.w.start(1, 1, k_frames, 1, 48000.0);
+        h.push({2.0}, 1);
+        h.wait_for(1);
+        CHECK(all_equal(h.push({3.0}, 1)[0], 2.0));
+    }
+}
+
+SCENARIO("A process() blocked in a call Python cannot interrupt is abandoned, not waited for (plan 8.3)") {
+    ensure_runtime();
+    // the abandoned thread may wake and touch the processor and worker later: leaked, as a host must
+    auto* h = new harness{"sleeps"}; // NOLINT(cppcoreguidelines-owning-memory)
+    REQUIRE(h->p.load());
+    h->w.start(1, 1, k_frames, 2, 48000.0);
+    h->push({1.0}, 1); // the worker sleeps 3 s inside process()
+    std::this_thread::sleep_for(std::chrono::milliseconds{50});
+
+    const auto before = std::chrono::steady_clock::now();
+    h->w.stop();
+    const auto took = std::chrono::steady_clock::now() - before;
+    THEN("stop() returns within a second, having abandoned the thread, and says so") {
+        CHECK(took < std::chrono::seconds{1});
+        CHECK_FALSE(h->w.running());
+        CHECK(h->w.has_abandoned_thread());
+        CHECK(h->log.contains("abandoned", log_level::error));
+    }
+    THEN("a new worker runs the same class once it no longer blocks") {
+        REQUIRE(h->p.set_attribute("seconds", 0.0));
+        h->w.start(1, 1, k_frames, 1, 48000.0);
+        h->push({2.0}, 1);
+        h->wait_for(1);
+        CHECK(all_equal(h->push({3.0}, 1)[0], 2.0));
+        h->w.stop();
+    }
+    if (!h->w.has_abandoned_thread()) {
+        delete h; // NOLINT(cppcoreguidelines-owning-memory)
+    }
+}
+
+SCENARIO("A vector that is merely slow is waited for, not interrupted (plan 8.3)") {
+    ensure_runtime();
+    harness h{"stalls"};
+    REQUIRE(h.p.load());
+    h.w.start(1, 1, k_frames, 2, 48000.0);
+    REQUIRE(h.p.set_attribute("stall", value{0.05}));
+    h.push({1.0}, 1);
+    std::this_thread::sleep_for(std::chrono::milliseconds{10}); // into the 50 ms stall
+    h.w.stop();
+    h.p.flush_reports();
+    CHECK(h.notified.load() == 0);
+    CHECK_FALSE(h.log.contains("interrupted", log_level::error));
+    CHECK_FALSE(h.w.has_abandoned_thread());
+}
+
+SCENARIO("The worker's stack takes recursion through a C boundary to the recursion limit (plan 8.3)") {
+    ensure_runtime();
+    harness h{"deep_recursion"};
+    REQUIRE(h.p.load());
+    h.w.start(1, 1, 4, 1, 48000.0);
+    h.push({0.5}, 1, 4);
+    h.wait_for(1);
+    const auto outputs = h.push({0.5}, 1, 4);
+    CHECK(all_equal(outputs[0], 0.5)); // every sample made it down and back
+    CHECK(h.notified.load() == 0);     // no exception: the recursion did not hit a limit
+}
+
 SCENARIO("A reload while the worker runs takes effect without a pause on the audio thread (plan 2.5)") {
     ensure_runtime();
     write_script("worker_reload",

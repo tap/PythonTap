@@ -613,7 +613,9 @@ def worker(latency_ms: float | None = None, quiet_windows: int = 0) -> Test:
              "Worker mode (plan 2.5), at its default latency: with @mode worker the output is the input "
              "delayed by @latencysamples, sample for sample what delay~ gives, and stays so through a "
              "reload; a class that stalls for 0.2 s is late, reported once, and comes back at the same "
-             "latency; @mode direct takes the delay away.")
+             "latency; @mode direct takes the delay away. A process() that never returns is interrupted "
+             "when the worker stops for the switch to direct (plan 8.3), reported once, and the class "
+             "runs on once it returns.")
     ramp = t.obj("phasor~ 50", signal=True)  # a new value every sample, so any delay shows
     py = t.python("maxtest_stall @mode worker" + (f" @latency {latency_ms}" if latency_ms is not None else ""))
     delay = t.obj("delay~ 48000 0", inlets=2, signal=True)
@@ -627,6 +629,7 @@ def worker(latency_ms: float | None = None, quiet_windows: int = 0) -> Test:
     t.patcher.connect(delay_by_latency, 1, py)
     t.patcher.connect(delay_by_latency, 0, delay, 1)
     t.count_errors("late.for")
+    t.count_errors("interrupted")
 
     watch = t.no_change("delayed-by-latencysamples", late, 0.0)
     after = t.no_change("same-latency-after-stall", late, 0.0)
@@ -644,10 +647,16 @@ def worker(latency_ms: float | None = None, quiet_windows: int = 0) -> Test:
     t.step(after[1], wait=1000)
     t.step(t.send("filechanged", py))
     t.step(t.sample_equals("delayed-after-reload", late, 0.0), wait=500)
-    t.step(t.send("mode direct", py))
+    # the worker enters a process() that never returns; switching to direct stops it, which must
+    # interrupt the vector (within 350 ms) rather than hang Max; direct mode then runs the same
+    # class, which loops until hang is cleared a step later (plan 8.3)
+    t.step(t.send("hang 1", py))
+    t.step(t.send("mode direct", py), wait=500)
+    t.step(t.send("hang 0", py), wait=500)
     t.step(t.attribute_equals("direct-reports-no-latency", py, "latencysamples", 0),
            t.sample_equals("direct-has-no-delay", now, 0.0),
-           t.errors_are("console-only-the-stall", "== 1"), wait=500)
+           t.errors_are("hang-interrupted-once", "== 1", "interrupted"),
+           t.errors_are("console-only-the-stall-and-the-interruption", "== 2"), wait=1000)
     return t
 
 

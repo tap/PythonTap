@@ -243,7 +243,21 @@ class python : public object<python>, public vector_operator<> {
     ~python() {
         m_file_watch.reset();
         m_use_worker = false;
-        m_worker.reset();    // joins the worker thread, before the processor it runs goes
+        if (m_worker) {
+            m_worker->stop(); // joins the worker thread, before the processor it runs goes
+            if (m_worker->has_abandoned_thread()) {
+                // a process() that never returned still runs on the thread stop() gave up on, through
+                // this worker and this processor: leak both rather than free what it may yet touch
+                // (plan 8.3); the process exits with the thread
+                cerr << "a stalled process() is still running on an abandoned thread; this object's Python "
+                        "state is kept alive for it until Max quits"
+                     << endl;
+                m_worker.release();
+                m_processor.release();
+                return;
+            }
+        }
+        m_worker.reset();
         m_processor.reset(); // releases the Python objects under the GIL
     }
 

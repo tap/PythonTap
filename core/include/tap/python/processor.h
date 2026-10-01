@@ -298,6 +298,10 @@ namespace tap::python {
                                           + ", not a number — output as 0.0 (reported once per load)");
                 Py_DECREF(type);
             }
+            if (m_pending_interrupted.exchange(false)) {
+                log(log_level::error, "process() had not returned when the worker stopped and was interrupted — "
+                                      "that vector is silence; audio stays bound (reported once per load)");
+            }
             if (m_pending_non_finite.exchange(false)) {
                 log(log_level::error,
                     "process() produced a non-finite sample (NaN or infinity) — replaced with 0.0 (reported once per "
@@ -574,6 +578,7 @@ namespace tap::python {
         std::atomic<PyObject*>                  m_pending_exception{};   // strong
         std::atomic<PyObject*>                  m_pending_non_numeric{}; // strong: the returned object's type
         std::atomic<bool>                       m_pending_non_finite{};
+        std::atomic<bool>                       m_pending_interrupted{}; // WorkerStopped raised into process() (8.3)
         std::atomic<std::int64_t>               m_pending_bad_length{k_no_length};
         std::atomic<std::int64_t>               m_bad_length_expected{};
         std::atomic<bool>                       m_warned_non_numeric{};
@@ -770,16 +775,38 @@ namespace tap::python {
         }
 
         void reset_warnings() {
-            m_warned_non_numeric = false;
-            m_warned_non_finite  = false;
-            m_warned_bad_length  = false;
-            m_warned_bad_count   = false;
+            m_pending_interrupted = false;
+            m_warned_non_numeric  = false;
+            m_warned_non_finite   = false;
+            m_warned_bad_length   = false;
+            m_warned_bad_count    = false;
         }
 
         void notify_report() const {
             if (m_report_ready) {
                 m_report_ready();
             }
+        }
+
+        /// If the pending exception is the worker's own interruption — WorkerStopped, raised into a
+        /// process() that had not returned when the worker stopped (plan 8.3) — clear it and record
+        /// that, and say so: it is not the class's fault, so the caller keeps audio bound. Otherwise
+        /// leave the exception pending and return false. Caller holds the GIL.
+        bool take_interruption() {
+            PyObject* exception = PyErr_GetRaisedException();
+            if (!exception) {
+                return false;
+            }
+            PyObject* interruption = detail::support("WorkerStopped"); // borrowed
+            if (interruption && PyErr_GivenExceptionMatches(exception, interruption)) {
+                Py_DECREF(exception);
+                if (!m_pending_interrupted.exchange(true)) {
+                    notify_report();
+                }
+                return true;
+            }
+            PyErr_SetRaisedException(exception); // steals the reference
+            return false;
         }
 
         /// Record the pending exception (audio thread; caller holds the GIL). Only the first since
@@ -881,8 +908,10 @@ namespace tap::python {
                 release_arguments(call_args, io.inputs);
 
                 if (!result) {
-                    record_exception();
-                    unbind_process(function); // load() re-arms it
+                    if (!take_interruption()) { // the worker's interruption keeps audio bound (8.3)
+                        record_exception();
+                        unbind_process(function); // load() re-arms it
+                    }
                     silence(io.out, 0, written, i, frame_count);
                     sanitize(io, written, frame_count); // the samples before this one are still the class's
                     return;
@@ -956,8 +985,10 @@ namespace tap::python {
             release_arguments(call_args, io.inputs);
 
             if (!result) {
-                record_exception();
-                unbind_process(function);
+                if (!take_interruption()) { // the worker's interruption keeps audio bound (8.3)
+                    record_exception();
+                    unbind_process(function);
+                }
                 silence(io.out, 0, written, 0, frame_count);
                 return;
             }
