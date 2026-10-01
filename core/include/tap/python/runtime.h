@@ -317,6 +317,15 @@ namespace tap::python {
         // so that a save that breaks a file shared by many objects, or a patch opening many of them,
         // reports it once, while an object created later still says why it is silent (plan 6.10).
         //
+        // Before a class file is executed, every helper module imported from the scripts folder — a
+        // source module whose __file__ is under _scripts_dir, other than the class modules
+        // themselves — is dropped from sys.modules, so that the fresh execution imports the helpers
+        // afresh (plan 8.5). A helper saved on its own is not watched: it is picked up by the next
+        // save that changes a class file importing it. Compiled extension modules are left alone
+        // (they cannot be imported twice), and no bytecode is written for anything (initialize()
+        // sets write_bytecode off), so the stale-.pyc hazard 3.6a closed for class files cannot
+        // return for helpers.
+        //
         // hint_kind(hint) -> str. The name the host maps a type hint by: 'int', 'float', 'bool', 'str',
         // 'ndarray', 'tuple', ... ('any' for no hint, 'ClassVar' for a class variable). Optional[X] and
         // X | None are X; an unresolved hint written as a string is read by name.
@@ -340,7 +349,7 @@ namespace tap::python {
         // `except Exception:` cannot swallow it and keep looping; the processor recognizes it and
         // keeps the class's audio bound — it is the host's interruption, not the class's fault.
         inline constexpr const char* k_support_source = R"(
-import inspect, re, sys, time, types, typing
+import inspect, os, re, sys, time, types, typing
 
 class WorkerStopped(BaseException):
     """tap.python~ stopped the worker thread while process() had not returned."""
@@ -348,6 +357,25 @@ class WorkerStopped(BaseException):
 _cache = {}
 _failed = {}
 _REPORT_WINDOW = 2.0
+_scripts_dir = None  # set by initialize(): the folder the helpers live in
+
+def forget_helpers():
+    """Drop from sys.modules every source module imported from the scripts folder, other than the
+    class modules (_tap_python_*), so the next import runs its current source (plan 8.5)."""
+    if not _scripts_dir:
+        return []
+    root = os.path.normcase(os.path.abspath(_scripts_dir)) + os.sep
+    forgotten = []
+    for name, module in list(sys.modules.items()):
+        if name.startswith('_tap_python_'):
+            continue
+        file = getattr(module, '__file__', None)
+        if not isinstance(file, str) or not file.endswith('.py'):
+            continue
+        if os.path.normcase(os.path.abspath(file)).startswith(root):
+            del sys.modules[name]
+            forgotten.append(name)
+    return forgotten
 
 def load(module_name, path):
     with open(path, 'rb') as f:
@@ -357,6 +385,7 @@ def load(module_name, path):
         return cached[1], False
     try:
         code = compile(source, path, 'exec', dont_inherit=True)
+        forget_helpers()
         module = types.ModuleType(module_name)
         module.__file__ = path
         previous = sys.modules.get(module_name)
@@ -705,6 +734,7 @@ def return_shape(hint):
             PyConfig_InitIsolatedConfig(&config); // ignore environment variables and user site-packages
             config.install_signal_handlers = 0;   // we are a plugin: never steal signal handling from the host
             config.parse_argv              = 0;
+            config.write_bytecode          = 0; // no .pyc for the user's helpers (plan 8.5); the runtime has its own
 
 #ifdef _WIN32
             PyStatus status = PyConfig_SetString(&config, &config.home, options.home.wstring().c_str());
@@ -734,6 +764,12 @@ def return_shape(hint):
             }
 
             detail::create_support();
+            if (detail::support_globals()) { // where the helpers live, for forget_helpers()
+                if (PyObject* dir = detail::path_to_unicode(options.scripts_dir)) {
+                    PyDict_SetItemString(detail::support_globals(), "_scripts_dir", dir);
+                    Py_DECREF(dir);
+                }
+            }
 
             // 2.6: hand the GIL to a waiting thread — the audio thread, above all — sooner
             if (PyObject* set_interval = PySys_GetObject("setswitchinterval")) { // borrowed

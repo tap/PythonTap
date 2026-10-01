@@ -6,6 +6,16 @@ breaking changes to the contract are allowed where they buy correctness (D5 in
 
 ## Unreleased
 
+### Changed — helper modules follow the class file
+
+- **A helper module in `python/` is imported afresh when a class file that changed is saved.**
+  Before each execution of a class file the loader drops from `sys.modules` every source module
+  imported from the folder (not the class modules themselves, nor compiled extensions), so the
+  fresh class imports the helper's current source; and the interpreter writes no bytecode, so the
+  stale-`.pyc` hazard fixed for class files in 0.9.0 cannot return for helpers. A save of the
+  helper alone is still not watched. Helpers used to load once per Max session. (Plan 8.5, audit
+  A7.)
+
 ### Changed — nothing of yours posts from the audio thread
 
 - **What `process()` prints, or warns, is posted from Max's main thread.** A `print()` or a numpy

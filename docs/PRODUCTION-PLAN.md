@@ -688,7 +688,7 @@ down rather than discovered again. *This plan was itself audited before being ad
   keeps 256 and counts 9,744 dropped, in bounded time; a 2,000-character line is cut. The
   battery's other console checks run on the test's main thread with no predicate and stand as
   they were.
-- [ ] **8.5 Helper modules follow the class file (A7b).** When a load *executes* the class file
+- [x] **8.5 Helper modules follow the class file (A7b).** When a load *executes* the class file
   (the loader says so), it first drops from `sys.modules` every module whose `__file__` is a `.py`
   under `scripts_directory()` — *revised:* **except the class modules themselves**
   (`_tap_python_*`, which `typing.get_type_hints` and the loader's cache depend on) and anything
@@ -704,7 +704,14 @@ down rather than discovered again. *This plan was itself audited before being ad
   should force re-execution — the watcher would then send a distinct, undocumented message — or
   whether the folder should be watched. Test: a class importing `helper.py`, the helper edited,
   the class file changed and loaded → the new helper runs; edited alone → it does not, and the
-  ReadMe says so. CHANGELOG: helpers reload with the class file.
+  ReadMe says so. CHANGELOG: helpers reload with the class file. *Done:* `forget_helpers()` in the support
+  module, called by `load()` before it executes a changed file, compares
+  `normcase(abspath(__file__))` against the scripts folder `initialize()` hands it (no file-system
+  calls per module), skips `_tap_python_*` and anything not a `.py`; `PyConfig.write_bytecode = 0`.
+  One scenario in `test_loading.cpp`: the helper's new value after a changed save, another class
+  file's module left in `sys.modules` and working, the old value after an unchanged save (the
+  documented limit), no `__pycache__`. *Decided:* the rule stands as documented — "save the class
+  file too" — rather than a forced reload on `filechanged` or a folder watch; revisit if users ask.
 - [ ] **8.6 Type hints that map as a reader expects (A8).** In `hint_kind`: unwrap `Annotated`
   and `Final` to their first argument; *revised:* a `Union` of several members other than `None`
   maps to **`any`** — the atom passes as it is, as for an unannotated parameter — rather than to
