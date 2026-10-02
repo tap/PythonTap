@@ -5,6 +5,19 @@ breaking changes to the contract were allowed where they bought correctness (D5 
 `docs/PRODUCTION-PLAN.md`); each is recorded here. From 1.0.0, a change to the class contract is
 a major version.
 
+## 1.0.1 — unreleased
+
+### Fixed
+
+- **In Max, the object had no attributes and no messages.** 1.0.0's guard against a Python method
+  or field named like a message the Max object already answers (plan 8.2) asked Max's
+  `object_getmethod()` and took anything but null for an answer — but for a name the object does
+  not have, Max returns `method_false()`, a function, as the SDK documents, so every field and
+  method of every class was "reserved by the host" and the console said so for each; only audio
+  still worked. The mock kernel the unit tests run against answers null, which is why they passed.
+  The guard now recognizes `method_false()`, the unit test's kernel answers as Max does, and the
+  Mac session (8.8) is what would have caught it before the tag.
+
 ## 1.0.0 — 2026-10-01
 
 The first stable release: the class contract as the ReadMe states it, the production plan's

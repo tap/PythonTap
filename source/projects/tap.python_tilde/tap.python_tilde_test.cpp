@@ -51,7 +51,24 @@ namespace c74 {
             }
             return ac;
         }
-        void  filewatcher_start(void*) {}
+        void filewatcher_start(void*) {}
+        // What Max's own does, which the mock's (always null) does not: method_false() for a name
+        // the object does not answer. 1.0.0 took that for "found" and reserved every Python name
+        // (plan 8.2's guard, found broken in Max; fixed in 1.0.1). The pretend class answers the
+        // names min registers for this object, plus one a test's class defines on purpose.
+        t_atom_long method_false(void*) {
+            return 0;
+        }
+        method object_getmethod(void*, t_symbol* s) {
+            static const char* const k_answered[] = {"dsp64",       "assist",   "notify",
+                                                     "filechanged", "dspsetup", "maxtest_host_answers"};
+            for (const auto* name : k_answered) {
+                if (s == gensym(name)) {
+                    return reinterpret_cast<method>(+[](void*) -> void* { return nullptr; });
+                }
+            }
+            return reinterpret_cast<method>(method_false);
+        }
         void* qelem_new(void*, method) {
             static int s_qelem;
             return &s_qelem;
@@ -419,11 +436,16 @@ SCENARIO("Methods named like messages Max sends with C arguments are not exposed
     ext_main(nullptr);
     const auto file = tap::python::package_root() / "python" / "maxtest_mock_reserved.py";
     write_file(file, "class maxtest_mock_reserved:\n"
+                     // a field, and a method, which must be exposed whatever the guard answers
+                     "    gain: float = 0.75\n"
                      // what Max calls with C arguments: a Python method of the name would crash Max
                      "    def dspstate(self, on: int) -> None:\n        pass\n"
                      "    def fileusage(self) -> None:\n        pass\n"
                      "    def patchlineupdate(self) -> None:\n        pass\n"
                      "    def inputchanged(self) -> None:\n        pass\n"
+                     // a name only the guard reserves: the test's object_getmethod answers it as
+                     // Max's would for a method the class registered
+                     "    def maxtest_host_answers(self) -> None:\n        pass\n"
                      // what the ReadMe promises stays a message, whatever the guard answers
                      "    def int(self, n: int) -> None:\n        pass\n"
                      "    def float(self, x: float) -> None:\n        pass\n"
@@ -440,6 +462,16 @@ SCENARIO("Methods named like messages Max sends with C arguments are not exposed
     THEN("the reserved names are not registered, and every promised name is") {
         CHECK(my_object.python_message_names()
               == std::vector<std::string>{"bang", "float", "greet", "int", "list", "symbol"});
+    }
+    THEN("the field is an attribute: a name Max does not answer is not reserved by the guard (1.0.1)") {
+        const auto got = get(my_object, "gain");
+        CHECK(c74::max::atom_gettype(&got) == c74::max::A_FLOAT);
+        CHECK(c74::max::atom_getfloat(&got) == 0.75);
+    }
+    THEN("the method's name decides nothing by itself: what object_getmethod() answers does") {
+        CHECK(python::found_method(nullptr) == false);
+        CHECK(python::found_method(reinterpret_cast<c74::max::method>(c74::max::method_false)) == false);
+        CHECK(python::found_method(reinterpret_cast<c74::max::method>(c74::max::object_getmethod)) == true);
     }
     THEN("audio is bound regardless") {
         CHECK(all_equal(render(my_object, 0.5), 0.5));

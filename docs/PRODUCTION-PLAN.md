@@ -612,7 +612,15 @@ down rather than discovered again. *This plan was itself audited before being ad
   cord connected by `thispatcher`, with those methods in the class) — to run in the Mac session
   (8.8), as is Build Collective for `fileusage`. In the mock kernel `object_getmethod()` always
   answers null, so the guard's own effect is seen only in Max: the existing
-  `attributes-and-messages` runtime test is what would show it over-reserving.
+  `attributes-and-messages` runtime test is what would show it over-reserving. *And it did
+  over-reserve (found 2026-10-02 in Max, 1.0.0 released with it):* for a name the object does not
+  answer Max returns `method_false()`, a function — the SDK says so — not null, so the guard
+  reserved every field and method of every class; the object loaded, audio ran, and nothing else
+  worked. Fixed in 1.0.1: `found_method()` treats null and `method_false()` alike as "not found",
+  and the glue test's kernel now answers as Max does (`method_false()` for an unknown name, a
+  method for the names min registers and for one the test's class defines on purpose), so the
+  guard's effect is pinned without Max. The lesson for 8.8: a tag with a Mac session outstanding
+  ships what only Max can show.
 - [x] **8.3 Worker mode never hangs Max (A1, A6 — `worker.h`).**
   *A1:* `stop()` bounds its join. The worker records its OS thread identifier
   (`PyThread_get_thread_ident()`, no GIL needed) as it starts; if the thread has not finished

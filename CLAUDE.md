@@ -134,6 +134,11 @@ attaches all the zips + SHA256s to a release — a pre-release for 0.x, a draft 
   which such a call crashes — so
   the watcher is owned by a nobox helper with the SDK's signature (`tap.python_tilde_filewatch.h`).
   Check the SDK's calling convention before exposing a Max-called method as a `message<>`.
+  And read the SDK's return contract before testing a Max call's result: `object_getmethod()`
+  answers `method_false()`, a function, not null, for a name an object does not have — a null
+  test reserved every Python name in 1.0.0 (`found_method()` in the object; its glue test's kernel
+  answers as Max does). The mock kernel is thinner than Max: when a stub decides a behavior, make
+  the test's stub faithful to the SDK (as `attr_args_offset` and `object_getmethod` are).
 - **Say what is true of a class once, what is true of an instance per instance.** Many objects can
   share one class file; only the processor whose `load()` ran the file (`load_script` says so)
   announces the class — its `Loaded` line and its diagnostics — through `announce()` (plan 6.7).
