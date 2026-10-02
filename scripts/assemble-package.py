@@ -56,9 +56,10 @@ FOLDERS = ["help", "docs", "python"]
 
 # Never shipped from the copied folders.
 # maxtest_*.py: the runtime tests' fixtures, copied into python/ while runtime-tests/run.py runs
-# PRODUCTION-PLAN.md, AUDIT-*.md: the development roadmap and audits in docs/, beside the reference page Max reads
+# PRODUCTION-PLAN.md, *-PLAN.md, AUDIT-*.md: the development roadmap, plans and audits in docs/, beside the
+# reference pages Max reads
 IGNORED = shutil.ignore_patterns("__pycache__", "*.pyc", ".ipynb_checkpoints", ".DS_Store", "maxtest_*",
-                                 "PRODUCTION-PLAN.md", "AUDIT-*.md")
+                                 "PRODUCTION-PLAN.md", "*-PLAN.md", "AUDIT-*.md")
 
 
 # Each platform's folder for its runtime in a package for every platform (plan 4.8); the external

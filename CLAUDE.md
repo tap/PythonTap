@@ -9,7 +9,10 @@ user's Python class as an audio object. `[tap.python~ name]` loads `python/name.
 `class name`, turns its annotated public fields into Max attributes and its public methods into Max
 messages, calls its `process()` on the signal, and hot-reloads on save. `ReadMe.md` is the user-facing
 contract; **`docs/PRODUCTION-PLAN.md` is the authoritative roadmap** — its settled decisions (D1–D6),
-its phases, and the audit findings behind them. Tick its items (with the PR) as they land.
+its phases, and the audit findings behind them. Tick its items (with the PR) as they land. Its
+Phase 9 is a second object, **`tap.python`**, a Python class as a Max object without audio (what a
+method returns is what it outputs): designed in `docs/TAP-PYTHON-PLAN.md` (decisions D7–D11), not
+built yet.
 
 ## Layout (D6: a host-independent core plus a thin Max wrapper)
 
