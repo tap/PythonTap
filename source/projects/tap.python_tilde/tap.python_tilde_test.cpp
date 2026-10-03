@@ -59,12 +59,19 @@ namespace c74 {
         t_atom_long method_false(void*) {
             return 0;
         }
+        // The method the pretend class answers with. Its body must be its own: a linker that folds
+        // identical functions (MSVC's /OPT:ICF, on by default in Release; lld's --icf=all) gave a
+        // `return 0` here method_false's address, so every name read as unanswered on Windows.
+        void* answered_method(void*) {
+            static int s_marker;
+            return &s_marker;
+        }
         method object_getmethod(void*, t_symbol* s) {
             static const char* const k_answered[] = {"dsp64",       "assist",   "notify",
                                                      "filechanged", "dspsetup", "maxtest_host_answers"};
             for (const auto* name : k_answered) {
                 if (s == gensym(name)) {
-                    return reinterpret_cast<method>(+[](void*) -> void* { return nullptr; });
+                    return reinterpret_cast<method>(answered_method);
                 }
             }
             return reinterpret_cast<method>(method_false);
@@ -434,6 +441,9 @@ SCENARIO("A save that changes process()'s inputs or outputs changes the object's
 SCENARIO("Methods named like messages Max sends with C arguments are not exposed, and the promised ones are "
          "(plan 8.2)") {
     ext_main(nullptr);
+    // the test's kernel must tell its two answers apart, or what follows tests the linker
+    REQUIRE(c74::max::object_getmethod(nullptr, c74::max::gensym("maxtest_host_answers"))
+            != reinterpret_cast<c74::max::method>(c74::max::method_false));
     const auto file = tap::python::package_root() / "python" / "maxtest_mock_reserved.py";
     write_file(file, "class maxtest_mock_reserved:\n"
                      // a field, and a method, which must be exposed whatever the guard answers
