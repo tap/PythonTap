@@ -18,6 +18,11 @@ a major version.
   The guard now recognizes `method_false()`, the unit test's kernel answers as Max does, and the
   Mac session (8.8) is what would have caught it before the tag.
 
+### Changed
+
+- **The package has the Tap family's PythonTap icon** in place of min's template icon: the
+  "ground" version from TapHouse's `brand/`, rendered at 500×500.
+
 ## 1.0.0 — 2026-10-01
 
 The first stable release: the class contract as the ReadMe states it, the production plan's
