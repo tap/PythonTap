@@ -478,11 +478,13 @@ class python : public object<python>, public vector_operator<> {
 
     /// Whether the Max object already answers `name` itself — a method its class registered (min's
     /// dsp64, assist, the ones above), which Max would call before anything added for a Python
-    /// method, or with C arguments. The messages this object added for the previous incarnation's
-    /// Python methods are its own, not Max's: still registered while load() runs, they must not
-    /// make the class's methods reserved on a reload. Main thread.
+    /// method, or with C arguments. The messages and attributes this object added for the previous
+    /// incarnation's methods and fields are its own, not Max's: still registered while load() runs
+    /// (an attribute answers its name, as a message does), they must not make the class's names
+    /// reserved on a reload — 1.0.1 left out the attributes, so a reload lost every field. Main thread.
     bool answered_by_max(const std::string& name) {
-        if (m_python_messages.find(name) != m_python_messages.end()) {
+        if (m_python_messages.find(name) != m_python_messages.end()
+            || m_python_attributes.find(name) != m_python_attributes.end()) {
             return false;
         }
         return found_method(c74::max::object_getmethod(maxobj(), c74::max::gensym(name.c_str())));

@@ -629,6 +629,7 @@ def worker(latency_ms: float | None = None, quiet_windows: int = 0) -> Test:
     t.patcher.connect(delay_by_latency, 1, py)
     t.patcher.connect(delay_by_latency, 0, delay, 1)
     t.count_errors("late.for")
+    t.count_errors("dropped")
     t.count_errors("interrupted")
 
     watch = t.no_change("delayed-by-latencysamples", late, 0.0)
@@ -656,7 +657,11 @@ def worker(latency_ms: float | None = None, quiet_windows: int = 0) -> Test:
     t.step(t.attribute_equals("direct-reports-no-latency", py, "latencysamples", 0),
            t.sample_equals("direct-has-no-delay", now, 0.0),
            t.errors_are("hang-interrupted-once", "== 1", "interrupted"),
-           t.errors_are("console-only-the-stall-and-the-interruption", "== 2"), wait=1000)
+           # the reload began a new load, so the hang's lateness is reported again, and at 500 ms it
+           # outlasts the ring (latency + 0.25 s) and drops input too (found in Max, plan 8.8)
+           t.errors_are("hang-late-again-after-the-reload", "== 2", "late.for"),
+           t.errors_are("hang-outlasts-the-ring", "== 1", "dropped"),
+           t.errors_are("console-only-the-stall-and-the-hang", "== 4"), wait=1000)
     return t
 
 

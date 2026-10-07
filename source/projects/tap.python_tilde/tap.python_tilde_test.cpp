@@ -4,9 +4,11 @@
 
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <fstream>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include "c74_min_unittest.h" // required unit-test header (defines main via Catch)
@@ -17,17 +19,42 @@
 // test binary links (the headers declare them with C linkage). With these stubs the Max-side attribute and method
 // registrations fail harmlessly, so the tests below drive the object's own
 // attribute and message handlers directly, as Max's dispatch would.
+// What Max does with an attribute the object adds, which the stubs below model only while a
+// scenario asks (the test process makes many objects in turn, and the others rely on the
+// registration failing quietly): the object then answers the attribute's name, so
+// object_getmethod() finds it. 1.0.1's guard took the previous load's attributes for Max's own
+// and reserved every field on a reload (found in the Mac session, plan 8.8).
+namespace attributes {
+    bool                            modeled{};
+    std::deque<std::string>         made;  // attribute_new's, by address (a deque keeps them in place)
+    std::unordered_set<std::string> added; // object_addattr's, until object_deleteattr
+
+    void model(const bool on) {
+        modeled = on;
+        made.clear();
+        added.clear();
+    }
+} // namespace attributes
+
 namespace c74 {
     namespace max {
         extern "C" {
-        t_object* attribute_new(const char*, t_symbol*, long, method, method) {
-            return nullptr;
+        t_object* attribute_new(const char* name, t_symbol*, long, method, method) {
+            if (!attributes::modeled) {
+                return nullptr;
+            }
+            attributes::made.emplace_back(name);
+            return reinterpret_cast<t_object*>(&attributes::made.back());
         }
-        t_max_err object_addattr(void*, t_object*) {
-            return MAX_ERR_GENERIC;
+        t_max_err object_addattr(void*, t_object* attribute) {
+            if (!attributes::modeled || attribute == nullptr) {
+                return MAX_ERR_GENERIC;
+            }
+            attributes::added.insert(*reinterpret_cast<std::string*>(attribute));
+            return MAX_ERR_NONE;
         }
         t_max_err object_attr_addattr_parse(t_object*, const char*, const char*, t_symbol*, long, const char*) {
-            return MAX_ERR_GENERIC;
+            return attributes::modeled ? MAX_ERR_NONE : MAX_ERR_GENERIC;
         }
         t_max_err object_addmethod(t_object*, method, const char*, ...) {
             return MAX_ERR_NONE;
@@ -74,6 +101,9 @@ namespace c74 {
                     return reinterpret_cast<method>(answered_method);
                 }
             }
+            if (attributes::added.count(s->s_name) != 0) { // an attribute the object added answers its name
+                return reinterpret_cast<method>(answered_method);
+            }
             return reinterpret_cast<method>(method_false);
         }
         void* qelem_new(void*, method) {
@@ -81,7 +111,8 @@ namespace c74 {
             return &s_qelem;
         }
         void      qelem_set(void*) {}
-        t_max_err object_deleteattr(void*, t_symbol*) {
+        t_max_err object_deleteattr(void*, t_symbol* name) {
+            attributes::added.erase(name->s_name);
             return MAX_ERR_NONE;
         }
         void qelem_free(void*) {}
@@ -554,4 +585,38 @@ SCENARIO("The runtime is support/<platform> in a package that carries every plat
         }
     }
     std::filesystem::remove_all(package);
+}
+
+SCENARIO("A reload keeps the class's attributes: those the object added are its own, not Max's (1.0.1)") {
+    ext_main(nullptr);
+    attributes::model(true);
+    // a fixture in the package's python folder, where python/maxtest_*.py is ignored by git
+    const auto file   = tap::python::package_root() / "python" / "maxtest_mock_fields.py";
+    const auto source = std::string{"class maxtest_mock_fields:\n    level: float = 1.0\n\n"
+                                    "    def process(self, x: float) -> float:\n        return x * self.level\n"};
+    write_file(file, source);
+    const auto argument = symbol_atom("maxtest_mock_fields");
+    auto*      wrapped  = c74::min::wrapper_new<python>(c74::min::symbol("dummy"), 1, &argument);
+    REQUIRE(wrapped);
+    python& my_object = wrapped->m_min_object;
+    REQUIRE(attributes::added.count("level") == 1); // the object answers "level" now, as in Max
+
+    const auto half = float_atom(0.5);
+    my_object.attr_set(c74::min::symbol{"level"}, 1, &half);
+    const auto before = get(my_object, "level");
+    REQUIRE(c74::max::atom_getfloat(&before) == 0.5);
+
+    WHEN("a save changes the file and it reloads") {
+        write_file(file, source + "    # saved again\n");
+        my_object.update_source();
+        THEN("the field is still an attribute, with its value") {
+            const auto got = get(my_object, "level");
+            CHECK(c74::max::atom_getfloat(&got) == 0.5);
+            CHECK(attributes::added.count("level") == 1);
+        }
+    }
+
+    c74::max::object_free(wrapped);
+    std::filesystem::remove(file);
+    attributes::model(false);
 }
