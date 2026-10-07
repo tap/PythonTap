@@ -751,6 +751,22 @@ down rather than discovered again. *This plan was itself audited before being ad
 - [ ] **8.8 The Mac session for this phase.** Runtime tests for 8.2 (`faults`) and 8.3 (`worker`);
   8.3's stack measurement; the macOS half of 8.7 is not needed (POSIX paths are UTF-8). Then
   repeat the runbook's step 4 on the release packages, and tag `v0.11.0`.
+  *Run 2026-10-07 (Intel Mac, Max 9, on main with 1.0.1's fix):* the suite found **a second bug in
+  8.2's guard** — `reload` failed: the attributes the object adds for a class's fields answer their
+  names in Max, so on a reload the guard took them for Max's own and reserved every field ("the
+  field gain is reserved by the host", then "doesn't understand gain"); `worker`'s
+  `hang` failed the same way after its reload, silently (an unchanged file announces nothing).
+  Fixed for 1.0.1 (`answered_by_max()` leaves out `m_python_attributes` as it did
+  `m_python_messages`), against a glue scenario that fails without it — the test's kernel now
+  answers an added attribute's name, as Max does, while the scenario asks. `faults` passes (DSP
+  toggled and a cord connected with the C-argument names in the class). `worker`'s console count
+  was wrong, not the worker: the reload before `hang 1` begins a new load, so the 500 ms hang is
+  reported late again, and it outlasts the ring (latency + 0.25 s), so input is dropped too — four
+  lines, not two; the test now expects each. Whole suite: 12 patchers pass. *Stack measured:* a
+  fresh `pthread_attr_t` (`std::thread`'s) has 512 KiB here, and recursion through `sorted`'s key
+  crashes there after about 98 levels — short of `deep_recursion.py`'s 450; at the worker's
+  16 MiB it reaches CPython's own recursion limit (about 2,500 levels), as `threading.Thread`
+  does. *Still by hand:* step 4 on the release packages, and Build Collective for `fileusage`.
 
 *The 1.0 gate (revised):* 8.1–8.6 change what the ReadMe promises or what a class can rely on, so
 they land before 1.0, where D5 still allows them; 8.7 may follow it. *Decided 2026-10-01 (the maintainer):*

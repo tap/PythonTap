@@ -5,7 +5,7 @@ breaking changes to the contract were allowed where they bought correctness (D5 
 `docs/PRODUCTION-PLAN.md`); each is recorded here. From 1.0.0, a change to the class contract is
 a major version.
 
-## 1.0.1 — unreleased
+## 1.0.1 — 2026-10-07
 
 ### Fixed
 
@@ -17,6 +17,12 @@ a major version.
   still worked. The mock kernel the unit tests run against answers null, which is why they passed.
   The guard now recognizes `method_false()`, the unit test's kernel answers as Max does, and the
   Mac session (8.8) is what would have caught it before the tag.
+- **A reload lost every attribute.** With that fixed, the guard still took the attributes the
+  object had added for the class's fields — which answer their names in Max, as messages do — for
+  Max's own, so a save left the object with no attributes ("the field … is reserved by the host",
+  then "doesn't understand …"). It now leaves out the object's own attributes as it did its own
+  messages. Found in the Mac session; the unit test's kernel now answers an added attribute's name
+  as Max does, and fails without the fix.
 
 ### Changed
 
