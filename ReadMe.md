@@ -1,4 +1,4 @@
-# tap.python
+# <picture><source media="(prefers-color-scheme: dark)" srcset=".github/icon-dark.svg"><img src=".github/icon-light.svg" width="40" height="40" alt="" align="top"></picture> tap.python
 
 [![build](https://github.com/tap/PythonTap/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/tap/PythonTap/actions/workflows/build.yml)
 [![Max 9](https://img.shields.io/badge/Max-9%2B-9cf)](https://cycling74.com/products/max)
