@@ -86,6 +86,16 @@ namespace c74 {
         t_atom_long method_false(void*) {
             return 0;
         }
+        // What the pretend Max answers for a name the object does not have: its own method_false(),
+        // which is not the method_false whose address this module takes. On Windows that address is
+        // the external's import thunk (the SDK declares method_false without dllimport), so 1.0.1,
+        // comparing with it, took every name for found and reserved it (found on Windows). The body
+        // is its own, so that no linker folds it into method_false.
+        t_atom_long max_method_false(void*) {
+            static volatile int s_calls;
+            s_calls = s_calls + 1;
+            return 0;
+        }
         // The method the pretend class answers with. Its body must be its own: a linker that folds
         // identical functions (MSVC's /OPT:ICF, on by default in Release; lld's --icf=all) gave a
         // `return 0` here method_false's address, so every name read as unanswered on Windows.
@@ -104,7 +114,7 @@ namespace c74 {
             if (attributes::added.count(s->s_name) != 0) { // an attribute the object added answers its name
                 return reinterpret_cast<method>(answered_method);
             }
-            return reinterpret_cast<method>(method_false);
+            return reinterpret_cast<method>(max_method_false);
         }
         void* qelem_new(void*, method) {
             static int s_qelem;
@@ -472,9 +482,11 @@ SCENARIO("A save that changes process()'s inputs or outputs changes the object's
 SCENARIO("Methods named like messages Max sends with C arguments are not exposed, and the promised ones are "
          "(plan 8.2)") {
     ext_main(nullptr);
-    // the test's kernel must tell its two answers apart, or what follows tests the linker
-    REQUIRE(c74::max::object_getmethod(nullptr, c74::max::gensym("maxtest_host_answers"))
-            != reinterpret_cast<c74::max::method>(c74::max::method_false));
+    // the test's kernel must tell its answers apart, or what follows tests the linker; and its
+    // "not found" must not be the method_false this module can take the address of (Windows)
+    const auto not_found = c74::max::object_getmethod(nullptr, c74::max::gensym("maxtest_no_such_name"));
+    REQUIRE(c74::max::object_getmethod(nullptr, c74::max::gensym("maxtest_host_answers")) != not_found);
+    REQUIRE(not_found != reinterpret_cast<c74::max::method>(c74::max::method_false));
     const auto file = tap::python::package_root() / "python" / "maxtest_mock_reserved.py";
     write_file(file, "class maxtest_mock_reserved:\n"
                      // a field, and a method, which must be exposed whatever the guard answers
@@ -509,10 +521,12 @@ SCENARIO("Methods named like messages Max sends with C arguments are not exposed
         CHECK(c74::max::atom_gettype(&got) == c74::max::A_FLOAT);
         CHECK(c74::max::atom_getfloat(&got) == 0.75);
     }
-    THEN("the method's name decides nothing by itself: what object_getmethod() answers does") {
-        CHECK(python::found_method(nullptr) == false);
-        CHECK(python::found_method(reinterpret_cast<c74::max::method>(c74::max::method_false)) == false);
-        CHECK(python::found_method(reinterpret_cast<c74::max::method>(c74::max::object_getmethod)) == true);
+    THEN("found means neither null nor what Max answers for a name it does not have (1.0.2)") {
+        const auto answered = c74::max::object_getmethod(nullptr, c74::max::gensym("maxtest_host_answers"));
+        CHECK(python::found_method(nullptr, not_found) == false);
+        CHECK(python::found_method(not_found, not_found) == false);
+        CHECK(python::found_method(answered, not_found) == true);
+        CHECK(my_object.not_found_method() == not_found); // asked of Max, not taken from &method_false
     }
     THEN("audio is bound regardless") {
         CHECK(all_equal(render(my_object, 0.5), 0.5));

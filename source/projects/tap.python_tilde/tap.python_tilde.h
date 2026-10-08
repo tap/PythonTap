@@ -386,12 +386,21 @@ class python : public object<python>, public vector_operator<> {
         return names;
     }
 
-    /// Whether object_getmethod() found a method. For a name the object does not answer, Max
-    /// returns method_false() — a function, as the SDK documents — not null; the mock kernel
-    /// returns null. 1.0.0 tested for null alone, so in Max every field and method of a class was
-    /// "answered by Max", and the object had no attributes and no messages (1.0.1).
-    static bool found_method(const c74::max::method found) {
-        return found != nullptr && found != reinterpret_cast<c74::max::method>(c74::max::method_false);
+    /// Whether object_getmethod() found a method: neither null nor `not_found`, what it answers for a
+    /// name the object does not have — Max's method_false(), as the SDK documents. 1.0.0 tested for
+    /// null alone, and 1.0.1 compared with the address of method_false as this module sees it, which
+    /// on Windows is the external's own import thunk (the SDK declares it without dllimport), never
+    /// what Max returns: either way every field and method of a class was "answered by Max", and the
+    /// object had no attributes and no messages. So `not_found` comes from Max (not_found_method()).
+    static bool found_method(const c74::max::method found, const c74::max::method not_found) {
+        return found != nullptr && found != not_found;
+    }
+
+    /// What object_getmethod() answers for a name the object does not have, asked of Max for one
+    /// no class can have (it has spaces): Max's method_false(), whatever its address looks like from
+    /// here. Main thread.
+    c74::max::method not_found_method() {
+        return c74::max::object_getmethod(maxobj(), c74::max::gensym("tap.python~ answers no such name"));
     }
 
   private:
@@ -487,7 +496,7 @@ class python : public object<python>, public vector_operator<> {
             || m_python_attributes.find(name) != m_python_attributes.end()) {
             return false;
         }
-        return found_method(c74::max::object_getmethod(maxobj(), c74::max::gensym(name.c_str())));
+        return found_method(c74::max::object_getmethod(maxobj(), c74::max::gensym(name.c_str())), not_found_method());
     }
 
     /// The worker thread's scheduling (plan 2.5): the real-time class an audio thread has, so that a
