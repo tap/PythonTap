@@ -5,7 +5,10 @@ breaking changes to the contract were allowed where they bought correctness (D5 
 `docs/PRODUCTION-PLAN.md`); each is recorded here. From 1.0.0, a change to the class contract is
 a major version.
 
-## 1.0.1 — 2026-10-07
+## 1.0.2 — 2026-10-08
+
+1.0.1 was tagged but never released: its Windows package still had the first fault below. Its
+fixes are here, with that one completed.
 
 ### Fixed
 
@@ -15,8 +18,12 @@ a major version.
   not have, Max returns `method_false()`, a function, as the SDK documents, so every field and
   method of every class was "reserved by the host" and the console said so for each; only audio
   still worked. The mock kernel the unit tests run against answers null, which is why they passed.
-  The guard now recognizes `method_false()`, the unit test's kernel answers as Max does, and the
-  Mac session (8.8) is what would have caught it before the tag.
+  The guard now asks Max what it answers for a name the object does not have, and compares with
+  that — first (in 1.0.1) it compared with the address of `method_false` as the external sees it,
+  which on Windows is the external's own import thunk (the SDK declares the function without
+  `dllimport`), never what Max returns, so on Windows every name was still reserved. The unit
+  test's kernel answers as Max does on Windows too, and the Mac session (8.8) is what would have
+  caught it on the Mac before the tag; on Windows, trying the package did.
 - **A reload lost every attribute.** With that fixed, the guard still took the attributes the
   object had added for the class's fields — which answer their names in Max, as messages do — for
   Max's own, so a save left the object with no attributes ("the field … is reserved by the host",
