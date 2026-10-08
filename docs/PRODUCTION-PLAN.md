@@ -620,7 +620,15 @@ down rather than discovered again. *This plan was itself audited before being ad
   and the glue test's kernel now answers as Max does (`method_false()` for an unknown name, a
   method for the names min registers and for one the test's class defines on purpose), so the
   guard's effect is pinned without Max. The lesson for 8.8: a tag with a Mac session outstanding
-  ships what only Max can show.
+  ships what only Max can show. *And on Windows it still did (found 2026-10-08 on the 1.0.1
+  package, which was not released):* 1.0.1 compared with `&method_false`, which in a Windows DLL
+  is its own import thunk — the SDK declares the function without `dllimport` — never the function
+  Max returns, so every name was still "found". Fixed in 1.0.2: `not_found_method()` asks Max what
+  it answers for a name no class can have (it has spaces), and `found_method()` compares with
+  that; the glue test's kernel answers an unknown name with a function other than the
+  `method_false` the module can take the address of, as Windows does, and every attribute and
+  message scenario fails without the fix. Verified on Windows by the maintainer with the branch's
+  package.
 - [x] **8.3 Worker mode never hangs Max (A1, A6 — `worker.h`).**
   *A1:* `stop()` bounds its join. The worker records its OS thread identifier
   (`PyThread_get_thread_ident()`, no GIL needed) as it starts; if the thread has not finished
