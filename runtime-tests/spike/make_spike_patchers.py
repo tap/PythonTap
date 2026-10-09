@@ -229,7 +229,8 @@ def q5_threads() -> Script:
                "Q5 (M4): which thread a metro-driven message runs on with Overdrive off, Overdrive on, and "
                "Overdrive plus Scheduler in Audio Interrupt on — with audio on, then off. Each 'spike: thread' "
                "line gives systhread_ismainthread, isaudiothread and istimerthread on the thread the message "
-               "came on. Starts audio for a second (silence). Puts Overdrive and Audio Interrupt back as they "
+               "came on; q5-dsp-running says whether audio really ran. Starts audio for a few seconds (silence). "
+               "Puts Overdrive and Audio Interrupt back as they "
                "were (q5-was-…) at the end.")
     spike = s.spike("1", value_outlets=1)
     p = s.patcher
@@ -283,16 +284,20 @@ def q5_threads() -> Script:
     s.at(t + 1000, "", "; max preempt 1")
     report(t + 1100)
     metro_phase(t + 1250, "overdrive-on")
+    # whether audio really runs: the audio-running phase means nothing without it (dspstate~ says 1
+    # when the audio starts, 0 when it stops), and an audio driver can take a while to start
+    dsp = p.box("dspstate~", inlets=1, outlets=4, column=2, outlettype=["int", "float", "int", "int"])
+    p.connect(dsp, 0, s.recorder("q5-dsp-running"))
     s.at(t + 1950, "", "; dsp takeover 1; dsp start")
     report(t + 2050)
-    metro_phase(t + 3200, "overdrive-on-audio-interrupt-on-audio-running")
-    s.at(t + 3900, "", "; dsp stop")
-    metro_phase(t + 4100, "overdrive-on-audio-interrupt-on-audio-stopped")
-    s.say(t + 4800, "q5 putting Overdrive and Audio Interrupt back")
-    s.at(t + 4850, overdrive_was, "bang")
-    s.at(t + 4860, takeover_was, "bang")
-    report(t + 5000)
-    s.say(t + 5200, f"q5 {END}")
+    metro_phase(t + 4200, "overdrive-on-audio-interrupt-on-audio-running")
+    s.at(t + 4900, "", "; dsp stop")
+    metro_phase(t + 5100, "overdrive-on-audio-interrupt-on-audio-stopped")
+    s.say(t + 5800, "q5 putting Overdrive and Audio Interrupt back")
+    s.at(t + 5850, overdrive_was, "bang")
+    s.at(t + 5860, takeover_was, "bang")
+    report(t + 6000)
+    s.say(t + 6200, f"q5 {END}")
     return s
 
 
