@@ -3,8 +3,12 @@
 `tap.python~` runs a Python class as an audio object. `tap.python` runs one as an ordinary Max
 object: messages in, messages out, no signal. This is its design — the decisions (D7–D11,
 continuing `PRODUCTION-PLAN.md`'s D1–D6), what a class looks like, how the core and the package
-change — and the plan to build it (Phase 9 of the production plan, which points here). Drafted
-2026-10-02 against 1.0.0; nothing in it is built yet. Tick the items below (with the PR) as they
+change — and the plan to build it (Phase 9 of the production plan, which points here).
+
+Drafted 2026-10-02 against 1.0.0 and audited the same day (`AUDIT-TAP-PYTHON-PLAN.md`: two
+blockers, six major findings, nine minor; its addendum of 2026-10-09 records what 1.0.1 and 1.0.2
+changed). **Revised 2026-10-09 against 1.0.2** for every finding; the [revision record](#revision-record)
+at the end says what each changed. Nothing is built yet. Tick the items below (with the PR) as they
 land, and keep the design current where a PR decides differently.
 
 ## What it is for
@@ -42,11 +46,11 @@ ordinary Max object model, which is what makes it composable with `trigger`, `me
 
 | # | Decision | Choice |
 |---|---|---|
-| D7 | What `tap.python` is | **A second external in the same package, over the same core, with the same class contract minus audio, plus output.** Same `python/` folder, same loader (a file saved once is executed once however many objects of either kind share it), same attributes, messages, hot reload, console and error guards. A class written for one object loads in the other: in `tap.python`, `process()` and `prepare()` are ordinary methods (sending `process 0.5` calls it and outputs the result — a way to test a filter sample by sample); in `tap.python~`, a method's return value is dropped, as now. |
-| D8 | How output works | **A method's return value is output from the object's outlets, by its type; its return *hint* fixes how many outlets, at bind time.** No injected outlet API in 1.x (nothing for the class to import, so it still runs in a notebook): `None` outputs nothing; a number or a string one atom; a sequence a list; a method hinted `-> tuple[A, B]` outputs one value per outlet, right to left. The object has as many outlets as the widest return hint among its methods (at least one), plus a dumpout outlet at the right, as Max objects with attributes do; a save that changes the count changes the outlets in place, as 2.4 does for `tap.python~`. The rules are in [Output](#output-what-a-method-returns). |
+| D7 | What `tap.python` is | **A second Max object in the same package, over the same core, with the same class contract minus audio, plus output.** Same `python/` folder, same loader (a file saved once is executed once however many objects of either kind share it), same attributes, messages, hot reload, console and error guards. A class written for one object loads in the other: in `tap.python`, `process()` and `prepare()` are ordinary methods (sending `process 0.5` calls it and outputs the result — a way to test a filter sample by sample); in `tap.python~`, a method's return value is dropped, as now. |
+| D8 | How output works | **A method's return value is output from the object's outlets, by its type; its return *hint* fixes how many outlets, at bind time.** No injected outlet API in 1.x (nothing for the class to import, so it still runs in a notebook): `None` outputs nothing; a number or a string one atom; a sequence a list; a method hinted `-> tuple[A, B]` outputs one value per outlet, right to left. The object has as many outlets as the widest return hint among its methods (at least one), plus a dumpout outlet at the right, as Max objects with attributes do; a save that changes the count changes the outlets in place. The rules are in [Output](#output-what-a-method-returns). |
 | D9 | Inlets | **One inlet in the first release.** Messages are the methods; state is the attributes (`steps 8`, `@pulses 3`, attrui), which is what a right inlet is for in most Max objects. More inlets are a later option (how, in [Later](#later-not-planned)), not a 1.x promise. |
-| D10 | Threads | **A message runs on the thread it arrives on — Max's main thread, or the scheduler thread under Overdrive — holding the GIL until it returns, and outputs on that thread.** As every ordinary Max object does, and as `tap.python~`'s messages already do. No worker. The honest limits: a long computation in a message from a `metro` holds Max's scheduler for its duration (send it through `deferlow` to run on the main thread instead); and while a message runs, a `tap.python~` in direct mode waits for the GIL in 0.5 ms slices (2.6) — worker mode (2.5) is the answer when both are in one patch and the computation is heavy. |
-| D11 | Code layout | **The Max glue the two objects share moves out of `tap.python_tilde/` into `source/shared/`, templated on the host object; the core gains one option.** The dynamic attribute and message registration, the C trampolines, the file watcher and the package paths are the same for both; min's `SUBDIRLIST` makes a target per folder of `source/projects/` only, so a shared folder beside it is safe. The core's `processor` takes `bind_audio` (true for `tap.python~`): with it off, `process` and `prepare` are plain methods and nothing is prepared. Behavior-preserving for `tap.python~`: its tests do not change. |
+| D10 | Threads | **A message runs on the thread it arrives on, holding the GIL while Python runs, and outputs on that thread after the GIL is released.** That is Max's main thread, the scheduler thread under Overdrive — or, with Scheduler in Audio Interrupt on, the audio thread itself, which the object says once per session and the ReadMe states as a limit. As every ordinary Max object does, and as `tap.python~`'s messages already do. No worker. The limits, in [Threads](#threads-and-the-gil). |
+| D11 | Code layout | **One binary registers both Max classes; the second is a plain SDK class, not a min class; the core gains one option.** *Why one binary (decided 2026-10-09, audit B1):* the core is header-only and keeps its process-wide state in function-local statics, so two externals would each start the interpreter — the second `PyImport_AppendInittab()` after `Py_Initialize()` aborts Max (reproduced with two shared objects in one process) — and, as 1.0.1's Windows failure showed, a function's address is not its identity across a DLL boundary. *Why a plain SDK class:* min keeps one file-scope `this_class` per translation unit and returns early from a second `wrap_as_max_external()` (`c74_min_api.h:325`, `c74_min_object_wrapper.h:780`); a second min class in a second translation unit would work by accident of internal linkage and violate the one-definition rule the moment a test instantiated its templates elsewhere. A plain class (`class_new`/`class_addmethod`/`class_register` in the same `ext_main`, after min's) is what the shared glue already speaks — `object_addattr`, `object_addmethod`, the nobox file watcher — and what the outlets need (M1). Max finds the object through the package's `init/` mapping (`objectfile`), with a stub external as the fallback; the 9.0 spike settles which. The core's `processor` takes `bind_audio` (true for `tap.python~`): with it off, `process` and `prepare` are plain methods and nothing is prepared. The shared glue moves into templates on the host object (`python_glue<Host>`) so both classes use one copy. |
 
 ## The class contract
 
@@ -65,17 +69,21 @@ settings* paragraphs, plus output:
   hinted `list[float]`, `list[int]`, `list[str]` or `np.ndarray`, last in the signature, takes all
   the remaining atoms as one list (or a float64 array) — `def list(self, values: np.ndarray) ->
   np.ndarray` is a list in and a list out. This last mapping lands in the core, so `tap.python~`'s
-  messages get it too.
+  messages get it too; it is a change to what such a parameter received before (the empty
+  symbol), recorded as one (9.1).
 - **Output** — below.
 - **Hot reload, errors, console** — as `tap.python~`: a save reloads keeping attribute values; a
   broken save is reported once and the object outputs nothing until a save fixes it; an exception
   in a method prints its traceback and the message outputs nothing; `sys.exit()` is reported, not
   honored; what is below Python (`os._exit()`, a crashing extension, an endless loop — which
   freezes the thread the message came on) is outside the guard (8.1).
-- **Reserved names** — Max's and min's own (8.2's list and the `answered_by_max()` guard), without
-  the audio ones: `dsp`, `dsp64`, `dspsetup`, `dspstate`, `inputchanged`, `multichanneloutputs`,
-  `signal`, `mode`, `latency` and `latencysamples` are free; `anything` is taken by the forwarder
-  above, as a method a class may define.
+- **Reserved names** — Max's and min's own (8.2's list and the guard), without the audio ones:
+  `dsp`, `dsp64`, `dspsetup`, `dspstate`, `inputchanged`, `multichanneloutputs`, `signal`, `mode`,
+  `latency` and `latencysamples` are free; `anything` is taken by the forwarder above, as a method
+  a class may define. The guard asks Max what it answers for a name no class can have and
+  compares every lookup with that (1.0.2's `not_found_method()`), and leaves out everything the
+  object itself registered — its messages, its attributes, its dumpout and its forwarder — since
+  each answers its name in Max (1.0.1's reload bug).
 
 ### Output: what a method returns
 
@@ -85,13 +93,13 @@ returns. The rules reproduce how Max objects and `js` behave, so a patch sees wh
 | The method returns | The object outputs |
 |---|---|
 | `None` | nothing |
-| `bool` | an int, 0 or 1 |
+| `bool`, or numpy's `bool_` | an int, 0 or 1 |
 | an `int` (anything with `__index__`: `np.int64`, an `IntEnum`) | an int (`t_atom_long`, 64-bit; a value past it is reported) |
-| a `float` (anything with `__float__` and no `__index__`: `np.float32`) | a float (non-finite values pass through, as `js` passes them) |
-| a `str` | the message named by it, with no arguments (`"hello world"` is one symbol, as in `js`) |
-| a sequence (`list`, a `tuple` with no `tuple[…]` hint, a 1-D `np.ndarray`, any non-`str` iterable) | a list, each element an atom by the rules above; if the first element is a `str`, the message it names with the rest as arguments (Max's own rule: `["note", 60, 100]` outputs `note 60 100`); an empty sequence outputs nothing; an element that is not an atom (`None`, a nested sequence) is reported and the list is not output |
+| a `float` (anything with `__float__` and no `__index__`: `np.float32`) | a float; a non-finite value passes through as the atom Max can carry (`tap.python~` zeroes them for the audio's sake; a control value is the class's to make) |
+| a `str` | the message named by it, with no arguments (`"hello world"` is one symbol, as in `js`) — *or* `symbol <s>`: the 9.0 spike decides against real downstream objects (`route`, `sel`, `prepend`, a message box's `$1`), and says what happens to the selectors `int`, `float`, `list`, `symbol`, `bang` and `""` |
+| a sequence: a `list`, a `tuple` without a `tuple[…]` hint, a `range`, or a 1-D `np.ndarray` | a list, each element an atom by the rules above; if the first element is a `str`, the message it names with the rest as arguments (Max's own rule: `["note", 60, 100]` outputs `note 60 100`); an empty sequence outputs nothing; an element that is not an atom (`None`, a nested sequence) is reported and the list is not output |
 | a sequence of *n* values, from a method hinted `-> tuple[…]` with *n* members | one value per outlet, outlets *n*…1, right to left, each by these rules (`None` in a slot outputs nothing from that outlet); a result that is not a sequence of exactly *n* values is reported |
-| anything else (a `dict`, an object) | reported, with its type; nothing output (a `dict` as a Max dictionary is a later item) |
+| anything else: a `dict`, a `set`, `bytes`, a generator, a 2-D array, an object | reported, with its type; nothing output (a `dict` as a Max dictionary is a later item) |
 
 The *hint* decides the outlet count when the class loads; the *value* fills them when the method
 runs. A method hinted `-> tuple[int, str]` has two outlets, and so does the object if no method is
@@ -99,17 +107,22 @@ hinted wider; a method hinted `-> list[float]`, `-> np.ndarray`, `-> float` or n
 and an unhinted method that happens to return a tuple outputs it as a list from the first outlet.
 An unhinted tuple return is a list, a hinted one is several outlets: this is the one place where
 the hint changes what a value does, so the ReadMe says it in those words. A `tuple[…]` hint of
-unsaid length (`tuple`, `tuple[int, ...]`) cannot name an outlet count: the method is not exposed,
-and the console says why (as 2.4 does for `process()`).
+unsaid length (`tuple`, `tuple[int, ...]`) cannot name an outlet count: the method keeps one
+outlet and outputs the tuple as a list, and the console says so once — rather than hiding the
+method, so that a class written for `tap.python~` still loads whole (D7). The count comes from
+the hint as an object, or as a string with the same depth-aware split `_split_union` uses
+(`'tuple[list[int], dict[str, int]]'` is two outlets, not three).
 
 A `print()` in a method posts to the console at once from the main thread and a moment later from
-the scheduler thread (8.4); it is not output.
+any other (8.4); it is not output.
 
 ### Examples
 
 `default.py` stays shared by both objects and gains a `bang` that returns the gain, so
 `[tap.python]` with no argument outputs something. New examples, each a thing Max users write by
-hand today:
+hand today, each with the comment `default.py` already carries — once `def list(...)` or
+`def int(...)` is defined, a later annotation in the same class body using `list[...]` or `int`
+names the method, so such methods come last:
 
 - `euclid.py` (above): a Euclidean rhythm from two attributes, a list out of a bang.
 - `scale.py`: a list in, scaled and offset by attributes with numpy, a list out — `def list(self,
@@ -119,19 +132,42 @@ hand today:
 
 ## Threads and the GIL
 
-Nothing new is load-bearing, and that is the point of D10. A message takes a `gil_lock` on the
-thread it arrives on (`processor::call()` already does), converts the arguments, calls the method, and
-converts the result to atoms, all under the GIL; the `outlet_*` calls come after the GIL is
-released. Not for reentrancy — `gil_lock` is `PyGILState_Ensure`, which nests, so a downstream
-object sending a message back into this one (a loop through `trigger`) simply takes it again on the
-same thread — but because an outlet call runs the whole downstream chain before it returns, and
-holding the GIL across it would keep every other Python thread (a `tap.python~`'s audio thread in
-direct mode) waiting for a cascade of Max objects that has nothing to do with Python. Reloads stay
-on the main thread; a message that arrives on the scheduler thread while a reload runs waits for
-the GIL, as a `tap.python~` message does now.
-Output from a thread Python started (`threading.Thread` in the class) is not supported: a method
-runs and returns on Max's thread, and there is no outlet to reach from anywhere else — stated in
-the ReadMe as an honest limit, with the later item that would change it.
+A message takes a `gil_lock` on the thread it arrives on (`processor::call()` already does),
+converts the arguments, calls the method, and converts the result to atoms, all under the GIL;
+the `outlet_*` calls come after the GIL is released. Not for reentrancy — `gil_lock` is
+`PyGILState_Ensure`, which nests, so a downstream object sending a message back into this one (a
+loop through `trigger`) simply takes it again on the same thread — but because an outlet call
+runs the whole downstream chain before it returns, and holding the GIL across it would keep every
+other Python thread (a `tap.python~`'s audio thread in direct mode) waiting for a cascade of Max
+objects that has nothing to do with Python.
+
+**Output against a reload (audit M2).** A reload runs on the main thread and, after `load()`
+returns the GIL, changes the object's outlets and messages. A message on the scheduler thread may
+be outputting at that moment. So the object has one lock of its own, a recursive mutex, held
+across the mapping of a result onto outlets *and the sends* (recursive, because a feedback loop
+re-enters on the same thread), and across every port change (`outlet_delete`,
+`outlet_insert_after`, the outlet vector, `object_deletemethod`/`object_addmethod`). It is never
+held across a call into Python. Under it a message checks that the outlet count it computed for is
+still current, and drops the output, reported once per load, if not. Pinned by a glue test that
+races a widening reload against a second thread's messages (TSan on the Linux leg).
+
+**The honest limits:**
+
+- A long computation in a message from a `metro` holds Max's scheduler for its duration under
+  Overdrive. The patch can send it through `deferlow` to run on the main thread instead.
+- **Scheduler in Audio Interrupt** makes the scheduler thread the audio thread, so a `metro`-driven
+  message then runs Python *on the audio thread*, and waits there for the GIL behind a reload (a
+  few milliseconds) — a dropout. `tap.python~`'s worker mode does not help, because the work
+  itself is on the audio thread; CLAUDE.md's "the audio thread never takes the GIL" holds for a
+  patch without a `tap.python`. The object detects it (`systhread_isaudiothread()`) and says so
+  once per session; the ReadMe states it as a limit; an `@defer` attribute running messages on
+  the main thread is the later remedy ([Later](#later-not-planned)).
+- The 0.5 ms switch interval (2.6) bounds how long a *bytecode* loop keeps the GIL from a waiting
+  thread; a single long C call (a numpy operation on a large array) holds it throughout, as 2.6
+  says itself.
+- Output from a thread Python started (`threading.Thread` in the class) is not supported: a method
+  runs and returns on Max's thread, and there is no outlet to reach from anywhere else — stated as
+  a limit, with the later item that would change it.
 
 ## The core
 
@@ -141,120 +177,175 @@ did (D6):
 - **`value.h`** — beside `value` (one atom): `output_item`, a message to output — a selector or
   none, and its atoms (what `outlet_anything` / `outlet_list` / `outlet_int` take) — and
   `output`, the per-outlet items of one call. The conversion from a Python object to an
-  `output_item` lives in the core (the rules above), with its errors as diagnostics through the
+  `output_item` lives in the core (the table above; `np.bool_` recognized by its `__mro__` name as
+  `hint_kind` does, without importing numpy), with its errors as diagnostics through the
   processor's log, so the Max side only maps items onto `outlet_*` calls.
 - **`processor.h`** — `message_info` gains `return_count` (from `describe()`'s `return_shape`,
-  which the signature already carries); `outlet_count()` is the widest among the messages (at least
-  one); `call()` returns the converted `output` (empty for `None` or a failure) instead of a bool,
-  with a `call()` overload keeping the old shape for `tap.python~`; a `processor_options` (or a
-  constructor flag) `bind_audio` — off, `process`/`prepare` are bound as messages, `has_process()`
-  is false, `prepare()` is a no-op; argument conversion for a last parameter hinted `list[…]` or
-  `np.ndarray`. The `Loaded` line (6.7) says what the loading object bound — "4 messages, 2
-  outlets" for a `tap.python`, "process() bound, one call per vector" for a `tap.python~` — so
-  with a file shared by both kinds it describes whichever ran the save; an honest limit of 6.7's
-  rule, written down.
-- **Tests** — `test_output.cpp`: every row of the table above, from a fixture class whose methods
-  return each kind; the outlet count from the hints; an unhinted tuple as a list against a hinted
-  one as outlets; an unsaid-length tuple hint not exposed; the `list[…]`/`np.ndarray` parameter;
-  `bind_audio` off making `process` a message; a method raising outputs nothing and reports; a
-  call from a second thread racing a reload on the first (as `test_threads.cpp` does for audio).
+  made depth-aware for string hints); `outlet_count()` is the widest among the messages (at least
+  one); a new **`call_with_output()`** returns the converted `output` (empty for `None` or a
+  failure) beside the existing `bool call()`, which `tap.python~` keeps (C++ cannot overload on the
+  return type alone); the constructor's `bind_audio` — off, `process`/`prepare` are bound as
+  messages, `has_process()` is false, `prepare()` is a no-op; the unsaid-length tuple rule applies
+  only with `bind_audio` off; argument conversion for a last parameter hinted `list[…]` or
+  `np.ndarray`, which needs the support module's `describe()` to report a list hint's element kind.
+- **Announce-once per kind (audit M5).** The class diagnostics that depend on the object kind — a
+  name reserved by one host and not the other, the tuple rule — are announced once per *(file,
+  kind)*, not once per file: the loader keeps what it announced for each kind against the source
+  it executed (`announce_due(name, kind)`), and a processor announces what its kind owes even when
+  the other kind ran the save. The `Loaded` line stays once per save, from whichever ran it, and
+  says what that object bound — "4 messages, 2 outlets" or "process() bound, one call per vector".
+- **Tests** — `test_output.cpp`: every row of the table above from a fixture whose methods return
+  each kind; the outlet count from the hints, object and string, nested; an unhinted tuple as a
+  list against a hinted one as outlets; an unsaid-length tuple hint as a list with one notice; the
+  `list[…]`/`np.ndarray` parameter — **with a test of today's behavior first** (the empty symbol),
+  then the change; `bind_audio` off making `process` a message and leaving `tap.python~`'s battery
+  untouched; two processors of different kinds on one file, each announcing what it owes; a method
+  raising outputs nothing and reports; a call from a second thread racing a reload on the first.
 
 ## The Max object
 
-`source/projects/tap.python/` — `tap.python.h`, `tap.python.cpp`, `tap.python_test.cpp` — a min
-`object<>` without `vector_operator<>`:
+`source/projects/tap.python_tilde/` gains the second class beside the first — `tap.python.h`,
+registered by the project's own `ext_main` in `tap.python_tilde.cpp` after min's
+`wrap_as_max_external<python>()` — a plain SDK class (D11):
 
-- **Ports.** One `inlet<>`; `outlet<>`s for the class's `outlet_count()` plus a last `outlet<>
-  m_dumpout{this, "dumpout"}` stored in the obex (`object_obex_store(maxobj(), gensym("dumpout"),
-  …)`) so that `get<attr>` outputs from it. On a reload that changes the count, dynamic outlets as
-  2.4 does, without `dsp_resize`: between the box's `dynlet_begin`/`dynlet_end`, `outlet_delete`
-  for the surplus and `outlet_insert_after` the last value outlet for the new ones (never
-  `outlet_append`, which would land them after the dumpout), min's lists following; without a box,
-  the object keeps its outlets and says so once. *To check in Max:* that min's `outlet<>` named
-  `dumpout` is enough for `get<attr>` or whether the obex store is needed (min stores one for jit
-  objects only, `max_jit_class_wrap_standard`).
-- **Messages.** The shared `python_message` registration; `message_gimme()` calls the processor and
-  maps each `output_item` onto `outlet_int`/`outlet_float`/`outlet_anything`/`outlet_list` on the
-  right outlet, right to left. A min `message<> m_anything{this, "anything", …}` forwards an
-  unknown selector with its atoms to the class's `anything` method when it has one, and otherwise
-  posts that the object does not understand it (Max's own wording).
-- **Reserved names.** 8.2's list less the audio names, and the `answered_by_max()` guard; `anything`
-  is answered by the object (the forwarder), so it must not be reserved by the guard — the guard
-  excludes it by name, and a glue test asserts a class's `anything` is exposed.
-- **The rest** is the shared glue: the file watcher (`filechanged`, 6.1's nobox helper), the console
-  (8.4's qelem), the package paths, attributes (3.4's reconciliation), `reserved_messages()` and
-  `answered_by_max()`. `MIN_DESCRIPTION` is the contract (5.1): min writes
-  `docs/tap.python.maxref.xml` from it.
-- **Glue test** (mock kernel): `[tap.python euclid]` has one inlet, two outlets (one plus dumpout);
-  a bang's list is in `object_getoutput(maxobj, 0)` (the mock records outlet sequences); a
-  `note_name` int fills outlet 1 then outlet 0; a str return arrives as an `anything`; `getsteps`
-  reaches the dumpout (if the mock routes it; else a runtime test); a `tuple[…]` save that widens
-  the class records the dynlet calls as 2.4's test does.
+- **The class.** `class_new("tap.python", new, free, sizeof(tap_python), nullptr, A_GIMME, 0)`,
+  `assist` (`A_CANT`), `filechanged` (typed, as the watcher sends it), the standard messages the
+  class's Python methods take through `python_message`, and a class-level `anything` forwarder;
+  `class_register(CLASS_BOX, c)`. The struct holds the `t_object`, the processor (`bind_audio`
+  off), the outlet pointers, the dumpout, the lock, the file watch and the attribute and message
+  maps — the same members as the min object, through the shared glue.
+- **How Max finds it.** The package's `init/tap.python.txt` maps the object name to the file:
+  `max objectfile tap.python tap.python~;` — the mapping Max's own `init/` text files use for
+  objects that live in a file of another name. *The spike confirms it on both platforms.* If Max
+  will not map it, the fallback is a stub external `tap.python.mxo` / `.mxe64` with no core in it,
+  whose `ext_main` has Max load `tap.python~`'s file (which registers both classes) and returns;
+  the spike tries that too if needed. `assemble-package.py` ships `init/`.
+- **Ports (audit M1).** In `new`, `outlet_new()` for the dumpout first (Max orders outlets by
+  creation, right to left), stored with `object_obex_store(x, _sym_dumpout, …)` as the SDK's own
+  example does, then the value outlets from last to first. The object sends through the raw
+  pointers it holds, never through min. On a reload that changes the count, between the box's
+  `dynlet_begin` and `dynlet_end`: `outlet_delete` for the surplus, `outlet_insert_after` the last
+  value outlet for the new ones (never `outlet_append`, which would land them after the dumpout),
+  under the object's lock; without a box, the object keeps its outlets and says so once.
+- **Messages and output.** `message_gimme()` calls `call_with_output()` and, under the lock, maps
+  each `output_item` onto `outlet_int`/`outlet_float`/`outlet_anything`/`outlet_list` on the right
+  outlet, right to left.
+- **`anything` (audit M3).** A class-level forwarder registered in `class_new`, so it exists for
+  every instance and the object, not Max's dispatch order, decides what happens: a selector is
+  tried as one of the class's messages, then as an attribute set, then as `get<name>` (output from
+  the dumpout), then as the class's Python `anything` if it has one, and otherwise posts that the
+  object does not understand it, in Max's own words. The Python `anything` is never registered as
+  an instance method. *Unverified until the spike:* whether Max consults the object's instance
+  methods and attributes before a class-level `anything` at all (8.8 showed an added attribute's
+  name is found by `object_getmethod()`, which is consistent with it); the forwarder is correct
+  either way.
+- **The guard.** `answered_by_max()` as 1.0.2 has it — compare with what Max answers for a name no
+  class can have — leaving out the object's own messages, attributes, dumpout and forwarder. If
+  Max answers unknown names with the forwarder on a class that has one, the sentinel *is* the
+  forwarder and unknown names still read as "not found".
+- **Reserved names.** 8.2's list less the audio names; `anything` is answered by the forwarder and
+  is not reserved by the guard (the sentinel sees to it), and a glue test asserts a class's
+  `anything` is exposed.
+- **Threads.** The lock above; `systhread_isaudiothread()` on each message for the once-per-session
+  notice; the console through the shared qelem (8.4).
+- **The rest** is the shared glue, templated on the host: the file watcher (6.1's nobox helper,
+  registered once for both hosts), attributes (3.4's reconciliation), messages, the trampolines
+  (`python_glue<Host>::self(t_object*)` instead of `wrapper_find_self`), the package paths.
+- **The reference page.** min writes `tap.python~`'s from `MIN_DESCRIPTION`; a plain SDK class has
+  no such generator, so `docs/tap.python.maxref.xml` is written by hand from the same source of
+  truth, the contract above, and kept in step by review (CLAUDE.md's "never hand-edit" is about
+  the page min generates). The help patcher is by hand in Max, as 5.2 was.
+- **Glue test** (mock kernel, with the stubs made faithful — audit m5): `outlet_nth` returning the
+  mock's real outlet ids, `object_obex_store`/`object_obex_dumpout` and `outlet_insert_after`
+  stubbed and recorded. `[tap.python euclid]` (made through the class's own `new`, as Max would)
+  has one inlet, two outlets (one plus dumpout); a bang's list is in `object_getoutput(x, 0)`; a
+  `note_name` int fills outlet 1 then outlet 0; `getsteps` reaches the dumpout; a `tuple[…]` save
+  that widens the class records the dynlet calls; the forwarder's order with a class that has
+  `anything` and with one that does not; the reload race under TSan.
 
 ## The package
 
-- **Build.** The runtime discovery block of `tap.python_tilde/CMakeLists.txt` (support/, weak link,
-  delay-load, rpaths per slice, bundle identifier, the `.mxo` touch) moves to
-  `source/cmake/embedded-python.cmake`, included by both objects' `CMakeLists.txt`; each object's
-  stays a page. Both externals build and test on Linux (the mock kernel), macOS and Windows.
+- **Build.** The second class compiles into `tap.python~`'s module: a second header and its TU in
+  the same CMake target; the runtime, link and rpath rules are unchanged. The glue test target
+  includes both. Linux (the mock kernel), macOS and Windows as now.
 - **CI.** `build.yml`: the data-import check (4.2), the bundle identifier, `lipo`/`otool` and the
-  rpath checks, and the Windows delay-load check run over both externals (a loop over
-  `externals/`, so a third would need nothing). `style.yml`: both objects' TUs in the clang-tidy
-  list and its header filter, and `source/shared/` added to clang-format's file list (today it
-  lists `source/projects/` and `core/` only). `scripts/tidy.sh` is TapHouse's and takes a repo's
-  own TUs — unchanged.
-- **Packaging.** `assemble-package.py`'s `EXTERNALS` becomes a list per platform; `--merge` already
-  copies every external it finds. `package-info.json.in`'s description names both objects. The
-  release zips carry both; nothing else in `release.yml` names an external.
+  rpath checks and the Windows delay-load check are unchanged (one external). `style.yml`: the new
+  TU and header in the clang-tidy list, and `source/shared/` — if the glue moves there — in
+  clang-format's file list (today it lists `source/projects/` and `core/` only).
+- **Packaging.** `assemble-package.py` ships `init/` beside `help`, `docs` and `python`;
+  `package-info.json.in`'s description names both objects. One external per platform, as now; the
+  icon is TapHouse's and guarded (v6), and is the package's, not an object's.
 - **Docs.** The ReadMe: a `tap.python` section after the audio one — the loading line, the output
-  table, the honest limits (D10, threads, no output from Python's own threads, no dictionaries
-  yet) — and its performance note is one sentence: the cost is the method's Python, plus the
-  `call()` bridge measured once by `core/bench`. `help/tap.python.maxhelp`, by hand in Max, with
-  the three examples. `docs/tap.python.maxref.xml` from min (6.8's rule: commit Max's). CLAUDE.md:
-  the second object in the layout and the shared glue. `CHANGELOG.md`: 1.1.0 — a new object, no
-  change to `tap.python~`'s contract beyond the `list[…]` parameter, which only adds.
+  table, the limits (D10, Scheduler in Audio Interrupt, no output from Python's own threads, no
+  dictionaries yet), and a performance sentence: the cost is the method's Python, plus the
+  `call()` bridge measured once by `core/bench`. `help/tap.python.maxhelp` with the three examples.
+  `docs/tap.python.maxref.xml` by hand (above). CLAUDE.md: the second class, the shared glue, D11's
+  reasons. `CHANGELOG.md`: 1.1.0 — a new object; the `list[…]` parameter recorded as a change to
+  what `tap.python~` passes such a parameter (the empty symbol before), pinned by a test of the old
+  behavior first; whether that needs 2.0 under the CHANGELOG's rule is the maintainer's call, and
+  the plan's position is that a hint which never carried a value is not a contract a class could
+  have relied on.
 - **Runtime tests in Max** (`runtime-tests/`): `make_patchers.py` gains a non-signal `python()`
-  box; new patchers `tap.python.*.maxtest.maxpat`: load (no argument, each example); every output
-  row through `[print]`-free checks (a list into `test.assert`, an `anything` through `route`, two
-  outlets in order through `trigger`); `getsteps` from the dumpout; a save that widens the return
-  hint changes the outlets and the new one's cord carries (2.4's `channels` test, for control
-  outlets); one file shared by a `tap.python~` and a `tap.python`, saved: one `Loaded` line, both
-  reload; a message from a `metro` under Overdrive (the scheduler thread) outputs correctly and in
-  order; `sys.exit()` and an exception reported, the object alive; `anything` forwarded. The Mac
-  session that runs them is the phase's last item, with the help patcher.
+  box; new patchers `tap.python.*.maxtest.maxpat`: load (no argument, each example, through the
+  `init/` mapping in a fresh Max); every output row through `[print]`-free checks (a list into
+  `test.assert`, an `anything` through `route`, two outlets in order through `trigger`); `getsteps`
+  from the dumpout; a save that widens the return hint changes the outlets and the new one's cord
+  carries (2.4's `channels` test, for control outlets); one file shared by a `tap.python~` and a
+  `tap.python`, saved: one `Loaded` line, both reload, each kind's diagnostics once; a message from
+  a `metro` under Overdrive outputs correctly and in order; `sys.exit()` and an exception reported,
+  the object alive; `anything` forwarded; a class with `anything` and attributes, the attributes
+  still set and read. Windows has no harness: the glue test runs there in CI, and the spike and
+  the release session run the package by hand.
 
 ## Plan — Phase 9 of the production plan
 
-One PR each, in this order; each lands against tests that fail before it.
+One PR each, in this order; each lands against tests that fail before it. **9.0 comes first,
+before any code the others depend on, and runs on a Mac and on Windows** — three releases in a
+row (1.0.0, 1.0.1, 1.0.1's Windows package) shipped what only a host platform could show, and the
+third was Windows-only.
 
+- [ ] **9.0 The spike, in Max on both platforms.** A throwaway second class in `tap.python~`'s
+  binary, enough to answer what only Max can, written into this plan before 9.1:
+  - a plain SDK class registered beside min's in one `ext_main` loads, and both objects work in
+    one patch created in either order (D11);
+  - `init/tap.python.txt`'s `objectfile` mapping makes `[tap.python]` load the file in a fresh
+    Max — or the stub external does;
+  - `outlet_insert_after` places an outlet before the dumpout, and patch cords survive it (M1);
+  - `get<attr>` reaches the obex-stored dumpout (M1);
+  - the dispatch order of a class-level `anything` against the object's instance methods and
+    attributes, and what `object_getmethod()` answers for an unknown name on such a class (M3);
+  - which thread a `metro`-driven message runs on with Overdrive on, and with Scheduler in Audio
+    Interrupt on (M4);
+  - `symbol` or `anything` for a `str` return, against `route`, `sel`, `prepend` and a message
+    box (m2).
 - [ ] **9.1 The core: output, outlets and the audio option.** `value.h`'s `output_item`/`output`
-  and the Python-to-output conversion; `message_info::return_count`, `outlet_count()`, `call()`
-  returning the output; `bind_audio`; the `list[…]`/`np.ndarray` final parameter (for both
-  objects); the `Loaded` line per binding. `test_output.cpp` and fixtures. No Max code changes;
-  `tap.python~`'s battery and glue test unchanged and green, the bench numbers unchanged (the
-  audio path does not touch the new code).
+  and the Python-to-output conversion; `message_info::return_count` (depth-aware for strings),
+  `outlet_count()`, `call_with_output()`; `bind_audio`, gating the tuple rule; the
+  `list[…]`/`np.ndarray` final parameter with the old behavior pinned first; announce-once per
+  kind; the `Loaded` line per binding. `test_output.cpp` and fixtures. No Max code changes;
+  `tap.python~`'s battery and glue test unchanged and green; the bench numbers unchanged (the audio
+  path does not touch the new code).
 - [ ] **9.2 The shared glue.** `tap.python_tilde_{attribute,message,cglue,filewatch,package}.h`
-  move to `source/shared/tap/python_max/` as `python_glue<Host>` (the trampolines instantiated in
-  each object's `.cpp` through `wrapper_find_self<Host>`); the runtime CMake block to
-  `source/cmake/embedded-python.cmake`; `style.yml`'s list and header filter follow. Pure move:
-  `tap.python~`'s behavior, tests and the data-import check unchanged. *Decide in the PR:* whether
-  `reserved_messages()` and `answered_by_max()` move too, parameterized by the audio names, or each
-  object keeps its list (the audio names are the only difference).
-- [ ] **9.3 The object.** `source/projects/tap.python/`: ports with the dumpout, output mapping,
-  `anything` forwarding, dynamic outlets on reload, the reserved names, `MIN_DESCRIPTION`; the
-  glue test; the examples (`euclid.py`, `scale.py`, `note_name.py`, `default.py`'s `bang`); the
-  CI checks over both externals; `assemble-package.py` and `package-info.json.in`. CHANGELOG 1.1.0
-  started.
-- [ ] **9.4 Documentation.** The ReadMe section and the output table; CLAUDE.md; the help patcher
-  (JSON by hand, as 5.2 was, checked in Max in 9.6); the reference page from min against the mock
-  kernel (5.1's way), to be replaced by Max's in 9.6.
-- [ ] **9.5 Runtime tests.** The patchers above, in `make_patchers.py`, and `run.py` aware of the
-  second external (its `EXTERNAL` check, the `--package` mode, the reference-page rule for both
-  pages).
-- [ ] **9.6 The Mac session.** Build, run the whole runtime suite (both objects), check the help
-  patcher and re-save it, commit the pages Max writes, the hand checks the tests cannot make
-  (`get<attr>` through the dumpout in a patcher, attrui on a `tap.python`, a `tap.python~` and a
-  `tap.python` on one file saved while audio runs), then tag `v1.1.0`.
+  become `python_glue<Host>` (the trampolines instantiated per host through `Host::self()`), in
+  `source/shared/tap/python_max/` or beside the object; `reserved_messages()` parameterized by the
+  audio names. A pure move: `tap.python~`'s behavior, tests and the data-import check unchanged.
+- [ ] **9.3 The object.** `tap.python.h` and its TU in the project, registered by the project's
+  `ext_main`; ports with the dumpout and the lock; output mapping; the `anything` forwarder; dynamic
+  outlets on reload; the guard and the reserved names; the Scheduler-in-Audio-Interrupt notice;
+  `init/tap.python.txt` (or the stub); the glue test with faithful stubs; the examples (`euclid.py`,
+  `scale.py`, `note_name.py`, `default.py`'s `bang`); `assemble-package.py` and
+  `package-info.json.in`; CHANGELOG 1.1.0 started.
+- [ ] **9.4 Documentation.** The ReadMe section, the output table and the limits; CLAUDE.md; the
+  help patcher (JSON by hand, checked in Max in 9.6); `docs/tap.python.maxref.xml` by hand.
+- [ ] **9.5 Runtime tests.** The patchers above in `make_patchers.py`; `run.py` aware of the
+  second object (the `init/` mapping in the installed package, the `--package` mode, the
+  reference-page rule for `tap.python~`'s page only).
+- [ ] **9.6 The release session, Mac and Windows.** Build, run the whole runtime suite on the Mac,
+  check the help patcher and re-save it, commit the page Max writes for `tap.python~`, the hand
+  checks the tests cannot make (`get<attr>` through the dumpout in a patcher, attrui on a
+  `tap.python`, a `tap.python~` and a `tap.python` on one file saved while audio runs); on
+  Windows, the package by hand: both objects load through the mapping, attributes and messages
+  work, a reload keeps them. Then tag `v1.1.0`.
 
 ## Later (not planned)
 
@@ -264,21 +355,48 @@ Written down so they are decided rather than rediscovered; none is promised by 1
   `t_dictionary` the object owns), and a `dictionary` message in as a `dict` argument. The natural
   next step, and a real design: ownership of the named dictionary, nested values, and `jit`-style
   `dictobj` registration.
+- **`@defer`.** Run every message on the main thread (`defer_low`), as `js` effectively does: the
+  remedy for Scheduler in Audio Interrupt, and for a heavy method under Overdrive. `deferlow` in
+  the patch does the same today; add it when the notice above is seen in practice.
 - **Timers.** A class that wants to run on its own — a sequencer — needs a clock. Two shapes: an
   attribute `@interval` ms calling a method `tick()` on the scheduler thread (nothing to import,
   consistent with the rest), or a `self`-side API (a `schedule(ms, method)` injected at
   construction, which breaks "runs in a notebook"). The first fits; measure a Python call per tick
   against Max's own `metro` before promising timing.
-- **More inlets.** min's `inlet<>` list makes proxies, and `proxy_getinlet()` says which one a
-  message came in; a mapping would be `inlets: ClassVar[int]` plus the inlet number as a first
-  argument to `anything`, or a method per inlet. Not until a use needs it: attributes cover the
-  cold-inlet idiom.
+- **More inlets.** `proxy_new()` per extra inlet and `proxy_getinlet()` to tell which one a message
+  came in; a mapping would be `inlets: ClassVar[int]` plus the inlet number as a first argument to
+  `anything`, or a method per inlet. Not until a use needs it: attributes cover the cold-inlet
+  idiom.
 - **Output from Python's own threads.** A queue the class could post to from a `threading.Thread`,
   drained by a qelem on the main thread — `node.script`'s shape. It needs the injected API the
   timers item weighs.
 - **`buffer~` and `jit.matrix` as numpy arrays.** Attractive and Max-specific: a `buffer~` name as
   an attribute, its samples as an `np.ndarray` view under `buffer_locksamples()`. The locking rules
   make it its own design.
-- **Deferring to the main thread.** An `@defer` attribute running every message on the main
-  thread (`defer_low`), as `js` effectively does. `deferlow` in the patch does the same today; add
-  it only if users ask.
+
+## Revision record
+
+*2026-10-09, against 1.0.2, for `AUDIT-TAP-PYTHON-PLAN.md` and its addendum:*
+
+- **B1 → D11 rewritten:** one binary, two classes; and, because min allows one class per
+  translation unit, the second is a plain SDK class. Max finds it through `init/`'s `objectfile`
+  mapping, with a stub external as the fallback.
+- **B2 → 9.0:** a Max spike on both platforms before 9.1, with the questions listed; 8.8 has run.
+- **M1 → Ports:** raw outlets created dumpout-first, the dumpout in the obex, sends through the
+  object's own pointers, `outlet_insert_after` on reload.
+- **M2 → Threads:** the object's recursive lock across output and port changes, with a race test.
+- **M3 → `anything`:** a class-level forwarder that fixes the order itself; the Python `anything`
+  never an instance method; the guard as 1.0.2 has it, leaving out everything the object registers.
+- **M4 → D10 and Threads:** Scheduler in Audio Interrupt named, detected and stated as a limit;
+  `@defer` the later remedy; the C-call caveat on the switch interval.
+- **M5 → The core:** announce-once per (file, kind).
+- **M6 → The core and Docs:** the tuple rule gated on `bind_audio`; an unsaid-length tuple output
+  as a list rather than hidden; the `list[…]` parameter recorded as a change with the old
+  behavior pinned first, and the version question put to the maintainer.
+- **m1–m9:** the output table's sequence types enumerated and `np.bool_` placed; the `str` return
+  decided by the spike; `call_with_output()`; depth-aware string hints; faithful mock stubs; the
+  file watcher registered once (one binary); the shadowing comment in the examples; D10 reworded
+  to match the Threads section; non-finite floats pass through on the plan's own reasoning, the
+  `js` claim dropped.
+- **Addendum:** the guard rule from 1.0.1 and 1.0.2 (compare with what Max answers; leave out what
+  the object registers), Windows in the spike and the release session.
