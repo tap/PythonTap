@@ -61,7 +61,7 @@ $Sessions = @(
     @('q4-dispatch',    @('q4-dispatch'),    6),
     @('q5-threads',     @('q5-threads'),     12),
     @('q6-strings',     @('q6-strings'),     6),
-    @('q7',             @(),                 900)
+    @('q7',             @(),                 3600)
 )
 
 $Interesting = "spike|recorder|\bq[1-7]\b|tap\.python|No such object|python:|Loaded |doesn't understand|" +
@@ -156,7 +156,11 @@ for name in names:
 "@
     $script = Join-Path $Logs 'spike-windows-q7-query.py'
     [System.IO.File]::WriteAllText($script, $query)
-    $lines = @('', "Max's file database ($($database.Name)), for the files q7 put in the package:")
+    $lines = @('')
+    if (-not (Select-String -Path $MaxLog -Pattern 'maxdb update complete' -Quiet)) {
+        $lines += "Max's file database had NOT finished its update when Max quit, so what follows is incomplete:"
+    }
+    $lines += "Max's file database ($($database.Name)), for the files q7 put in the package:"
     $lines += & $Python $script $copy $names
     return $lines
 }
@@ -248,5 +252,23 @@ $os = (Get-CimInstance Win32_OperatingSystem)
 $header = @("# The plan 9.0 spike in Max $version, $($os.Caption) $($os.Version) $env:PROCESSOR_ARCHITECTURE",
             '# (written by runtime-tests/spike/run_spike_windows.ps1: the lines of interest from Max''s log)', '')
 $output = Join-Path $Results 'windows.txt'
-[System.IO.File]::WriteAllLines($output, [string[]]($header + $report))  # UTF-8, no BOM
+# With -Only, the sessions run replace their own sections of an existing results file.
+$sections = [ordered]@{}
+if ($Only.Count -and (Test-Path $output)) {
+    $current = $null
+    foreach ($line in (Get-Content $output)) {
+        if ($line -match '^## session (\S+)') { $current = $Matches[1]; $sections[$current] = @() }
+        if ($current) { $sections[$current] += $line }
+    }
+}
+$current = $null
+foreach ($line in $report) {
+    if ($line -match '^## session (\S+)') { $current = $Matches[1]; $sections[$current] = @() }
+    if ($current) { $sections[$current] += $line }
+}
+$body = @()
+foreach ($session in $Sessions) {
+    if ($sections.Contains($session[0])) { $body += $sections[$session[0]] }
+}
+[System.IO.File]::WriteAllLines($output, [string[]]($header + $body))  # UTF-8, no BOM
 Write-Host "wrote $output"
