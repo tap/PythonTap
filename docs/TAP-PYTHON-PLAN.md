@@ -47,7 +47,7 @@ ordinary Max object model, which is what makes it composable with `trigger`, `me
 | # | Decision | Choice |
 |---|---|---|
 | D7 | What `tap.python` is | **A second Max object in the same package, over the same core, with the same class contract minus audio, plus output.** Same `python/` folder, same loader (a file saved once is executed once however many objects of either kind share it), same attributes, messages, hot reload, console and error guards. A class written for one object loads in the other: in `tap.python`, `process()` and `prepare()` are ordinary methods (sending `process 0.5` calls it and outputs the result — a way to test a filter sample by sample); in `tap.python~`, a method's return value is dropped, as now. |
-| D8 | How output works | **A method's return value is output from the object's outlets, by its type; its return *hint* fixes how many outlets, at bind time.** No injected outlet API in 1.x (nothing for the class to import, so it still runs in a notebook): `None` outputs nothing; a number or a string one atom; a sequence a list; a method hinted `-> tuple[A, B]` outputs one value per outlet, right to left. The object has as many outlets as the widest return hint among its methods (at least one), plus a dumpout outlet at the right, as Max objects with attributes do; a save that changes the count changes the outlets in place. The rules are in [Output](#output-what-a-method-returns). |
+| D8 | How output works | **A method's return value is output from the object's outlets, by its type; its return *hint* fixes how many outlets, at bind time.** No injected outlet API in 2.0 (nothing for the class to import, so it still runs in a notebook): `None` outputs nothing; a number or a string one atom; a sequence a list; a method hinted `-> tuple[A, B]` outputs one value per outlet, right to left. The object has as many outlets as the widest return hint among its methods (at least one), plus a dumpout outlet at the right, as Max objects with attributes do; a save that changes the count changes the outlets in place. The rules are in [Output](#output-what-a-method-returns). |
 | D9 | Inlets | **One inlet in the first release.** Messages are the methods; state is the attributes (`steps 8`, `@pulses 3`, attrui), which is what a right inlet is for in most Max objects. More inlets are a later option (how, in [Later](#later-not-planned)), not a 1.x promise. |
 | D10 | Threads | **A message runs on the thread it arrives on, holding the GIL while Python runs, and outputs on that thread after the GIL is released.** That is Max's main thread, the scheduler thread under Overdrive — or, with Scheduler in Audio Interrupt on, the audio thread itself, which the object says once per session and the ReadMe states as a limit. As every ordinary Max object does, and as `tap.python~`'s messages already do. No worker. The limits, in [Threads](#threads-and-the-gil). |
 | D11 | Code layout | **One binary registers both Max classes; the second is a plain SDK class, not a min class; the core gains one option.** *Why one binary (decided 2026-10-09, audit B1):* the core is header-only and keeps its process-wide state in function-local statics, so two externals would each start the interpreter — the second `PyImport_AppendInittab()` after `Py_Initialize()` aborts Max (reproduced with two shared objects in one process) — and, as 1.0.1's Windows failure showed, a function's address is not its identity across a DLL boundary. *Why a plain SDK class:* min keeps one file-scope `this_class` per translation unit and returns early from a second `wrap_as_max_external()` (`c74_min_api.h:325`, `c74_min_object_wrapper.h:780`); a second min class in a second translation unit would work by accident of internal linkage and violate the one-definition rule the moment a test instantiated its templates elsewhere. A plain class (`class_new`/`class_addmethod`/`class_register` in the same `ext_main`, after min's) is what the shared glue already speaks — `object_addattr`, `object_addmethod`, the nobox file watcher — and what the outlets need (M1). Max finds the object through the package's `init/` mapping (`objectfile`), with a stub external as the fallback; the 9.0 spike settles which. The core's `processor` takes `bind_audio` (true for `tap.python~`): with it off, `process` and `prepare` are plain methods and nothing is prepared. The shared glue moves into templates on the host object (`python_glue<Host>`) so both classes use one copy. |
@@ -70,7 +70,7 @@ settings* paragraphs, plus output:
   the remaining atoms as one list (or a float64 array) — `def list(self, values: np.ndarray) ->
   np.ndarray` is a list in and a list out. This last mapping lands in the core, so `tap.python~`'s
   messages get it too; it is a change to what such a parameter received before (the empty
-  symbol), recorded as one (9.1).
+  symbol), recorded as one (9.1) — and the reason the release is 2.0.0 (decided 2026-10-09).
 - **Output** — below.
 - **Hot reload, errors, console** — as `tap.python~`: a save reloads keeping attribute values; a
   broken save is reported once and the object outputs nothing until a save fixes it; an exception
@@ -269,7 +269,10 @@ registered by the project's own `ext_main` in `tap.python_tilde.cpp` after min's
   the same CMake target; the runtime, link and rpath rules are unchanged. The glue test target
   includes both. Linux (the mock kernel), macOS and Windows as now.
 - **CI.** `build.yml`: the data-import check (4.2), the bundle identifier, `lipo`/`otool` and the
-  rpath checks and the Windows delay-load check are unchanged (one external). `style.yml`: the new
+  rpath checks and the Windows delay-load check are unchanged (one external); `linux-max-glue`
+  gains ASan/UBSan and TSan rows, as `linux-core` has, for the lock and the reload race; one
+  script checks the hand-made artifacts (the pages' XML, the help patchers' JSON, `init/` in the
+  assembled package). `style.yml`: the new
   TU and header in the clang-tidy list, and `source/shared/` — if the glue moves there — in
   clang-format's file list (today it lists `source/projects/` and `core/` only).
 - **Packaging.** `assemble-package.py` ships `init/` beside `help`, `docs` and `python`;
@@ -277,14 +280,16 @@ registered by the project's own `ext_main` in `tap.python_tilde.cpp` after min's
   icon is TapHouse's and guarded (v6), and is the package's, not an object's.
 - **Docs.** The ReadMe: a `tap.python` section after the audio one — the loading line, the output
   table, the limits (D10, Scheduler in Audio Interrupt, no output from Python's own threads, no
-  dictionaries yet), and a performance sentence: the cost is the method's Python, plus the
-  `call()` bridge measured once by `core/bench`. `help/tap.python.maxhelp` with the three examples.
-  `docs/tap.python.maxref.xml` by hand (above). CLAUDE.md: the second class, the shared glue, D11's
-  reasons. `CHANGELOG.md`: 1.1.0 — a new object; the `list[…]` parameter recorded as a change to
-  what `tap.python~` passes such a parameter (the empty symbol before), pinned by a test of the old
-  behavior first; whether that needs 2.0 under the CHANGELOG's rule is the maintainer's call, and
-  the plan's position is that a hint which never carried a value is not a contract a class could
-  have relied on.
+  dictionaries yet), and a performance sentence backed by the bench row 9.1 adds. In Max's own
+  documentation system (9.4): `docs/tap.python.maxref.xml` by hand (above); a vignette and three
+  tutorials with patchers in `docs/`; a *PythonTap Overview* patcher in `extras/`, named as the
+  landing patcher; help patchers with tabs for both objects. CLAUDE.md: the second class, the
+  shared glue, D11's reasons. `CHANGELOG.md`: 2.0.0 — a new object; the `list[…]` parameter
+  recorded as a change to what `tap.python~` passes such a parameter (the empty symbol before),
+  pinned by a test of the old behavior first. *Decided 2026-10-09 (the maintainer):* that is a
+  contract change under the CHANGELOG's rule, so the release that carries `tap.python` is **2.0.0**,
+  not 1.1 — the rule is applied as written, however unlikely a class relied on a hint that carried
+  the empty symbol. The book (9.7) follows the release.
 - **Runtime tests in Max** (`runtime-tests/`): `make_patchers.py` gains a non-signal `python()`
   box; new patchers `tap.python.*.maxtest.maxpat`: load (no argument, each example, through the
   `init/` mapping in a fresh Max); every output row through `[print]`-free checks (a list into
@@ -317,39 +322,73 @@ third was Windows-only.
   - which thread a `metro`-driven message runs on with Overdrive on, and with Scheduler in Audio
     Interrupt on (M4);
   - `symbol` or `anything` for a `str` return, against `route`, `sel`, `prepend` and a message
-    box (m2).
+    box (m2) — *the maintainer's choice (2026-10-09): the spike decides*;
+  - where Max picks up a vignette (`.maxvig.xml`) and a tutorial (`.maxtut.xml`) dropped into
+    the package's `docs/`, and a patcher in `extras/`, for 9.4.
 - [ ] **9.1 The core: output, outlets and the audio option.** `value.h`'s `output_item`/`output`
   and the Python-to-output conversion; `message_info::return_count` (depth-aware for strings),
   `outlet_count()`, `call_with_output()`; `bind_audio`, gating the tuple rule; the
   `list[…]`/`np.ndarray` final parameter with the old behavior pinned first; announce-once per
-  kind; the `Loaded` line per binding. `test_output.cpp` and fixtures. No Max code changes;
-  `tap.python~`'s battery and glue test unchanged and green; the bench numbers unchanged (the audio
-  path does not touch the new code).
+  kind; the `Loaded` line per binding. `test_output.cpp` and fixtures, with the output table
+  exercised as one data-driven test over its edges (64-bit ints at the limit, non-finite floats,
+  numpy scalars of every family, 0-d and 2-D arrays, nested sequences, a `tuple[…]` hint of each
+  length against results of the wrong length), and `test_examples.cpp` running the three new
+  examples on known inputs. A `core/bench` row for a message call with a list of 64 atoms, written
+  by `scripts/update-perf-docs.py` with the others, so the ReadMe's performance sentence is
+  measured. No Max code changes; `tap.python~`'s battery and glue test unchanged and green; the
+  audio bench numbers unchanged (the audio path does not touch the new code).
 - [ ] **9.2 The shared glue.** `tap.python_tilde_{attribute,message,cglue,filewatch,package}.h`
   become `python_glue<Host>` (the trampolines instantiated per host through `Host::self()`), in
   `source/shared/tap/python_max/` or beside the object; `reserved_messages()` parameterized by the
   audio names. A pure move: `tap.python~`'s behavior, tests and the data-import check unchanged.
 - [ ] **9.3 The object.** `tap.python.h` and its TU in the project, registered by the project's
   `ext_main`; ports with the dumpout and the lock; output mapping; the `anything` forwarder; dynamic
-  outlets on reload; the guard and the reserved names; the Scheduler-in-Audio-Interrupt notice;
-  `init/tap.python.txt` (or the stub); the glue test with faithful stubs; the examples (`euclid.py`,
-  `scale.py`, `note_name.py`, `default.py`'s `bang`); `assemble-package.py` and
-  `package-info.json.in`; CHANGELOG 1.1.0 started.
-- [ ] **9.4 Documentation.** The ReadMe section, the output table and the limits; CLAUDE.md; the
-  help patcher (JSON by hand, checked in Max in 9.6); `docs/tap.python.maxref.xml` by hand.
+  outlets on reload; the guard and the reserved names; the Scheduler-in-Audio-Interrupt notice,
+  with the audio-thread predicate injected as the main-thread one is (8.4) so the glue test can
+  drive it; `init/tap.python.txt` (or the stub); the glue test with faithful stubs, **and
+  `linux-max-glue` gaining ASan/UBSan and TSan rows** — the lock and the reload race live in the
+  glue, which CI builds without sanitizers today; the examples (`euclid.py`, `scale.py`,
+  `note_name.py`, `default.py`'s `bang`); `assemble-package.py` and `package-info.json.in`, with a
+  CI check that the assembled package lists `init/tap.python.txt`; CHANGELOG 2.0.0 started.
+- [ ] **9.4 Documentation, in Max's own system and the ReadMe.** The ReadMe section, the output
+  table and the limits; CLAUDE.md. For the Documentation window: `docs/tap.python.maxref.xml` by
+  hand, with see-also links between the two pages; a vignette, *Writing Max objects in Python* —
+  the ReadMe's "Writing a class" and the threads and performance sections, rewritten for the
+  window, covering both objects; and three tutorials with their patchers — a gain per sample and
+  then per vector, a filter with `prepare()`, a control object (`euclid`). For the Extras menu, a
+  *PythonTap Overview* patcher, named as the package's landing patcher in `package-info.json.in`
+  (its `homepatcher` is empty today). The help patchers with tabs: `tap.python`'s from the start,
+  and `tap.python~`'s gaining the numpy, allpass and `mc.` tabs 5.2 asked for. Where Max reads the
+  vignette and tutorial files from inside `docs/` is what 9.0 found. CI checks for what is written
+  by hand: the reference page, the vignette and the tutorials well-formed XML, and the help
+  patchers' JSON as 5.2 checked by hand (ids unique, every line connects), in one script. All
+  checked open in Max in 9.6.
 - [ ] **9.5 Runtime tests.** The patchers above in `make_patchers.py`; `run.py` aware of the
   second object (the `init/` mapping in the installed package, the `--package` mode, the
-  reference-page rule for `tap.python~`'s page only).
+  reference-page rule for `tap.python~`'s page only). The soak session (6.2) gains a
+  `tap.python` driven by a `metro` while its file is saved every second: every output checked,
+  memory flat, the console counts exact.
 - [ ] **9.6 The release session, Mac and Windows.** Build, run the whole runtime suite on the Mac,
   check the help patcher and re-save it, commit the page Max writes for `tap.python~`, the hand
   checks the tests cannot make (`get<attr>` through the dumpout in a patcher, attrui on a
   `tap.python`, a `tap.python~` and a `tap.python` on one file saved while audio runs); on
   Windows, the package by hand: both objects load through the mapping, attributes and messages
-  work, a reload keeps them. Then tag `v1.1.0`.
+  work, a reload keeps them. Then tag `v2.0.0`.
+- [ ] **9.7 The book.** After 2.0.0, the family's shape: an mdBook under `book/` (TapHouse's icon
+  rule already knows `book/book.toml` and guards `book/theme/favicon.*`), built and published by
+  CI. Chapters from the ReadMe's sections — install, writing a class, audio, worker mode, control
+  objects, performance, errors and limits, building, testing — plus the examples, the notebook
+  rendered, and the design decisions for contributors. Example code is pulled into the pages by
+  mdBook's include directive straight from `python/*.py`, and the performance tables are written
+  into the book by `scripts/update-perf-docs.py` beside the ReadMe's, so neither can drift from
+  what ships. The ReadMe then shrinks to the front door — what it is, install, a quick start, and
+  links — so that each fact has one home. *Decided 2026-10-09 (the maintainer):* the vignette is
+  the short form, written separately — a few screens in Max's own conventions that point to the
+  ReadMe and the book for the contract's facts — not generated from the book's source.
 
 ## Later (not planned)
 
-Written down so they are decided rather than rediscovered; none is promised by 1.1.
+Written down so they are decided rather than rediscovered; none is promised by 2.0.
 
 - **Dictionaries.** A `dict` return as a Max dictionary out (`dictionary <name>` through a
   `t_dictionary` the object owns), and a `dictionary` message in as a `dict` argument. The natural
@@ -400,3 +439,21 @@ Written down so they are decided rather than rediscovered; none is promised by 1
   `js` claim dropped.
 - **Addendum:** the guard rule from 1.0.1 and 1.0.2 (compare with what Max answers; leave out what
   the object registers), Windows in the spike and the release session.
+
+*2026-10-09, after the maintainer's review — documentation and test coverage; and the three
+decisions put to the maintainer: the release is 2.0.0 (the `list[…]` parameter is a contract
+change, the CHANGELOG's rule applied as written); the `str` return is the spike's to decide;
+the vignette is written separately as the short form:*
+
+- **Documentation** was reference pages and help files only. 9.4 now covers Max's own system — a
+  vignette, three tutorials with patchers, an Extras overview and landing patcher, help tabs —
+  with CI checks for what is written by hand, and 9.0 finds where Max reads the files from. A
+  new 9.7, the family's mdBook, follows 2.0.0, with example code and performance tables pulled
+  from what ships so the book cannot drift.
+- **Test coverage** had four gaps: no sanitizer rows for the Max glue, where the new lock lives
+  (9.3); a performance sentence with no measurement behind it — a bench row (9.1); no soak for
+  the new object (9.5); and hand-made artifacts with no check — the pages, the help patchers, the
+  `init/` file (9.3, 9.4). Also added: the output table as a data-driven test over its edges and
+  core tests for the new examples (9.1), and the audio-thread predicate injected so the
+  Scheduler-in-Audio-Interrupt notice is testable without Max (9.3). Windows stays by hand: the
+  runtime harness is macOS only, written down as a limit rather than fixed here.
