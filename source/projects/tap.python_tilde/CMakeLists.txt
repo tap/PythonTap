@@ -120,6 +120,17 @@ if (APPLE)
     set_target_properties(${PROJECT_NAME} PROPERTIES BUILD_WITH_INSTALL_RPATH ON)
 endif ()
 
+# Plan 9.0, the spike: a throwaway second Max class, tap.python — a plain SDK class registered by
+# this external's ext_main after min's — built only to answer in Max what docs/TAP-PYTHON-PLAN.md
+# needs to know before 9.1 (the patchers are in runtime-tests/spike/). Off by default and never in a
+# release; the external only (the mock-kernel test compiles tap.python_tilde.cpp without it).
+option(TAP_PYTHON_SPIKE "Build the throwaway tap.python spike class (plan 9.0) into tap.python~" OFF)
+if (TAP_PYTHON_SPIKE)
+    message(STATUS "tap.python~: with the tap.python spike (plan 9.0) — not for release")
+    target_sources(${PROJECT_NAME} PRIVATE tap.python_spike.cpp)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE TAP_PYTHON_SPIKE)
+endif ()
+
 include(${C74_MIN_API_DIR}/script/min-posttarget.cmake)
 # (C++20 is forced on this target and its test by the root CMakeLists.txt.)
 

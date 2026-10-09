@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="_c74_vig.xsl"?>
+<vignette name="PythonTap spike vignette (docs/)" package="PythonTap">
+<h1>PythonTap spike vignette (docs/)</h1>
+<p>A placeholder from the tap.python plan's 9.0 spike (runtime-tests/spike/ in the PythonTap repository),
+placed at <b>docs/</b> inside the package. If this page is listed in the Documentation window, Max reads
+vignettes from there.</p>
+</vignette>

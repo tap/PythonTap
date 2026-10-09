@@ -804,7 +804,10 @@ row shipped what only a host platform could show.
   `get<attr>` through it; the dispatch order of a class-level `anything` against instance methods
   and attributes, and `object_getmethod()` on such a class; the thread of a `metro`-driven message
   under Overdrive and under Scheduler in Audio Interrupt; `symbol` or `anything` for a `str`
-  return. The answers go into the plan before 9.1.
+  return. The answers go into the plan before 9.1. *Run on a Mac 2026-10-09 (#43, Max 9.1.5),
+  every question answered in TAP-PYTHON-PLAN.md under 9.0: the `init/` mapping works; `get<attr>`
+  needs the class's `dumpout` method; `int`, `float`, `bang` and `list` never reach a class-level
+  `anything`; a `str` is output as `symbol <s>`. Windows still to run.*
 - [ ] **9.1 The core:** output items and their conversion in `value.h`; `message_info::return_count`
   (depth-aware for string hints), `outlet_count()`, `call_with_output()`; the `bind_audio` option,
   gating the tuple rule; a last parameter hinted `list[…]` or `np.ndarray` taking the remaining
