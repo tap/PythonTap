@@ -71,10 +71,9 @@ include_directories(
 
 set(SOURCE_FILES
     ${PROJECT_NAME}.h
-    ${PROJECT_NAME}_package.h
-    ${PROJECT_NAME}_cglue.h
-    ${PROJECT_NAME}_attribute.h
-    ${PROJECT_NAME}_message.h
+    tap.python_glue.h
+    tap.python_filewatch.h
+    tap.python_package.h
     ${PROJECT_NAME}.cpp
 )
 

@@ -2,6 +2,7 @@
 /// @copyright  Copyright 2022-2026 Timothy Place. All rights reserved.
 /// @license    Use of this source code is governed by the MIT License found in the License.md file.
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <deque>
@@ -523,16 +524,44 @@ SCENARIO("Methods named like messages Max sends with C arguments are not exposed
     }
     THEN("found means neither null nor what Max answers for a name it does not have (1.0.2)") {
         const auto answered = c74::max::object_getmethod(nullptr, c74::max::gensym("maxtest_host_answers"));
-        CHECK(python::found_method(nullptr, not_found) == false);
-        CHECK(python::found_method(not_found, not_found) == false);
-        CHECK(python::found_method(answered, not_found) == true);
-        CHECK(my_object.not_found_method() == not_found); // asked of Max, not taken from &method_false
+        CHECK(runtime::found_method(nullptr, not_found) == false);
+        CHECK(runtime::found_method(not_found, not_found) == false);
+        CHECK(runtime::found_method(answered, not_found) == true);
+        CHECK(runtime::not_found_method(my_object.maxobj()) == not_found); // asked of Max, not taken from &method_false
     }
     THEN("audio is bound regardless") {
         CHECK(all_equal(render(my_object, 0.5), 0.5));
     }
     c74::max::object_free(wrapped);
     std::filesystem::remove(file);
+}
+
+SCENARIO("Every object reserves the names Max sends it; an audio object, the audio ones as well (plan 9.2)") {
+    const auto every = runtime::reserved_messages(false);
+    const auto audio = runtime::reserved_messages(true);
+    const auto has   = [](const std::vector<std::string>& names, const std::string& name) {
+        return std::find(names.begin(), names.end(), name) != names.end();
+    };
+
+    THEN("both are sorted, and every object reserves what Max sends with C arguments, and filechanged") {
+        CHECK(std::is_sorted(every.begin(), every.end()));
+        CHECK(std::is_sorted(audio.begin(), audio.end()));
+        for (const auto* name : {"anything", "assist", "fileusage", "filechanged", "notify", "patchlineupdate"}) {
+            CHECK(has(every, name));
+        }
+    }
+    THEN("an audio object reserves every object's names and exactly the audio ones besides") {
+        auto expected = every;
+        for (const auto& name : runtime::audio_messages()) {
+            CHECK_FALSE(has(every, name));
+            expected.push_back(name);
+        }
+        std::sort(expected.begin(), expected.end());
+        CHECK(audio == expected);
+        for (const auto* name : {"dsp64", "dspsetup", "dspstate", "inputchanged", "mode", "latency"}) {
+            CHECK(has(audio, name));
+        }
+    }
 }
 
 SCENARIO("With @mode worker, process() runs on a thread of its own, @latency milliseconds behind (plan 2.5)") {

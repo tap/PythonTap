@@ -65,7 +65,7 @@ IGNORED = shutil.ignore_patterns("__pycache__", "*.pyc", ".ipynb_checkpoints", "
 
 
 # Each platform's folder for its runtime in a package for every platform (plan 4.8); the external
-# names its own (runtime_platform() in tap.python_tilde_package.h).
+# names its own (runtime_platform() in tap.python_package.h).
 RUNTIME_PLATFORMS = ["macos-arm64", "macos-x86_64", "windows-x64"]
 
 # What differs between single-platform packages, and is merged rather than copied once.
