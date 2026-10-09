@@ -33,7 +33,7 @@ note the PR that closed them.
 | D4 | Python version policy | **Pin 3.13; upgrade deliberately.** One CPython minor per release; a move (e.g. to 3.14's deferred annotations) is its own PR with tests. No free-threaded or subinterpreter builds until numpy supports them. |
 | D5 | Compatibility before 1.0 | **Breaking changes to the class contract are allowed** where they buy correctness (reserved names, file-based loading, signature dispatch). Each is recorded in a `CHANGELOG.md`; the shipped examples are updated in the same PR. |
 | D6 | Architecture | **A host-independent core plus a thin Max wrapper**, the family's kernel/wrapper split (TapTools / TapTools-Max). Everything that talks to CPython — interpreter start-up, thread state, module loading, class introspection, value conversion, `process()` binding and reload, exception handling — lives in `core/` (`tap::python`, plain C++20 + CPython, no Max or min-api). The external maps the core's attribute and message descriptions onto `object_addattr`/`object_addmethod` and owns only Max concerns (package paths, the file watcher, atoms). Linux is the first test platform *for the core*: real audio/main threads and sanitizers in CI and in cloud sessions. A plugin front end (CLAP or VST3) is optional later work over the same core (Phase 7), not a test vehicle — the Max glue still needs its own tests. |
-| D7–D11 | A second object, `tap.python`, without audio | **Decided 2026-10-02 in `docs/TAP-PYTHON-PLAN.md`** (Phase 9 below): the same core, folder, loader and class contract minus audio; a method's return value is the output, its return hint the outlet count; one inlet; a message runs on the thread it arrives on; the shared Max glue moves to `source/shared/`. |
+| D7–D11 | A second object, `tap.python`, without audio | **Decided 2026-10-02 in `docs/TAP-PYTHON-PLAN.md`, revised 2026-10-09 for its audit** (Phase 9 below): the same core, folder, loader and class contract minus audio; a method's return value is the output, its return hint the outlet count; one inlet; a message runs on the thread it arrives on; and *one binary* registers both Max classes — two externals would each start the interpreter, and the second aborts Max — the second a plain SDK class (min allows one class per translation unit), found through the package's `init/` mapping. |
 
 ## Phase 0 — the core split and a test foundation that can fail
 
@@ -792,26 +792,38 @@ draft until signing exists, as `release.yml` has it.
 ## Phase 9 — `tap.python`, a Python class as a Max object without audio (after 1.0)
 
 The design — decisions D7–D11, the class contract, the output rules, what changes in the core, the
-glue and the package — is `docs/TAP-PYTHON-PLAN.md`; keep it current where a PR decides
-differently. One PR per item, in this order, each against tests that fail before it:
+object and the package — is `docs/TAP-PYTHON-PLAN.md`, audited in `docs/AUDIT-TAP-PYTHON-PLAN.md`
+(two blockers, six major findings) and revised for every finding on 2026-10-09; keep both current
+where a PR decides differently. One PR per item, in this order, each against tests that fail
+before it. 9.0 runs in Max on a Mac *and* on Windows before anything else: three releases in a
+row shipped what only a host platform could show.
 
-- [ ] **9.1 The core:** output items and their conversion in `value.h`; `message_info::return_count`,
-  `outlet_count()`, `call()` returning the output; the `bind_audio` option; a last parameter hinted
-  `list[…]` or `np.ndarray` taking the remaining atoms (both objects); the `Loaded` line per
-  binding. `test_output.cpp`. `tap.python~` unchanged and green.
+- [ ] **9.0 The spike,** in Max on both platforms: a throwaway second class in `tap.python~`'s
+  binary answers what only Max can — one binary, two classes (D11) and the `init/` `objectfile`
+  mapping (or the stub external); `outlet_insert_after` before an obex-stored dumpout and
+  `get<attr>` through it; the dispatch order of a class-level `anything` against instance methods
+  and attributes, and `object_getmethod()` on such a class; the thread of a `metro`-driven message
+  under Overdrive and under Scheduler in Audio Interrupt; `symbol` or `anything` for a `str`
+  return. The answers go into the plan before 9.1.
+- [ ] **9.1 The core:** output items and their conversion in `value.h`; `message_info::return_count`
+  (depth-aware for string hints), `outlet_count()`, `call_with_output()`; the `bind_audio` option,
+  gating the tuple rule; a last parameter hinted `list[…]` or `np.ndarray` taking the remaining
+  atoms (both objects; the old behavior pinned first, the change recorded); announce-once per
+  (file, kind); the `Loaded` line per binding. `test_output.cpp`. `tap.python~` unchanged and green.
 - [ ] **9.2 The shared glue:** the attribute, message, trampoline, file-watcher and package headers
-  to `source/shared/tap/python_max/`, templated on the host object; the runtime CMake block to
-  `source/cmake/embedded-python.cmake`; `style.yml` follows. A pure move.
-- [ ] **9.3 The object:** `source/projects/tap.python/` — ports with a dumpout, the output mapping,
-  `anything` forwarding, dynamic outlets on reload, reserved names, `MIN_DESCRIPTION`; the glue
-  test; the examples (`euclid.py`, `scale.py`, `note_name.py`, `default.py`'s `bang`); CI checks and
-  packaging over both externals; CHANGELOG 1.1.0 started.
-- [ ] **9.4 Documentation:** the ReadMe section and output table, CLAUDE.md, the help patcher, the
-  reference page.
+  as `python_glue<Host>`; `reserved_messages()` parameterized by the audio names. A pure move.
+- [ ] **9.3 The object:** `tap.python.h` in the project, a plain SDK class registered by the
+  project's `ext_main` — ports with the dumpout and the object's lock, the output mapping, the
+  `anything` forwarder, dynamic outlets on reload, the guard, the Scheduler-in-Audio-Interrupt
+  notice; `init/tap.python.txt`; the glue test with faithful stubs; the examples (`euclid.py`,
+  `scale.py`, `note_name.py`, `default.py`'s `bang`); packaging; CHANGELOG 1.1.0 started.
+- [ ] **9.4 Documentation:** the ReadMe section, output table and limits, CLAUDE.md, the help
+  patcher, `docs/tap.python.maxref.xml` by hand (a plain SDK class has no min generator).
 - [ ] **9.5 Runtime tests:** the `tap.python.*` patchers in `make_patchers.py`; `run.py` aware of
-  both externals.
-- [ ] **9.6 The Mac session:** the whole suite for both objects, the help patcher checked and
-  re-saved, Max's pages committed, the hand checks, then tag `v1.1.0`.
+  the second object.
+- [ ] **9.6 The release session, Mac and Windows:** the whole suite on the Mac, the help patcher
+  checked and re-saved, Max's page for `tap.python~` committed, the hand checks; the package by
+  hand on Windows; then tag `v1.1.0`.
 
 ## Sequencing (one PR each)
 
@@ -828,9 +840,10 @@ differently. One PR per item, in this order, each against tests that fail before
 11. Phase 8 — the audit's findings, in the order above: 8.1 (docs and hardening, first, so the
     ReadMe stops overclaiming while the fixes land), 8.2, 8.3, 8.4, 8.5, 8.6, 8.7 (#35), then the
     Mac session 8.8 — decided on 2026-10-01 to follow 1.0.0 rather than gate it.
-12. Phase 9 — `tap.python`: 9.1 (the core, no Max change), 9.2 (the shared glue, a pure move),
-    9.3 (the object), 9.4 and 9.5 (docs and runtime tests, independent of each other), then the
-    Mac session 9.6 and `v1.1.0`. After 8.8, or beside it: nothing in it touches what 8.8 checks.
+12. Phase 9 — `tap.python`: 9.0 (the spike in Max, on a Mac and on Windows, first), then 9.1
+    (the core, no Max change), 9.2 (the shared glue, a pure move), 9.3 (the object), 9.4 and 9.5
+    (docs and runtime tests, independent of each other), then the release session 9.6 on both
+    platforms and `v1.1.0`. 8.8 ran on 2026-10-07; its two by-hand items can ride along with 9.6.
 
 ## External prerequisites
 
