@@ -5,6 +5,24 @@ breaking changes to the contract were allowed where they bought correctness (D5 
 `docs/PRODUCTION-PLAN.md`); each is recorded here. From 1.0.0, a change to the class contract is
 a major version.
 
+## 2.0.0 — unreleased
+
+The release that brings `tap.python`, a Python class as a Max object without audio
+(`docs/TAP-PYTHON-PLAN.md`, Phase 9 of the production plan). Its entries are added as the phase
+lands.
+
+### Changed — a last parameter hinted `list[…]` or `np.ndarray` takes the remaining atoms
+
+- **A message's last parameter hinted `list[float]`, `list[int]`, `list[str]`, `list` or
+  `np.ndarray`** — with no `*args` after it — now takes every atom left after the parameters before
+  it: as one list, each atom converted by the element hint as a single parameter's would be, or as
+  a float64 array. `def taps(self, values: list[float])` answers `taps 0.1 0.2 0.3`, and `def
+  list(self, values: np.ndarray)` a whole list message. With no atoms left it is an empty list, or
+  its default if it has one. Before, such a parameter took one atom, converted as a `str` — so a
+  number arrived as the empty string — and a message with more atoms than the method has
+  parameters was refused. A class that relied on that now receives a list. It is a change to the
+  class contract, and so the release is 2.0.0 (plan 9.1; decided 2026-10-09).
+
 ## 1.0.2 — 2026-10-08
 
 1.0.1 was tagged but never released: its Windows package still had the first fault below. Its

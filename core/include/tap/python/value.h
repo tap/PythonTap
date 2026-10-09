@@ -12,9 +12,11 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 namespace tap::python {
 
@@ -24,6 +26,23 @@ namespace tap::python {
 
     /// One argument or attribute value: an integer, a real number, or a symbol (string).
     using value = std::variant<std::int64_t, double, std::string>;
+
+    /// One message for an outlet, converted from what a method returned (tap.python, plan 9.1):
+    /// - no selector: a single number, the one atom (in Max, outlet_int or outlet_float);
+    /// - the selector "list": a list, its elements the atoms (outlet_list);
+    /// - any other selector: the message it names, with the atoms as arguments (outlet_anything) —
+    ///   a `str` is `symbol <s>`, and a sequence whose first element is a `str` the message that
+    ///   names.
+    struct output_item {
+        std::optional<std::string> selector;
+        std::vector<value>         atoms;
+
+        bool operator==(const output_item&) const = default;
+    };
+
+    /// What one call outputs, outlet by outlet: [0] is the leftmost, and an empty slot outputs
+    /// nothing. Empty when the call outputs nothing at all.
+    using output = std::vector<std::optional<output_item>>;
 
     /// Map a type hint's kind (see the support module's hint_kind: Optional[X] is already X) to a
     /// value type: `int` → integer, `float` → real, `bool` → boolean, no hint → any, anything else →
