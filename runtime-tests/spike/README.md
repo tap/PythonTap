@@ -69,16 +69,31 @@ patcher with a `tap.python~` in it) loads the binary before the patcher under te
 then fresh — and it restores Max's preference files when it is done. The build writes the same
 `externals/` folder as `build/`: rebuild `build` afterwards to put the shipping external back.
 
-## On Windows, by hand
+## On Windows
 
-The runner is macOS-only (as `run.py` is). With the runtime installed (`scripts/install-runtime.ps1`):
+`run_spike_windows.ps1` is `run_spike.py`'s counterpart, without the macOS-only harness: each
+patcher runs in a fresh Max of its own, started as Explorer starts it (`Max.exe "<patcher>"`)
+together with a small patcher that sends `; max clean; max quit` once the patcher under test has had
+its time (q7 runs until Max's file database reports its update complete). It reads Max's log
+(`%APPDATA%\Cycling '74\Max 9\Logs\Max.log`), writes `results\windows.txt`, turns off Restore Windows
+on Launch for the run and puts Max's preference files back afterwards. With the runtime installed
+(`scripts\install-runtime.ps1`) and Max quit:
 
 ```powershell
 cmake -S . -B build-spike -DTAP_PYTHON_SPIKE=ON
 cmake --build build-spike --config Release
+mklink /J "C:\ProgramData\Max 9\Packages\PythonTap" <this checkout>
+mklink /J "C:\ProgramData\Max 9\Packages\PythonTap-spike" <this checkout>\runtime-tests\spike
+powershell -ExecutionPolicy Bypass -File runtime-tests\spike\run_spike_windows.ps1
 ```
 
-then, with the package in `Documents\Max 9\Packages\PythonTap`:
+(`C:\ProgramData\Max 9\Packages` is Max's system-wide Packages folder on Windows. In a Parallels VM
+whose Documents folder is the Mac's, the per-user one is the Mac's own `~/Documents/Max 9/Packages`,
+where a junction cannot be made — and which the Windows test should not touch. To run the glue test
+there, put `support\` on `PATH` first, as CI does: without it the test stops at a modal "python313.dll
+was not found" dialog.)
+
+Or by hand, with the package in a Packages folder:
 
 1. In Max's preferences, turn off **Restore Windows on Launch** (or make sure no patcher with a
    `tap.python~` in it is open when you quit), and quit Max.
