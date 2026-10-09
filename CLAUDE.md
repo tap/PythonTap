@@ -143,17 +143,17 @@ attaches all the zips + SHA256s to a release — a pre-release for 0.x, a draft 
   `&method_false` is its own import thunk (the SDK declares it without `dllimport`), so 1.0.1's
   comparison reserved every name again, on Windows only. The object asks Max what it answers for a
   name no class can have (`not_found_method()`) and compares with that (`found_method()`, 1.0.2).
-  And what the object itself registers can answer its name too — its *attributes* do, and the
-  guard must leave them out, or a reload reserves every field (1.0.1, found in Max); its messages,
-  added with `object_addmethod()`, answer as unknown (the 9.0 spike, on the Mac), and are left out
-  as well. The mock kernel is thinner than Max: when a stub decides a behavior, make the test's
-  stub faithful to the SDK (as `attr_args_offset` and `object_getmethod` are — the glue test's
-  kernel answers an unknown name with a function the module cannot take the address of, as
-  Windows does, and an added attribute's name, as Max does), and give each fake function a body
-  of its own: MSVC's Release link folds identical functions (`/OPT:ICF`), which once gave a fake
-  "found" method `method_false()`'s address on Windows only. Three releases in a row shipped what
-  only a host platform could show, and the third was Windows-only: a change to Max glue is
-  verified in Max on **both** platforms before it is tagged.
+  And what the object itself registers can answer its name too — its *attributes* do, and the guard
+  must leave them out, or a reload reserves every field (1.0.1, found in Max); its messages, added
+  with `object_addmethod()`, answer as unknown (the 9.0 spike, on both platforms), and are left out
+  as well. The mock kernel is thinner than Max: when a stub decides a behavior, make the test's stub
+  faithful to the SDK (as `attr_args_offset` and `object_getmethod` are — the glue test's kernel
+  answers an unknown name with a function the module cannot take the address of, as Windows does,
+  and an added attribute's name, as Max does), and give each fake function a body of its own: MSVC's
+  Release link folds identical functions (`/OPT:ICF`), which once gave a fake "found" method
+  `method_false()`'s address on Windows only. Three releases in a row shipped what only a host
+  platform could show, and the third was Windows-only: a change to Max glue is verified in Max on
+  **both** platforms before it is tagged.
 - **Say what is true of a class once, what is true of an instance per instance.** Many objects can
   share one class file; only the processor whose `load()` ran the file (`load_script` says so)
   announces the class — its `Loaded` line and its diagnostics — through `announce()` (plan 6.7).

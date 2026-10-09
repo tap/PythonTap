@@ -798,16 +798,16 @@ where a PR decides differently. One PR per item, in this order, each against tes
 before it. 9.0 runs in Max on a Mac *and* on Windows before anything else: three releases in a
 row shipped what only a host platform could show.
 
-- [ ] **9.0 The spike,** in Max on both platforms: a throwaway second class in `tap.python~`'s
+- [x] **9.0 The spike,** in Max on both platforms: a throwaway second class in `tap.python~`'s
   binary answers what only Max can — one binary, two classes (D11) and the `init/` `objectfile`
   mapping (or the stub external); `outlet_insert_after` before an obex-stored dumpout and
   `get<attr>` through it; the dispatch order of a class-level `anything` against instance methods
   and attributes, and `object_getmethod()` on such a class; the thread of a `metro`-driven message
   under Overdrive and under Scheduler in Audio Interrupt; `symbol` or `anything` for a `str`
-  return. The answers go into the plan before 9.1. *Run on a Mac 2026-10-09 (#43, Max 9.1.5),
-  every question answered in TAP-PYTHON-PLAN.md under 9.0: the `init/` mapping works; `get<attr>`
-  needs the class's `dumpout` method; `int`, `float`, `bang` and `list` never reach a class-level
-  `anything`; a `str` is output as `symbol <s>`. Windows still to run.*
+  return. The answers go into the plan before 9.1. *Done 2026-10-09: run on a Mac (#43) and on
+  Windows (#44), Max 9.1.5, the same answers on both, in TAP-PYTHON-PLAN.md under 9.0: the `init/`
+  mapping works; `get<attr>` needs the class's `dumpout` method; `int`, `float`, `bang` and `list`
+  never reach a class-level `anything`; a `str` is output as `symbol <s>`.*
 - [ ] **9.1 The core:** output items and their conversion in `value.h`; `message_info::return_count`
   (depth-aware for string hints), `outlet_count()`, `call_with_output()`; the `bind_audio` option,
   gating the tuple rule; a last parameter hinted `list[…]` or `np.ndarray` taking the remaining
