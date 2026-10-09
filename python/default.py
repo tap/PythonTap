@@ -3,14 +3,15 @@ from attrs import define, field
 
 @define
 class default:
-    """The class loaded by tap.python~ when no source argument is given.
+    """The class loaded by tap.python~ and tap.python when no source argument is given.
 
     Demonstrates the mapping from Python to Max:
     - the annotated 'gain' field becomes a Max attribute
     - any public method (like 'greet') becomes a Max message
     - methods named 'int' and 'float' answer those standard Max messages
-    - process() runs on the audio signal, once per sample (see numpy_gain.py
-      for the much cheaper once-per-vector form)
+    - process() runs on the audio signal in tap.python~, once per sample (see
+      numpy_gain.py for the much cheaper once-per-vector form)
+    - in tap.python, what a method returns is output: bang outputs the gain
     """
 
     gain: float = field(default = 1.0)
@@ -20,6 +21,9 @@ class default:
 
     def process(self, x: float) -> float:
         return x * self.gain
+
+    def bang(self) -> float:
+        return self.gain
 
     # These two come last on purpose: once `def float` has run, the name `float` in
     # the class body means this method, so an annotation written after it would no

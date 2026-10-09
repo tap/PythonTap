@@ -43,7 +43,7 @@ namespace {
 
 } // namespace
 
-SCENARIO("default.py passes audio at unity gain and exposes gain, float, int and greet") {
+SCENARIO("default.py passes audio at unity gain and exposes gain, bang, float, int and greet") {
     ensure_runtime();
     if (!importable("attrs")) {
         SKIP("attrs is not importable by the embedded interpreter");
@@ -60,7 +60,7 @@ SCENARIO("default.py passes audio at unity gain and exposes gain, float, int and
     for (const auto& m : p.messages()) {
         names.push_back(m.name);
     }
-    CHECK(names == std::vector<std::string>{"float", "greet", "int"});
+    CHECK(names == std::vector<std::string>{"bang", "float", "greet", "int"});
 
     CHECK(all_equal(render(p, 0.5), 0.5));
 
@@ -77,6 +77,22 @@ SCENARIO("default.py passes audio at unity gain and exposes gain, float, int and
         REQUIRE(p.call("greet", std::vector<value>{std::string{"max"}}));
         CHECK(console().contains("hello max, from python!", log_level::info));
     }
+}
+
+SCENARIO("default.py in tap.python: bang outputs the gain, and process() is a message (plan 9.3)") {
+    ensure_runtime();
+    if (!importable("attrs")) {
+        SKIP("attrs is not importable by the embedded interpreter");
+    }
+    processor p{"default", {}, {}, {}, {}, false};
+    REQUIRE(p.load());
+    CHECK_FALSE(p.has_process());
+    CHECK(p.outlet_count() == 1);
+
+    CHECK(p.call_with_output("bang", {}) == output{output_item{std::nullopt, {1.0}}});
+    REQUIRE(p.call("float", std::vector<value>{0.25}));
+    CHECK(p.call_with_output("bang", {}) == output{output_item{std::nullopt, {0.25}}});
+    CHECK(p.call_with_output("process", std::vector<value>{2.0}) == output{output_item{std::nullopt, {0.5}}});
 }
 
 SCENARIO("allpass.py is an allpass: an impulse's energy is preserved") {

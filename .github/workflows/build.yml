@@ -75,8 +75,24 @@ jobs:
           TSAN_OPTIONS: halt_on_error=1
         run: ctest --test-dir build-core --output-on-failure --parallel 4
 
+  # The glue test under sanitizers as well (plan 9.3): tap.python's lock, and a reload racing a
+  # message on another thread, live in the glue, which the core's battery cannot see.
   linux-max-glue:
+    name: linux-max-glue (${{ matrix.name }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: release
+            build_type: Release
+            sanitize: ""
+          - name: asan-ubsan
+            build_type: Debug
+            sanitize: "address,undefined"
+          - name: tsan
+            build_type: Debug
+            sanitize: "thread"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -89,19 +105,33 @@ jobs:
       - name: Install the examples' dependencies into the embedded interpreter's prefix
         run: 'python -m pip install --require-hashes --only-binary :all: -r scripts/requirements.lock'
 
+      # The sanitizer runtimes cannot map their shadow memory with the runner
+      # kernel's default ASLR entropy ("unexpected memory mapping").
+      - name: Reduce ASLR entropy for the sanitizers
+        if: matrix.sanitize != ''
+        run: sudo sysctl vm.mmap_rnd_bits=28
+
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE="$(which python)"
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DPython3_EXECUTABLE="$(which python)"
+          -DTAP_PYTHON_SANITIZE="${{ matrix.sanitize }}"
 
       - name: Build
         run: cmake --build build --parallel
 
       - name: Test
+        env:
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          TSAN_OPTIONS: halt_on_error=1
         run: ctest --test-dir build --output-on-failure
 
       # The Windows external delay-loads python3xx.dll (plan 4.2), which MSVC allows only while
       # the external imports no CPython data symbols. The same headers make the same references
       # here, so a regression fails this step by name rather than the Windows link.
       - name: Verify the external imports no CPython data symbols
+        if: matrix.sanitize == ''
         run: |
           libpython=$(python -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR') + '/' + sysconfig.get_config_var('LDLIBRARY'))")
           scripts/check-data-imports.sh externals/tap.python~.mxl_x86_64 "$libpython"
@@ -109,6 +139,7 @@ jobs:
       # The release packaging's license collection (plan 4.6), against this interpreter's own
       # install, which is laid out like the macOS runtime and has the locked packages in it.
       - name: Collect the licenses a package would ship
+        if: matrix.sanitize == ''
         run: |
           python scripts/assemble-package.py --licenses-only \
             --support "$(python -c 'import sys; print(sys.base_prefix)')" --output build/licenses-check
@@ -183,6 +214,11 @@ jobs:
           bin="externals/tap.python~.mxo/Contents/MacOS/tap.python~"
           otool -l "$bin" | grep -A2 "cmd LC_LOAD_WEAK_DYLIB" | tee /dev/stderr | grep -q "@rpath/libpython" \
             || { echo "ERROR: libpython is not weakly linked"; exit 1; }
+
+      # The package as a release assembles it, which fails unless it is complete — init/tap.python.txt
+      # above all, the mapping without which Max does not find tap.python (plan 9.3).
+      - name: Assemble the package
+        run: support/bin/python3 scripts/assemble-package.py --platform macos --output build/package
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

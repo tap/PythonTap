@@ -3,10 +3,14 @@
 /// @license    Use of this source code is governed by the MIT License found in the License.md file.
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <deque>
 #include <fstream>
+#include <iostream>
+#include <map>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_set>
@@ -36,6 +40,11 @@ namespace attributes {
         added.clear();
     }
 } // namespace attributes
+
+// How many times a qelem was set (tap.python's notice from the audio thread sets one).
+namespace qelems {
+    std::atomic<int> set{};
+} // namespace qelems
 
 namespace c74 {
     namespace max {
@@ -121,7 +130,9 @@ namespace c74 {
             static int s_qelem;
             return &s_qelem;
         }
-        void      qelem_set(void*) {}
+        void qelem_set(void*) {
+            ++qelems::set;
+        }
         t_max_err object_deleteattr(void*, t_symbol* name) {
             attributes::added.erase(name->s_name);
             return MAX_ERR_NONE;
@@ -135,29 +146,89 @@ namespace c74 {
 // and what the object asks of it is recorded, so the tests can check what it does and that min's
 // own lists follow.
 namespace dynlets {
-    long              signal_inlets{}; // the last dsp_resize, 0 if none
-    long              appended{};      // outlets appended
-    std::vector<long> deleted;         // the indices of the outlets deleted, in order
-    bool              chain_broken{};
+    int                      box{};           // the pretend box (its address)
+    long                     signal_inlets{}; // the last dsp_resize, 0 if none
+    long                     appended{};      // outlets appended
+    std::vector<long>        deleted;         // the indices of the outlets deleted, in order (by outlet_nth)
+    std::vector<std::string> calls;           // what was asked of the box and of the outlets, in order
+    bool                     chain_broken{};
 
     void reset() {
         signal_inlets = 0;
         appended      = 0;
         deleted.clear();
+        calls.clear();
         chain_broken = false;
     }
+
+    std::string id(const void* outlet) {
+        return std::to_string(reinterpret_cast<std::intptr_t>(outlet));
+    }
 } // namespace dynlets
+
+// What an object stores in its obex (tap.python's dumpout), which the mock kernel does not keep.
+namespace obex {
+    std::map<std::pair<void*, c74::max::t_symbol*>, c74::max::t_object*> stored;
+} // namespace obex
+
+// Which thread a message comes on: the audio thread only while a scenario says so (Scheduler in
+// Audio Interrupt, plan 9.0).
+namespace audio_thread {
+    std::atomic<bool> now{};
+} // namespace audio_thread
+
+// The outlets the mock kernel made for each object, newest first (its order), with the ones
+// tap.python inserted on a reload made by the same outlet_new: so an outlet's messages are found by
+// what Max gave the object, whatever the mock's order (see outlet_insert_after below).
+namespace outlets {
+    std::map<void*, std::vector<void*>> inserted; // per object, in order
+
+    /// The mock's index of `outlet` among `ids`, every outlet the object was given: the mock keeps
+    /// them newest first, and its ids grow with each outlet made.
+    int index_of(const std::vector<void*>& ids, const void* outlet) {
+        int index = 0;
+        for (const auto* other : ids) {
+            index += reinterpret_cast<std::intptr_t>(other) > reinterpret_cast<std::intptr_t>(outlet) ? 1 : 0;
+        }
+        return index;
+    }
+} // namespace outlets
 
 namespace c74 {
     namespace max {
         extern "C" {
-        t_max_err object_obex_lookup(void*, t_symbol* key, t_object** val) {
-            static int s_box;
-            if (key != gensym("#B")) {
+        t_max_err object_obex_lookup(void* x, t_symbol* key, t_object** val) {
+            if (key == gensym("#B")) {
+                *val = reinterpret_cast<t_object*>(&dynlets::box);
+                return MAX_ERR_NONE;
+            }
+            const auto found = obex::stored.find({x, key});
+            if (found == obex::stored.end()) {
                 return MAX_ERR_GENERIC;
             }
-            *val = reinterpret_cast<t_object*>(&s_box);
+            *val = found->second;
             return MAX_ERR_NONE;
+        }
+        t_max_err object_obex_store(void* x, t_symbol* key, t_object* val) {
+            obex::stored[{x, key}] = val;
+            return MAX_ERR_NONE;
+        }
+        // As Max's: the message from the outlet the object stored as its dumpout.
+        void object_obex_dumpout(void* x, t_symbol* s, long argc, t_atom* argv) {
+            const auto found = obex::stored.find({x, gensym("dumpout")});
+            if (found != obex::stored.end()) {
+                outlet_anything(found->second, s, static_cast<short>(argc), argv);
+            }
+        }
+        void class_obexoffset_set(t_class*, long) {}
+        // The SDK's object_method() is this on 64-bit; the mock's answers nothing. The pretend box
+        // records what it is asked (dynlet_begin, dynlet_end), and every other receiver answers
+        // nothing, as the mock's.
+        void* object_method_imp(void* x, void* sym, void*, void*, void*, void*, void*, void*, void*, void*) {
+            if (x == &dynlets::box) {
+                dynlets::calls.emplace_back(static_cast<t_symbol*>(sym)->s_name);
+            }
+            return nullptr;
         }
         void dsp_resize(t_pxobject*, long nsignals) {
             dynlets::signal_inlets = nsignals;
@@ -171,6 +242,19 @@ namespace c74 {
         }
         void outlet_delete(void* x) {
             dynlets::deleted.push_back(static_cast<long>(reinterpret_cast<std::intptr_t>(x) - 1));
+            dynlets::calls.push_back("delete " + dynlets::id(x));
+        }
+        // Max's inserts the outlet after `previous`; the mock kernel has no insertion, so the outlet
+        // is made by its outlet_new (newest first, the mock's order), and the call recorded: what the
+        // object asked for is what the tests check, and the new outlet carries messages like any.
+        void* outlet_insert_after(t_object* x, t_symbol*, t_symbol*, void* previous) {
+            void* outlet = outlet_new(x, nullptr);
+            outlets::inserted[x].push_back(outlet);
+            dynlets::calls.push_back("insert after " + dynlets::id(previous));
+            return outlet;
+        }
+        short systhread_isaudiothread() {
+            return audio_thread::now.load() ? 1 : 0;
         }
         t_dspchain* dspchain_fromobject(t_object*) {
             static int s_chain;
@@ -183,6 +267,7 @@ namespace c74 {
     } // namespace max
 } // namespace c74
 
+#include "tap.python.h"         // tap.python: its class is tap.python.cpp, compiled beside this test
 #include "tap.python_tilde.cpp" // include the object source so we can instantiate it
 
 // The Max glue, end to end through the mock kernel. The test binary lands in <package>/tests/,
@@ -662,4 +747,451 @@ SCENARIO("A reload keeps the class's attributes: those the object added are its 
     c74::max::object_free(wrapped);
     std::filesystem::remove(file);
     attributes::model(false);
+}
+
+// ---- tap.python (plan 9.3) ------------------------------------------------------------------------
+//
+// Each object is made through the class's own new, as Max makes a box, and messages reach it through
+// the class's methods as Max dispatches them. The mock kernel registers no instance methods
+// (object_addmethod is stubbed above), so a message for one of the class's Python methods reaches it
+// through the class's forwarders here — which try the class's messages first for that reason.
+
+namespace {
+
+    using tap::python::control_object;
+
+    std::map<void*, std::vector<void*>> made; // the outlets each object was made with
+
+    /// [tap.python <name>], made as Max makes a box.
+    c74::max::t_object* make_control(const char* name) {
+        auto  argument = symbol_atom(name);
+        auto* x        = static_cast<c74::max::t_object*>(tap_python_new(c74::max::gensym("tap.python"), 1, &argument));
+        if (x) {
+            auto& ids = made[x];
+            ids.push_back(control_object::self(x)->dumpout_outlet());
+            for (std::size_t n = 0; control_object::self(x)->value_outlet(n); ++n) {
+                ids.push_back(control_object::self(x)->value_outlet(n));
+            }
+        }
+        return x;
+    }
+
+    /// Free the object, and forget what the stubs kept for it (its address may be the next one's).
+    void free_control(c74::max::t_object* x) {
+        c74::max::object_free(x);
+        made.erase(x);
+        outlets::inserted.erase(x);
+        for (auto it = obex::stored.begin(); it != obex::stored.end();) {
+            it = it->first.first == x ? obex::stored.erase(it) : std::next(it);
+        }
+    }
+
+    /// One message as text: "int 4", "symbol C", "1 0 1" (a list), "steps 5".
+    std::string text_of(const c74::max::t_atom_vector& message) {
+        std::string text;
+        for (const auto& atom : message) {
+            text += text.empty() ? "" : " ";
+            switch (c74::max::atom_gettype(&atom)) {
+            case c74::max::A_LONG:
+                text += std::to_string(c74::max::atom_getlong(&atom));
+                break;
+            case c74::max::A_FLOAT: {
+                char number[64];
+                std::snprintf(number, sizeof number, "%g", c74::max::atom_getfloat(&atom));
+                text += number;
+                break;
+            }
+            default:
+                text += c74::max::atom_getsym(&atom)->s_name;
+                break;
+            }
+        }
+        return text;
+    }
+
+    /// What `outlet`, as Max gave it to the object, has output so far.
+    std::vector<std::string> output_of(c74::max::t_object* x, const void* outlet) {
+        auto ids = made[x];
+        ids.insert(ids.end(), outlets::inserted[x].begin(), outlets::inserted[x].end());
+        std::vector<std::string> texts;
+        for (const auto& message : *c74::max::object_getoutput(x, outlets::index_of(ids, outlet))) {
+            texts.push_back(text_of(message));
+        }
+        return texts;
+    }
+
+    std::vector<std::string> value_output(c74::max::t_object* x, const std::size_t n) {
+        return output_of(x, control_object::self(x)->value_outlet(n));
+    }
+
+    std::vector<std::string> dumpout_output(c74::max::t_object* x) {
+        return output_of(x, control_object::self(x)->dumpout_outlet());
+    }
+
+    /// A message, as Max dispatches it to the class: its int, float, bang or list method, or its
+    /// anything for any other selector — each called with the type it was registered with.
+    void send(c74::max::t_object* x, const char* selector, std::vector<c74::max::t_atom> atoms = {}) {
+        using tap::python::t_tap_python;
+        auto*             object = reinterpret_cast<t_tap_python*>(x);
+        const std::string name{selector};
+        const auto        method = [&](const char* of) { return c74::max::zgetfn(x, c74::max::gensym(of)); };
+        if (name == "int") {
+            reinterpret_cast<void (*)(t_tap_python*, c74::max::t_atom_long)>(method("int"))(
+                object, c74::max::atom_getlong(atoms.data()));
+        }
+        else if (name == "float") {
+            reinterpret_cast<void (*)(t_tap_python*, double)>(method("float"))(object,
+                                                                               c74::max::atom_getfloat(atoms.data()));
+        }
+        else if (name == "bang") {
+            reinterpret_cast<void (*)(t_tap_python*)>(method("bang"))(object);
+        }
+        else {
+            reinterpret_cast<void (*)(t_tap_python*, c74::max::t_symbol*, long, c74::max::t_atom*)>(
+                method(name == "list" ? "list" : "anything"))(object, c74::max::gensym(selector),
+                                                              static_cast<long>(atoms.size()), atoms.data());
+        }
+    }
+
+    /// What the mock kernel posts while `fn` runs: object_post and object_warn write std::cout,
+    /// object_error std::cerr.
+    template <class Fn>
+    std::string console_of(Fn&& fn) {
+        std::ostringstream text;
+        auto*              out = std::cout.rdbuf(text.rdbuf());
+        auto*              err = std::cerr.rdbuf(text.rdbuf());
+        fn();
+        std::cout.rdbuf(out);
+        std::cerr.rdbuf(err);
+        return text.str();
+    }
+
+    bool contains(const std::string& text, const std::string& part) {
+        return text.find(part) != std::string::npos;
+    }
+
+    std::filesystem::path fixture(const char* name) {
+        return tap::python::package_root() / "python" / (std::string{name} + ".py");
+    }
+
+} // namespace
+
+SCENARIO("tap.python is registered beside tap.python~, with its dumpout and its forwarders (plan 9.3)") {
+    ext_main(nullptr);
+    auto* x = make_control("default");
+    REQUIRE(x);
+
+    THEN("the class registers object_obex_dumpout as its dumpout method, which get<attr> needs (plan 9.0)") {
+        CHECK(c74::max::zgetfn(x, c74::max::gensym("dumpout"))
+              == reinterpret_cast<c74::max::method>(c74::max::object_obex_dumpout));
+    }
+    THEN("the forwarders, the file watcher's filechanged and assist are the class's") {
+        for (const auto* name : {"anything", "int", "float", "bang", "list", "filechanged", "assist"}) {
+            CHECK(c74::max::zgetfn(x, c74::max::gensym(name)) != nullptr);
+        }
+    }
+    THEN("the dumpout is stored in the obex, and is the rightmost outlet") {
+        c74::max::t_object* stored{};
+        REQUIRE(c74::max::object_obex_lookup(x, c74::max::gensym("dumpout"), &stored) == c74::max::MAX_ERR_NONE);
+        CHECK(stored == control_object::self(x)->dumpout_outlet());
+        CHECK(control_object::self(x)->value_outlet_count() == 1);
+        CHECK(outlets::index_of(made[x], stored) == 1); // made first: after the value outlet
+    }
+    THEN("with no argument it loads python/default.py, whose bang outputs the gain") {
+        send(x, "bang");
+        CHECK(value_output(x, 0) == std::vector<std::string>{"float 1"});
+        send(x, "float", {float_atom(0.25)});
+        send(x, "bang");
+        CHECK(value_output(x, 0) == std::vector<std::string>{"float 1", "float 0.25"});
+    }
+    THEN("process() is a message like any other, and outputs what it returns") {
+        send(x, "process", {float_atom(2.0)});
+        CHECK(value_output(x, 0) == std::vector<std::string>{"float 2"});
+    }
+    free_control(x);
+}
+
+SCENARIO("tap.python outputs what a method returns, from the outlets its return hints give it (plan 9.3)") {
+    ext_main(nullptr);
+
+    GIVEN("euclid.py: a bang outputs a list, from its one outlet") {
+        auto* x = make_control("euclid");
+        REQUIRE(x);
+        CHECK(control_object::self(x)->value_outlet_count() == 1);
+        send(x, "bang");
+        CHECK(value_output(x, 0) == std::vector<std::string>{"1 0 0 1 0 0 1 0"});
+
+        WHEN("an attribute is set by its message, and read back by get<attribute>") {
+            send(x, "steps", {long_atom(5)});
+            send(x, "bang");
+            send(x, "getsteps");
+            THEN("the list follows it, and the value comes from the dumpout") {
+                CHECK(value_output(x, 0) == std::vector<std::string>{"1 0 0 1 0 0 1 0", "1 0 1 0 1"});
+                CHECK(dumpout_output(x) == std::vector<std::string>{"steps 5"});
+            }
+        }
+        free_control(x);
+    }
+
+    GIVEN("note_name.py: an int outputs the octave from the right outlet and the name, as a symbol, from the left") {
+        auto* x = make_control("note_name");
+        REQUIRE(x);
+        CHECK(control_object::self(x)->value_outlet_count() == 2);
+        send(x, "int", {long_atom(60)});
+        send(x, "int", {long_atom(70)});
+        CHECK(value_output(x, 0) == std::vector<std::string>{"symbol C", "symbol A#"});
+        CHECK(value_output(x, 1) == std::vector<std::string>{"int 4", "int 4"});
+        CHECK(dumpout_output(x).empty());
+        free_control(x);
+    }
+
+    GIVEN("scale.py: a list in, through numpy, a list out") {
+        auto* x = make_control("scale");
+        REQUIRE(x);
+        send(x, "factor", {float_atom(2.0)});
+        send(x, "offset", {long_atom(1)});
+        send(x, "list", {long_atom(1), float_atom(2.0), long_atom(3)});
+        CHECK(value_output(x, 0) == std::vector<std::string>{"3 5 7"});
+        free_control(x);
+    }
+}
+
+SCENARIO("A save that widens or narrows the return hints changes tap.python's outlets in place (plan 9.3)") {
+    ext_main(nullptr);
+    const auto file = fixture("maxtest_mock_control_outlets");
+    const auto one = std::string{"class maxtest_mock_control_outlets:\n    def bang(self) -> int:\n        return 1\n"};
+    const auto two = std::string{"class maxtest_mock_control_outlets:\n"
+                                 "    def bang(self) -> tuple[int, int]:\n        return 1, 2\n"};
+    write_file(file, one);
+    auto* x = make_control("maxtest_mock_control_outlets");
+    REQUIRE(x);
+    auto&       object  = *control_object::self(x);
+    void* const first   = object.value_outlet(0);
+    void* const dumpout = object.dumpout_outlet();
+    REQUIRE(object.value_outlet_count() == 1);
+    dynlets::reset();
+
+    WHEN("a save gives a method a tuple[int, int] return") {
+        write_file(file, two);
+        object.update_source();
+        THEN("an outlet is inserted after the last value outlet, between the box's dynlet_begin and dynlet_end") {
+            CHECK(dynlets::calls
+                  == std::vector<std::string>{"dynlet_begin", "insert after " + dynlets::id(first), "dynlet_end"});
+            CHECK(object.value_outlet_count() == 2);
+            CHECK(object.value_outlet(0) == first);
+            CHECK(object.dumpout_outlet() == dumpout);
+        }
+        THEN("the new outlet carries its value") {
+            send(x, "bang");
+            CHECK(value_output(x, 0) == std::vector<std::string>{"int 1"});
+            CHECK(value_output(x, 1) == std::vector<std::string>{"int 2"});
+        }
+
+        AND_WHEN("a save narrows it again") {
+            void* const second = object.value_outlet(1);
+            dynlets::reset();
+            write_file(file, one);
+            object.update_source();
+            THEN("the surplus outlet is deleted, and nothing else") {
+                CHECK(dynlets::calls
+                      == std::vector<std::string>{"dynlet_begin", "delete " + dynlets::id(second), "dynlet_end"});
+                CHECK(object.value_outlet_count() == 1);
+                CHECK(object.value_outlet(0) == first);
+            }
+        }
+    }
+
+    WHEN("a save keeps the count") {
+        write_file(file, one + "    # saved again\n");
+        object.update_source();
+        THEN("the outlets are left alone") {
+            CHECK(dynlets::calls.empty());
+            CHECK(object.value_outlet_count() == 1);
+        }
+    }
+
+    WHEN("a save breaks the class") {
+        write_file(file, "class maxtest_mock_control_outlets:\n    def bang(self) -> int\n");
+        object.update_source();
+        THEN("the outlets stay as they were, and a bang outputs nothing") {
+            CHECK(dynlets::calls.empty());
+            send(x, "bang");
+            CHECK(value_output(x, 0).empty());
+        }
+    }
+
+    free_control(x);
+    std::filesystem::remove(file);
+}
+
+SCENARIO("tap.python's forwarders: the class's messages, its attributes, get<attribute>, then its own anything "
+         "(plan 9.3)") {
+    ext_main(nullptr);
+
+    GIVEN("a class with an anything method") {
+        const auto file = fixture("maxtest_mock_control_anything");
+        write_file(file, "class maxtest_mock_control_anything:\n"
+                         "    steps: int = 8\n\n"
+                         "    def hello(self, n: int) -> int:\n        return n + 1\n\n"
+                         "    def anything(self, selector: str, *args) -> list:\n"
+                         "        return [selector, *args]\n");
+        auto* x = make_control("maxtest_mock_control_anything");
+        REQUIRE(x);
+
+        THEN("its anything is not registered with Max: the class's forwarder calls it") {
+            CHECK(control_object::self(x)->python_message_names() == std::vector<std::string>{"hello"});
+        }
+        THEN("a message the class has a method for goes to that method") {
+            send(x, "hello", {long_atom(1)});
+            CHECK(value_output(x, 0) == std::vector<std::string>{"int 2"});
+        }
+        THEN("an attribute's name sets it, and get<name> outputs it from the dumpout") {
+            send(x, "steps", {long_atom(3)});
+            send(x, "getsteps");
+            CHECK(dumpout_output(x) == std::vector<std::string>{"steps 3"});
+            CHECK(value_output(x, 0).empty());
+        }
+        THEN("any other message reaches anything, with its selector first") {
+            send(x, "foo", {long_atom(1), symbol_atom("two")});
+            send(x, "symbol", {symbol_atom("hi")});
+            send(x, "bang");
+            CHECK(value_output(x, 0) == std::vector<std::string>{"foo 1 two", "symbol hi", "bang"});
+        }
+        free_control(x);
+        std::filesystem::remove(file);
+    }
+
+    GIVEN("a class without one") {
+        const auto file = fixture("maxtest_mock_control_plain");
+        write_file(file, "class maxtest_mock_control_plain:\n    def hello(self) -> int:\n        return 1\n");
+        auto* x = make_control("maxtest_mock_control_plain");
+        REQUIRE(x);
+
+        THEN("a message it has no method for is not understood, in Max's own words, and nothing is output") {
+            const auto said = console_of([&] {
+                send(x, "foo", {long_atom(1)});
+                send(x, "int", {long_atom(1)});
+            });
+            CHECK(contains(said, "doesn't understand \"foo\""));
+            CHECK(contains(said, "doesn't understand \"int\""));
+            CHECK(value_output(x, 0).empty());
+        }
+        free_control(x);
+        std::filesystem::remove(file);
+    }
+}
+
+SCENARIO("tap.python's reserved names: every object's, less anything, plus dumpout; the audio ones are free "
+         "(plan 9.3)") {
+    ext_main(nullptr);
+    const auto names = control_object::reserved_names();
+    const auto has   = [&](const char* name) { return std::find(names.begin(), names.end(), name) != names.end(); };
+    CHECK(has("dumpout"));
+    CHECK(has("filechanged"));
+    CHECK(has("assist"));
+    CHECK_FALSE(has("anything"));
+    for (const auto& name : tap::python::audio_messages()) {
+        CHECK_FALSE(has(name.c_str()));
+    }
+
+    const auto file = fixture("maxtest_mock_control_reserved");
+    write_file(file, "class maxtest_mock_control_reserved:\n"
+                     "    def dumpout(self) -> None:\n        pass\n"
+                     "    def assist(self) -> None:\n        pass\n"
+                     "    def dsp(self) -> None:\n        pass\n"
+                     "    def mode(self) -> None:\n        pass\n"
+                     "    def signal(self) -> None:\n        pass\n"
+                     "    def anything(self, selector: str, *args) -> None:\n        pass\n"
+                     "    def int(self, n: int) -> None:\n        pass\n"
+                     "    def list(self, *args: float) -> None:\n        pass\n"
+                     "    def bang(self) -> None:\n        pass\n");
+    auto* x = make_control("maxtest_mock_control_reserved");
+    REQUIRE(x);
+    THEN("dumpout and assist are not exposed; the audio names, and int, list and bang, are registered "
+         "despite the class's forwarders of those names; anything is forwarded") {
+        CHECK(control_object::self(x)->python_message_names()
+              == std::vector<std::string>{"bang", "dsp", "int", "list", "mode", "signal"});
+    }
+    free_control(x);
+    std::filesystem::remove(file);
+}
+
+SCENARIO("A message on the audio thread (Scheduler in Audio Interrupt) is said once per session, from the main "
+         "thread (plan 9.3)") {
+    ext_main(nullptr);
+    auto* x = make_control("default");
+    REQUIRE(x);
+    const auto before = qelems::set.load();
+
+    send(x, "bang");
+    CHECK(qelems::set.load() == before); // not on the audio thread: nothing to say
+
+    audio_thread::now = true;
+    send(x, "bang");
+    send(x, "bang");
+    audio_thread::now = false;
+    CHECK(qelems::set.load() == before + 1); // set once, from the audio thread: real-time safe
+
+    // what the qelem does on the main thread
+    const auto first  = console_of([&] { control_object::self(x)->post_notices(); });
+    const auto second = console_of([&] { control_object::self(x)->post_notices(); });
+    CHECK(contains(first, "Scheduler in Audio Interrupt"));
+    CHECK(second.empty());
+    CHECK(value_output(x, 0).size() == 3); // the messages ran regardless
+    free_control(x);
+}
+
+SCENARIO("A reload that widens and narrows the outlets races a second thread's messages safely (plan 9.3)") {
+    ext_main(nullptr);
+    const auto file = fixture("maxtest_mock_control_race");
+    const auto one  = std::string{"class maxtest_mock_control_race:\n    def bang(self) -> int:\n        return 1\n"};
+    const auto two  = std::string{"class maxtest_mock_control_race:\n"
+                                  "    def bang(self) -> tuple[int, int]:\n        return 1, 2\n"};
+    write_file(file, one);
+    auto* x = make_control("maxtest_mock_control_race");
+    REQUIRE(x);
+    auto& object = *control_object::self(x);
+    // once each way first, so that every symbol either thread asks the mock kernel for exists (its
+    // gensym is not thread-safe, as Max's is), and both sources are cached
+    write_file(file, two);
+    object.update_source();
+    write_file(file, one);
+    object.update_source();
+    const auto* bang = c74::max::gensym("bang");
+
+    std::atomic<bool> done{};
+    std::atomic<long> sent{};
+    std::thread       messages{[&] {
+        while (!done.load()) {
+            object.message_gimme(bang, 0, nullptr);
+            sent.fetch_add(1);
+        }
+    }};
+    // (the console is not captured here: both threads post to it)
+    for (int i = 0; i < 40; ++i) {
+        write_file(file, i % 2 == 0 ? two : one);
+        object.update_source();
+    }
+    done = true;
+    messages.join();
+    CHECK(sent.load() > 0);
+    CHECK(object.value_outlet_count() == 1);
+    // every value came out whole, from the outlet of its value: the first's 1, and 2 from each
+    // second outlet a widening inserted — never a value for an outlet the object did not have then
+    std::size_t output{};
+    std::size_t misplaced{};
+    for (const auto& text : value_output(x, 0)) {
+        ++output;
+        misplaced += text == "int 1" ? 0 : 1;
+    }
+    for (const auto* outlet : outlets::inserted[x]) {
+        for (const auto& text : output_of(x, outlet)) {
+            ++output;
+            misplaced += text == "int 2" ? 0 : 1;
+        }
+    }
+    CHECK(output > 0);
+    CHECK(misplaced == 0);
+    free_control(x);
+    std::filesystem::remove(file);
 }

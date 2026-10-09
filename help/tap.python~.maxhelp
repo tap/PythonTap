@@ -274,7 +274,7 @@
 					"numinlets" : 1,
 					"numoutlets" : 0,
 					"patching_rect" : [ 20.0, 165.0, 235.0, 108.0 ],
-					"text" : "Its annotated fields become attributes (gain, below), its public methods become messages (greet, float, int), process() runs on the signal, and prepare() is told the sample rate and vector size."
+					"text" : "Its annotated fields become attributes (gain, below), its public methods become messages (greet, bang, float, int), process() runs on the signal, and prepare() is told the sample rate and vector size."
 				}
 
 			}

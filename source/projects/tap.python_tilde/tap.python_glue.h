@@ -16,23 +16,28 @@
 #pragma once
 
 // The core includes CPython, which insists on preceding system headers.
+#include "tap/python/processor.h"
+#include "tap/python/runtime.h"
+#include "tap/python/value.h"
+
+// Then the standard library and Max's (this comment keeps clang-format from regrouping the two).
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <exception>
 #include <filesystem>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "c74_min_api.h"
 #include "tap.python_filewatch.h"
 #include "tap.python_package.h"
-#include "tap/python/processor.h"
-#include "tap/python/runtime.h"
-#include "tap/python/value.h"
 
 namespace tap::python {
 
@@ -458,6 +463,12 @@ namespace tap::python {
 
     /// The Max attributes and messages one object made for its class's fields and methods, kept in
     /// step with the class across reloads; the attribute access and the guard that go with them.
+    ///
+    /// The maps change on the main thread, on a reload, while attributes are read and set from the
+    /// main or the scheduler thread (and a host's forwarder looks names up from either): a lock of
+    /// its own guards them, held for the lookups and the changes and never across a call into
+    /// Python — what a lookup finds is copied out first. Recursive, because Max may call an
+    /// attribute's getter from inside object_addattr() on the thread making it.
     template <class Host>
     class python_members {
       public:
@@ -465,7 +476,8 @@ namespace tap::python {
         /// longer has, recreate the ones whose type changed, add the new ones. (The core has already
         /// carried the values of those that stayed over to the new instance.) Main thread.
         void create_attributes(c74::max::t_object* owner, const processor& p) {
-            const auto& current = p.attributes();
+            const std::lock_guard<std::recursive_mutex> lock{m_lock};
+            const auto&                                 current = p.attributes();
             for (auto it = m_attributes.begin(); it != m_attributes.end();) {
                 const auto found = std::find_if(current.begin(), current.end(),
                                                 [&](const attribute_info& a) { return a.name == it->first; });
@@ -485,27 +497,55 @@ namespace tap::python {
             }
         }
 
-        /// Replace the previous incarnation's Max messages with the class's current methods. Main thread.
-        void create_messages(c74::max::t_object* owner, const processor& p) {
+        /// Replace the previous incarnation's Max messages with the class's current methods. A method
+        /// named in `forwarded` is not registered with Max: the host answers it through a forwarder of
+        /// its own (tap.python's anything, plan 9.3), and has_message() still knows it. Main thread.
+        void create_messages(c74::max::t_object* owner, const processor& p,
+                             const std::vector<std::string>& forwarded = {}) {
+            const std::lock_guard<std::recursive_mutex> lock{m_lock};
             for (auto& element : m_messages) {
                 c74::max::object_deletemethod(owner, c74::max::gensym(element.first.c_str()));
             }
             m_messages.clear();
+            m_forwarded.clear();
 
             for (const auto& message : p.messages()) { // never names an attribute
-                m_messages[message.name] = std::make_unique<python_message<Host>>(owner, message.name);
+                if (std::find(forwarded.begin(), forwarded.end(), message.name) != forwarded.end()) {
+                    m_forwarded.insert(message.name);
+                }
+                else {
+                    m_messages[message.name] = std::make_unique<python_message<Host>>(owner, message.name);
+                }
             }
         }
 
         /// The names of the Max messages made for the class's methods, sorted (for the tests).
         std::vector<std::string> message_names() const {
-            std::vector<std::string> names;
+            const std::lock_guard<std::recursive_mutex> lock{m_lock};
+            std::vector<std::string>                    names;
             names.reserve(m_messages.size());
             for (const auto& element : m_messages) {
                 names.push_back(element.first);
             }
             std::sort(names.begin(), names.end());
             return names;
+        }
+
+        /// Whether the class has a method `name`: registered with Max, or forwarded by the host.
+        /// Any thread.
+        bool has_message(const std::string& name) const {
+            const std::lock_guard<std::recursive_mutex> lock{m_lock};
+            return m_messages.find(name) != m_messages.end() || m_forwarded.find(name) != m_forwarded.end();
+        }
+
+        /// The type of the attribute `name`, if the class has one of that name. Any thread.
+        std::optional<value_type> attribute_type(const std::string& name) const {
+            const std::lock_guard<std::recursive_mutex> lock{m_lock};
+            const auto                                  found = m_attributes.find(name);
+            if (found == m_attributes.end()) {
+                return std::nullopt;
+            }
+            return found->second->value_type();
         }
 
         /// Whether `owner` already answers `name` itself — a method its class registered (min's
@@ -517,7 +557,7 @@ namespace tap::python {
         /// added with object_addmethod() answers as unknown (plan 9.0), so is left out either way.
         /// Main thread.
         bool answered_by_max(c74::max::t_object* owner, const std::string& name) const {
-            if (m_messages.find(name) != m_messages.end() || m_attributes.find(name) != m_attributes.end()) {
+            if (has_message(name) || attribute_type(name)) {
                 return false;
             }
             return found_method(c74::max::object_getmethod(owner, c74::max::gensym(name.c_str())),
@@ -535,7 +575,7 @@ namespace tap::python {
                 log(log_level::error, "Attributes with more than 1 arg not supported");
                 return;
             }
-            if (m_attributes.find(name) == m_attributes.end()) {
+            if (!attribute_type(name)) {
                 return;
             }
             p->set_attribute(name, to_values(argc, argv).front());
@@ -559,13 +599,13 @@ namespace tap::python {
             if (!p || !p->loaded()) {
                 return;
             }
-            const auto found = m_attributes.find(name);
-            if (found == m_attributes.end()) {
+            const auto found = attribute_type(name);
+            if (!found) {
                 return;
             }
 
             // nothing to read (None, or a value that does not convert): the type's empty value
-            const auto type = found->second->value_type();
+            const auto type = *found;
             if (type == value_type::integer || type == value_type::boolean) {
                 c74::max::atom_setlong(*argv, 0);
             }
@@ -589,8 +629,10 @@ namespace tap::python {
         }
 
       private:
+        mutable std::recursive_mutex                                           m_lock;
         std::unordered_map<std::string, std::unique_ptr<python_message<Host>>> m_messages;
         std::unordered_map<std::string, std::unique_ptr<python_attr<Host>>>    m_attributes;
+        std::unordered_set<std::string>                                        m_forwarded;
     };
 
 } // namespace tap::python

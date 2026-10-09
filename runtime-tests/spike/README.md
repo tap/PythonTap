@@ -1,5 +1,9 @@
 # The tap.python spike (plan 9.0) — throwaway
 
+> **The spike's class is gone.** 9.3 built the real `tap.python` and removed `tap.python_spike.cpp`
+> and its `TAP_PYTHON_SPIKE` option, so what follows is the record of 9.0: to run these patchers
+> again, check out a commit before 9.3's (`f55984c`, say), where the instructions below still hold.
+
 `docs/TAP-PYTHON-PLAN.md` item 9.0: before any of 9.1 onward is built, answer in a real Max what
 the design of `tap.python` rests on. The answers, with the Max version they were verified in, are
 written into the plan under 9.0; this folder is how they were found, kept so the Windows session
