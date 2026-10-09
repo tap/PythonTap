@@ -368,7 +368,10 @@ third was Windows-only.
   length against results of the wrong length), and `test_examples.cpp` running the three new
   examples on known inputs. A `core/bench` row for a message call with a list of 64 atoms, written
   by `scripts/update-perf-docs.py` with the others, so the ReadMe's performance sentence is
-  measured. No Max code changes; `tap.python~`'s battery and glue test unchanged and green; the
+  measured. *(9.1: the row and the script's sentence are in; the ReadMe's table is regenerated on
+  the next measurement on an idle machine, 9.6 at the latest — on 2026-10-09, with macOS's indexing
+  running, a message with 64 numbers in and out measured 5.6 µs for the bridge alone and 15 µs for
+  `scale.py`, and `main` and the branch measured alike back to back.)* No Max code changes; `tap.python~`'s battery and glue test unchanged and green; the
   audio bench numbers unchanged (the audio path does not touch the new code).
 - [ ] **9.2 The shared glue.** `tap.python_tilde_{attribute,message,cglue,filewatch,package}.h`
   become `python_glue<Host>` (the trampolines instantiated per host through `Host::self()`), in
