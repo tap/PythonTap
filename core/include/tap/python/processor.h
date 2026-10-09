@@ -16,6 +16,11 @@
 // - an optional `prepare(self, sample_rate: float, vector_size: int)` is told the audio settings
 //   (prepare()) before the instance first processes audio, and again whenever they change
 //
+// That is the audio object, tap.python~. With bind_audio off — tap.python, a Python class as a Max
+// object without audio (docs/TAP-PYTHON-PLAN.md) — process() and prepare() are ordinary messages,
+// and what a method returns is what the object outputs: call_with_output() converts the result for
+// the host's outlets (see output_item), and the return hints say how many outlets (outlet_count()).
+//
 // Threads: load(), prepare(), flush_reports() and the destructor run on the host's main thread;
 // set_attribute(), get_attribute() and call() on any non-audio thread; process() on the audio
 // thread. Each takes the GIL. A processor that is not loaded (import, class lookup or construction
@@ -63,12 +68,29 @@ namespace tap::python {
         value_type  type;
     };
 
-    /// A public method of the user's class, callable through call().
+    /// How a method's last positional parameter takes its atoms.
+    enum class rest_kind {
+        none,  ///< one atom, as every other parameter does
+        list,  ///< hinted list[...]: all the atoms left after the others, as one list
+        array, ///< hinted np.ndarray: all the atoms left after the others, as one float64 array
+    };
+
+    /// A public method of the user's class, callable through call() and call_with_output().
     struct message_info {
         std::string               name;
         std::vector<value_type>   argument_types; ///< one per positional parameter, in order
         std::size_t               required{};     ///< how many of those have no default
         std::optional<value_type> variadic;       ///< the type of *args, if the method takes it
+        /// Whether the last positional parameter takes all the atoms left after the others: when it is
+        /// hinted list[...] or np.ndarray and the method takes no *args (plan 9.1). Its elements are
+        /// converted to rest_type (a list[float]'s to real; an array's are always real).
+        rest_kind  rest{rest_kind::none};
+        value_type rest_type{value_type::any};
+        /// How many outlets the method's result fills: n when its return is hinted tuple[...] with n
+        /// members (spreads: one value per outlet), 1 otherwise — a tuple of unsaid length is output as
+        /// a list from one outlet.
+        std::size_t return_count{1};
+        bool        spreads{};
     };
 
     class processor {
@@ -86,12 +108,17 @@ namespace tap::python {
         ///                          its class registered), which a Python method or field must not
         ///                          replace either: reserved like the list, with the same diagnostic.
         ///                          Called on the main thread during load(), with the GIL held.
+        /// @param bind_audio        true for an audio object (tap.python~): process() is the audio
+        ///                          callback and prepare() its settings hook. False for an object
+        ///                          without audio (tap.python): both are messages like any other,
+        ///                          has_process() stays false and prepare() does nothing.
         explicit processor(std::string source_name, log_function log = {},
                            std::vector<std::string> reserved_messages = {}, std::function<void()> report_ready = {},
-                           std::function<bool(const std::string&)> host_answers = {})
+                           std::function<bool(const std::string&)> host_answers = {}, const bool bind_audio = true)
             : m_source_name{std::move(source_name)}
             , m_log{std::move(log)}
             , m_reserved_messages{std::move(reserved_messages)}
+            , m_bind_audio{bind_audio}
             , m_report_ready{std::move(report_ready)}
             , m_host_answers{std::move(host_answers)} {}
 
@@ -116,8 +143,21 @@ namespace tap::python {
         /// True while a class instance exists (attributes and messages are live).
         bool loaded() const noexcept { return m_instance.load() != nullptr; }
 
-        /// True while process() is bound to the class's process() method.
+        /// True while process() is bound to the class's process() method (never without bind_audio).
         bool has_process() const noexcept { return m_process_function.load() != nullptr; }
+
+        /// Whether process() and prepare() are bound as audio (the constructor's bind_audio).
+        bool binds_audio() const noexcept { return m_bind_audio; }
+
+        /// How many outlets the class's messages need: the most any of them fills (message_info's
+        /// return_count), and at least one. Main thread, after load().
+        std::size_t outlet_count() const noexcept {
+            std::size_t count = 1;
+            for (const auto& message : m_messages) {
+                count = (std::max)(count, message.info.return_count);
+            }
+            return count;
+        }
 
         /// True when the bound process() takes a whole vector (hinted np.ndarray), false when it is
         /// called per sample. Main thread, after load().
@@ -194,6 +234,10 @@ namespace tap::python {
                 return false;
             }
             Py_XSETREF(m_module, module);
+            // 9.1 (audit M5): what depends on how this kind of object binds the class — a name its
+            // host reserves, how process() or a tuple return binds — is said once per kind, so even
+            // when an object of the other kind ran the file
+            m_announcing_kind = announce_due();
 
             PyObject* py_class = PyObject_GetAttrString(m_module, m_source_name.c_str()); // strong
             if (!py_class) {
@@ -398,72 +442,43 @@ namespace tap::python {
         /// Call the method `name` with `args`, each coerced to its parameter's hinted type (an
         /// unannotated parameter takes the value as it is). The count must fit the method's
         /// signature: its required positional parameters at least, all of them at most unless it
-        /// takes *args. Exceptions are printed to the console. Returns true when the method was
-        /// called and returned normally.
+        /// takes *args, or its last parameter is hinted list[...] or np.ndarray and takes all the
+        /// atoms left after the others (plan 9.1). Exceptions are printed to the console. Returns true
+        /// when the method was called and returned normally; what it returned is dropped.
         bool call(const std::string_view name, const std::span<const value> args) {
             if (!loaded()) {
                 return false;
             }
-
-            gil_lock lock;
-
-            const auto found = std::find_if(m_messages.begin(), m_messages.end(),
-                                            [&](const bound_message& m) { return m.info.name == name; });
-            if (found == m_messages.end()) {
-                return false;
-            }
-
-            // Take our own copies and references of everything the call uses before anything that
-            // could run Python code (even an allocation can trigger a GC finalizer): that could let
-            // a reload on another thread replace the message list under us.
-            const message_info info     = found->info;
-            PyObject*          function = found->function; // bound: call with the arguments only
-            Py_INCREF(function);
-
-            const auto positional = info.argument_types.size();
-            if (args.size() < info.required || (!info.variadic && args.size() > positional)) {
-                Py_DECREF(function);
-                std::string expected;
-                if (info.variadic) {
-                    expected = "at least " + std::to_string(info.required);
-                }
-                else if (info.required == positional) {
-                    expected = std::to_string(positional);
-                }
-                else {
-                    expected = std::to_string(info.required) + " to " + std::to_string(positional);
-                }
-                log(log_level::error,
-                    std::string{name} + ": expected " + expected + " argument(s), got " + std::to_string(args.size()));
-                return false;
-            }
-
-            std::vector<PyObject*> call_args;
-            call_args.reserve(args.size());
-            bool converted = true;
-            for (std::size_t i = 0; i < args.size(); ++i) {
-                const value_type type = i < positional ? info.argument_types[i] : *info.variadic;
-                PyObject*        item = to_python(coerce(args[i], type), type);
-                if (!item) {
-                    converted = false;
-                    break;
-                }
-                call_args.push_back(item);
-            }
-
-            PyObject* result =
-                converted ? PyObject_Vectorcall(function, call_args.data(), call_args.size(), nullptr) : nullptr;
-            for (PyObject* arg : call_args) {
-                Py_DECREF(arg);
-            }
-            Py_DECREF(function);
-
+            gil_lock     lock;
+            message_info info;
+            PyObject*    result = invoke(name, args, info);
             if (!result) {
-                report_exception();
                 return false;
             }
             Py_DECREF(result);
             return true;
+        }
+
+        /// Call the method `name` as call() does, and convert what it returned for the host's outlets
+        /// (tap.python, plan 9.1): None outputs nothing; a bool, a number or a str one value; a list,
+        /// an unhinted tuple, a range or a 1-D np.ndarray a list, or the message its first element
+        /// names when that is a str; a return hinted tuple[...] with n members one value per outlet.
+        /// Anything else, or a value an outlet cannot carry (an integer past 64 bits, a list holding
+        /// None or another list), is reported and nothing is output. Empty when nothing is output —
+        /// None, an exception (printed), or a value that does not convert (reported).
+        output call_with_output(const std::string_view name, const std::span<const value> args) {
+            if (!loaded()) {
+                return {};
+            }
+            gil_lock     lock;
+            message_info info;
+            PyObject*    result = invoke(name, args, info);
+            if (!result) {
+                return {};
+            }
+            output out = to_output(result, info);
+            Py_DECREF(result);
+            return out;
         }
 
         /// The audio callback: `input_count` input channels and `output_count` output channels of
@@ -536,7 +551,8 @@ namespace tap::python {
         std::string              m_source_name;
         log_function             m_log;
         std::vector<std::string> m_reserved_messages;
-        PyObject*                m_module{}; // strong; main thread only
+        bool                     m_bind_audio{true}; // process() and prepare() are audio (tap.python~)
+        PyObject*                m_module{};         // strong; main thread only
         // Written only under the GIL; atomic so the audio thread's lock-free "is anything
         // bound?" check (and loaded()) is well-defined.
         std::atomic<PyObject*>      m_instance{};         // strong
@@ -548,9 +564,10 @@ namespace tap::python {
         bool                       m_block_mode{};
         std::size_t                m_inputs{1}; // the bound process()'s inputs and outputs
         std::size_t                m_outputs{1};
-        std::vector<std::string>   m_input_names;  // main thread only
-        bool                       m_announcing{}; // this load() ran the file: see announce()
-        std::atomic<std::uint64_t> m_loads{};      // successful load()s
+        std::vector<std::string>   m_input_names;       // main thread only
+        bool                       m_announcing{};      // this load() ran the file: see announce()
+        bool                       m_announcing_kind{}; // this kind still owes the class's binding: see announce_kind()
+        std::atomic<std::uint64_t> m_loads{};           // successful load()s
         // The np.ndarray each input arrives in, reused every vector: strong, its buffer held so its
         // memory cannot move.
         struct block_buffer {
@@ -602,8 +619,43 @@ namespace tap::python {
             }
         }
 
-        /// How the class's audio is bound, for the line load() announces.
+        /// Log something true of how this kind of object binds the class — a name its host
+        /// reserves, how process() or a tuple return binds: once per kind (see announce_due()).
+        void announce_kind(const log_level level, const std::string& text) const {
+            if (m_announcing_kind) {
+                log(level, text);
+            }
+        }
+
+        /// Whether this kind of object (audio or control) still owes what is true of the class as it
+        /// binds it, for the source executed last: the support module's announce_due(). Caller holds
+        /// the GIL; main thread, in load().
+        bool announce_due() const {
+            PyObject* function = detail::support("announce_due"); // borrowed
+            PyObject* module   = PyUnicode_FromString(("_tap_python_" + m_source_name).c_str());
+            PyObject* kind     = PyUnicode_FromString(m_bind_audio ? "audio" : "control");
+            PyObject* result =
+                function && module && kind ? PyObject_CallFunctionObjArgs(function, module, kind, nullptr) : nullptr;
+            Py_XDECREF(module);
+            Py_XDECREF(kind);
+            if (!result) {
+                PyErr_Clear();
+                return m_announcing;
+            }
+            const bool due = PyObject_IsTrue(result) == 1;
+            Py_DECREF(result);
+            return due;
+        }
+
+        /// How the class is bound, for the line load() announces: its audio, or (without bind_audio)
+        /// its messages and outlets.
         std::string binding_description() const {
+            if (!m_bind_audio) {
+                const auto messages = m_messages.size();
+                const auto outlets  = outlet_count();
+                return std::to_string(messages) + (messages == 1 ? " message, " : " messages, ")
+                       + std::to_string(outlets) + (outlets == 1 ? " outlet" : " outlets");
+            }
             if (!has_process()) {
                 return "no process() bound, so the object outputs silence";
             }
@@ -1161,6 +1213,387 @@ namespace tap::python {
             Py_DECREF(result);
         }
 
+        // ---- messages, and what they output (plan 9.1) ------------------------------------------
+
+        /// Find the method `name`, convert `args` for its signature and call it: a new reference to
+        /// what it returned, or nullptr — an exception (printed), or a count that does not fit the
+        /// signature (logged). `info` is set to the method's description. Caller holds the GIL.
+        PyObject* invoke(const std::string_view name, const std::span<const value> args, message_info& info) {
+            const auto found = std::find_if(m_messages.begin(), m_messages.end(),
+                                            [&](const bound_message& m) { return m.info.name == name; });
+            if (found == m_messages.end()) {
+                return nullptr;
+            }
+
+            // Take our own copies and references of everything the call uses before anything that
+            // could run Python code (even an allocation can trigger a GC finalizer): that could let
+            // a reload on another thread replace the message list under us.
+            info               = found->info;
+            PyObject* function = found->function; // bound: call with the arguments only
+            Py_INCREF(function);
+
+            // A rest parameter (list[...] or np.ndarray, last) takes the atoms after the others, so
+            // the call may have as many as it likes, and needs no atom for the rest parameter itself
+            const auto positional = info.argument_types.size();
+            const bool rest       = info.rest != rest_kind::none;
+            const auto fixed      = rest ? positional - 1 : positional; // the parameters taking one atom each
+            const auto minimum    = rest ? (std::min)(info.required, fixed) : info.required;
+            if (args.size() < minimum || (!rest && !info.variadic && args.size() > positional)) {
+                Py_DECREF(function);
+                std::string expected;
+                if (rest || info.variadic) {
+                    expected = "at least " + std::to_string(minimum);
+                }
+                else if (info.required == positional) {
+                    expected = std::to_string(positional);
+                }
+                else {
+                    expected = std::to_string(info.required) + " to " + std::to_string(positional);
+                }
+                log(log_level::error,
+                    std::string{name} + ": expected " + expected + " argument(s), got " + std::to_string(args.size()));
+                return nullptr;
+            }
+
+            std::vector<PyObject*> call_args;
+            call_args.reserve(args.size() + 1);
+            bool       converted = true;
+            const auto singles   = rest ? (std::min)(args.size(), fixed) : args.size();
+            for (std::size_t i = 0; i < singles; ++i) {
+                const value_type type = i < positional ? info.argument_types[i] : *info.variadic;
+                PyObject*        item = to_python(coerce(args[i], type), type);
+                if (!item) {
+                    converted = false;
+                    break;
+                }
+                call_args.push_back(item);
+            }
+            // The rest parameter: with no atoms left it is an empty list when it has no default (it is
+            // required), and left to its default when it has one.
+            if (converted && rest && (args.size() > fixed || info.required == positional)) {
+                const auto atoms     = args.size() > fixed ? args.subspan(fixed) : std::span<const value>{};
+                PyObject*  collected = collect(atoms, info.rest, info.rest_type);
+                if (collected) {
+                    call_args.push_back(collected);
+                }
+                else {
+                    converted = false;
+                }
+            }
+
+            PyObject* result =
+                converted ? PyObject_Vectorcall(function, call_args.data(), call_args.size(), nullptr) : nullptr;
+            for (PyObject* arg : call_args) {
+                Py_DECREF(arg);
+            }
+            Py_DECREF(function);
+
+            if (!result) {
+                report_exception();
+                return nullptr;
+            }
+            return result;
+        }
+
+        /// The atoms a rest parameter takes: a list of `type` values, or (an array) a float64
+        /// np.ndarray. A new reference, or nullptr with an error set. Caller holds the GIL.
+        static PyObject* collect(const std::span<const value> atoms, const rest_kind kind, const value_type type) {
+            const auto element = kind == rest_kind::array ? value_type::real : type;
+            PyObject*  list    = PyList_New(static_cast<Py_ssize_t>(atoms.size()));
+            if (!list) {
+                return nullptr;
+            }
+            for (std::size_t i = 0; i < atoms.size(); ++i) {
+                PyObject* item = to_python(coerce(atoms[i], element), element);
+                if (!item) {
+                    Py_DECREF(list);
+                    return nullptr;
+                }
+                PyList_SET_ITEM(list, static_cast<Py_ssize_t>(i), item); // steals the reference
+            }
+            if (kind == rest_kind::list) {
+                return list;
+            }
+            PyObject* array = nullptr;
+            if (PyObject* numpy = PyImport_ImportModule("numpy")) {
+                array = PyObject_CallMethod(numpy, "array", "Os", list, "float64");
+                Py_DECREF(numpy);
+            }
+            Py_DECREF(list);
+            return array;
+        }
+
+        /// What `result` — returned by the method `info` — outputs: see call_with_output(). What does
+        /// not convert is reported, and nothing is output. Caller holds the GIL. The conversion can
+        /// run Python code (an array's tolist(), a number's __index__), which may let another thread
+        /// in: it works on its own reference and its own copy of `info`.
+        output to_output(PyObject* result, const message_info& info) const {
+            std::string why;
+            if (!info.spreads) {
+                auto item = to_output_item(result, why);
+                if (!why.empty()) {
+                    report_output(info.name, why);
+                    return {};
+                }
+                if (!item) {
+                    return {};
+                }
+                output out;
+                out.push_back(std::move(item));
+                return out;
+            }
+
+            // a return hinted tuple[...] of n members: one value per outlet
+            PyObject*  items = sequence_items(result);
+            const auto count = items ? static_cast<std::size_t>(PyList_GET_SIZE(items)) : std::size_t{0};
+            if (!items || count != info.return_count) {
+                report_output(info.name, "is hinted to return " + std::to_string(info.return_count)
+                                             + (info.return_count == 1 ? " value" : " values")
+                                             + ", one per outlet, but returned "
+                                             + (items ? std::to_string(count) + " value(s)" : described(result)));
+                Py_XDECREF(items);
+                return {};
+            }
+            output out(count);
+            bool   any = false;
+            for (std::size_t k = 0; k < count; ++k) {
+                out[k] = to_output_item(PyList_GET_ITEM(items, static_cast<Py_ssize_t>(k)), why);
+                if (!why.empty()) {
+                    Py_DECREF(items);
+                    report_output(info.name, why + " as its value " + std::to_string(k + 1));
+                    return {};
+                }
+                any = any || out[k].has_value();
+            }
+            Py_DECREF(items);
+            if (!any) {
+                return {};
+            }
+            return out;
+        }
+
+        void report_output(const std::string& name, const std::string& why) const {
+            log(log_level::error, name + "() " + why + " — nothing output");
+        }
+
+        /// One value as an outlet outputs it: nothing for None; a number, or `symbol <s>` for a str;
+        /// a sequence as a list, or as the message its first element names when that is a str (an
+        /// empty one outputs nothing). On a value an outlet cannot carry, `why` says so. Caller holds
+        /// the GIL.
+        std::optional<output_item> to_output_item(PyObject* object, std::string& why) const {
+            if (object == detail::none()) {
+                return std::nullopt;
+            }
+            if (is_ndarray(object)) {
+                const auto dimensions = array_dimensions(object);
+                if (dimensions == 0) { // a 0-d array is its value
+                    PyObject* item = PyObject_CallMethod(object, "item", nullptr);
+                    if (!item) {
+                        PyErr_Clear();
+                        why = "returned a 0-d np.ndarray whose value could not be read";
+                        return std::nullopt;
+                    }
+                    auto converted = to_output_item(item, why);
+                    Py_DECREF(item);
+                    return converted;
+                }
+                if (dimensions != 1) {
+                    why = "returned a " + std::to_string(dimensions)
+                          + "-D np.ndarray, which an outlet cannot carry (a 1-D one is a list)";
+                    return std::nullopt;
+                }
+            }
+            if (PyObject* items = sequence_items(object)) {
+                const auto         count = static_cast<std::size_t>(PyList_GET_SIZE(items));
+                std::vector<value> atoms;
+                atoms.reserve(count);
+                for (std::size_t i = 0; i < count; ++i) {
+                    value       atom;
+                    std::string what;
+                    if (!to_atom(PyList_GET_ITEM(items, static_cast<Py_ssize_t>(i)), atom, what)) {
+                        Py_DECREF(items);
+                        why = "returned a list holding " + what + " (item " + std::to_string(i + 1)
+                              + "), which an outlet cannot carry";
+                        return std::nullopt;
+                    }
+                    atoms.push_back(std::move(atom));
+                }
+                Py_DECREF(items);
+                if (atoms.empty()) {
+                    return std::nullopt;
+                }
+                if (const auto* selector = std::get_if<std::string>(&atoms.front())) { // Max's own rule
+                    output_item message{*selector, {}};
+                    message.atoms.assign(std::make_move_iterator(atoms.begin() + 1),
+                                         std::make_move_iterator(atoms.end()));
+                    return message;
+                }
+                return output_item{std::string{"list"}, std::move(atoms)};
+            }
+            value       atom;
+            std::string what;
+            if (!to_atom(object, atom, what)) {
+                why = "returned " + what + ", which an outlet cannot carry";
+                return std::nullopt;
+            }
+            if (std::holds_alternative<std::string>(atom)) { // a str is symbol <s> (decided by plan 9.0)
+                return output_item{std::string{"symbol"}, {std::move(atom)}};
+            }
+            return output_item{std::nullopt, {std::move(atom)}};
+        }
+
+        /// One element of what a method returned, as an atom: a bool (numpy's too) as 0 or 1; an
+        /// integer (anything with __index__) as a 64-bit one; a real number (anything with __float__)
+        /// as a float, NaN and infinity included; a str as a symbol; a 0-d np.ndarray as its value.
+        /// False for anything else — None, a sequence, a value past 64 bits — and `what` names it.
+        /// Caller holds the GIL; never leaves an error set.
+        static bool to_atom(PyObject* object, value& atom, std::string& what) {
+            if (object == detail::none()) {
+                what = "None";
+                return false;
+            }
+            if (is_bool(object)) {
+                const int truth = PyObject_IsTrue(object);
+                if (truth < 0) {
+                    PyErr_Clear();
+                    what = described(object);
+                    return false;
+                }
+                atom = std::int64_t{truth};
+                return true;
+            }
+            if (is_ndarray(object)) {
+                if (array_dimensions(object) == 0) {
+                    PyObject* item = PyObject_CallMethod(object, "item", nullptr);
+                    if (!item) {
+                        PyErr_Clear();
+                        what = described(object);
+                        return false;
+                    }
+                    const bool converted = to_atom(item, atom, what);
+                    Py_DECREF(item);
+                    return converted;
+                }
+                what = described(object);
+                return false;
+            }
+            if (PyUnicode_Check(object)) {
+                atom = utf8(object);
+                return true;
+            }
+            if (PyList_Check(object) || PyTuple_Check(object) || is_range(object)) {
+                what = described(object);
+                return false;
+            }
+            if (PyIndex_Check(object)) {
+                PyObject* index = PyNumber_Index(object);
+                if (!index) {
+                    PyErr_Clear();
+                    what = described(object);
+                    return false;
+                }
+                int             overflow = 0;
+                const long long integer  = PyLong_AsLongLongAndOverflow(index, &overflow);
+                if (overflow != 0) {
+                    PyObject* text = PyObject_Repr(index);
+                    what           = utf8(text) + " (past a 64-bit integer)";
+                    Py_XDECREF(text);
+                    Py_DECREF(index);
+                    return false;
+                }
+                Py_DECREF(index);
+                if (integer == -1 && PyErr_Occurred()) {
+                    PyErr_Clear();
+                    what = described(object);
+                    return false;
+                }
+                atom = std::int64_t{integer};
+                return true;
+            }
+            const auto* number = Py_TYPE(object)->tp_as_number;
+            if (number && number->nb_float) {
+                const double real = PyFloat_AsDouble(object);
+                if (real == -1.0 && PyErr_Occurred()) {
+                    PyErr_Clear();
+                    what = described(object);
+                    return false;
+                }
+                atom = real;
+                return true;
+            }
+            what = described(object);
+            return false;
+        }
+
+        /// A new reference to the items of a list, a tuple, a range or a 1-D np.ndarray, as a list;
+        /// nullptr, with no error set, for anything else. Caller holds the GIL.
+        static PyObject* sequence_items(PyObject* object) {
+            PyObject* items = nullptr;
+            if (is_ndarray(object)) {
+                if (array_dimensions(object) == 1) {
+                    items = PyObject_CallMethod(object, "tolist", nullptr);
+                }
+            }
+            else if (PyList_Check(object) || PyTuple_Check(object) || is_range(object)) {
+                items = PySequence_List(object);
+            }
+            if (items && !PyList_Check(items)) {
+                Py_CLEAR(items);
+            }
+            if (!items) {
+                PyErr_Clear();
+            }
+            return items;
+        }
+
+        /// Whether `object`'s type, or one of its bases, has the name `name` (a static type's name
+        /// includes its module: "numpy.ndarray") — so numpy's types are known without importing it.
+        static bool is_kind_of(PyObject* object, const std::string_view name) {
+            const PyTypeObject* type = Py_TYPE(object);
+            if (name == type->tp_name) {
+                return true;
+            }
+            PyObject* bases = type->tp_mro; // a tuple of the type and its bases
+            if (!bases || !PyTuple_Check(bases)) {
+                return false;
+            }
+            for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); ++i) {
+                if (name == reinterpret_cast<PyTypeObject*>(PyTuple_GET_ITEM(bases, i))->tp_name) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// A Python bool, or numpy's (numpy.bool, numpy.bool_ before numpy 2).
+        static bool is_bool(PyObject* object) {
+            return Py_TYPE(object) == Py_TYPE(Py_GetConstantBorrowed(Py_CONSTANT_TRUE))
+                   || is_kind_of(object, "numpy.bool") || is_kind_of(object, "numpy.bool_");
+        }
+
+        static bool is_ndarray(PyObject* object) { return is_kind_of(object, "numpy.ndarray"); }
+
+        static bool is_range(PyObject* object) { return std::string_view{Py_TYPE(object)->tp_name} == "range"; }
+
+        /// An np.ndarray's number of dimensions, or -1. Caller holds the GIL; leaves no error set.
+        static long array_dimensions(PyObject* array) {
+            PyObject*  ndim       = PyObject_GetAttrString(array, "ndim");
+            const long dimensions = ndim ? PyLong_AsLong(ndim) : -1;
+            Py_XDECREF(ndim);
+            if (PyErr_Occurred()) {
+                PyErr_Clear();
+                return -1;
+            }
+            return dimensions;
+        }
+
+        /// A value's type, for a report: "a dict", "an object", "a numpy.ndarray".
+        static std::string described(PyObject* object) {
+            const std::string name{Py_TYPE(object)->tp_name};
+            const bool vowel = !name.empty() && std::string_view{"aeiouAEIOU"}.find(name[0]) != std::string_view::npos;
+            return (vowel ? "an " : "a ") + name;
+        }
+
         bool is_reserved(const std::string& name) const {
             return std::find(m_reserved_messages.begin(), m_reserved_messages.end(), name) != m_reserved_messages.end()
                    || (m_host_answers && m_host_answers(name));
@@ -1215,9 +1648,10 @@ namespace tap::python {
                     continue;
                 }
                 if (is_reserved(name)) { // a host attribute or message has the name (plan 2.5)
-                    announce(log_level::error,
-                             "the field " + name
-                                 + " is reserved by the host and is not exposed as an attribute; rename the field");
+                    announce_kind(
+                        log_level::error,
+                        "the field " + name
+                            + " is reserved by the host and is not exposed as an attribute; rename the field");
                     continue;
                 }
                 b.attributes.push_back({name, value_type_from_hint(kind)});
@@ -1231,6 +1665,7 @@ namespace tap::python {
             std::string kind; // the hint kind
             int         parameter_kind{};
             bool        has_default{};
+            std::string element_kind; // a list hint's elements' kind; 'any' otherwise
         };
 
         struct signature {
@@ -1266,7 +1701,7 @@ namespace tap::python {
                 PyObject* p = PyList_GetItem(parameters, i); // borrowed
                 sig.parameters.push_back({utf8(PyTuple_GetItem(p, 0)), utf8(PyTuple_GetItem(p, 1)),
                                           static_cast<int>(PyLong_AsLong(PyTuple_GetItem(p, 2))),
-                                          PyObject_IsTrue(PyTuple_GetItem(p, 3)) == 1});
+                                          PyObject_IsTrue(PyTuple_GetItem(p, 3)) == 1, utf8(PyTuple_GetItem(p, 4))});
             }
             if (PyErr_Occurred()) {
                 PyErr_Clear();
@@ -1276,7 +1711,8 @@ namespace tap::python {
         }
 
         /// Bind the instance's public methods as messages, process() as the audio callback and
-        /// prepare() as the settings hook. Caller holds the GIL.
+        /// prepare() as the settings hook — or, without bind_audio, those two as messages too.
+        /// Caller holds the GIL.
         void collect_messages(binding& b) const {
             PyObject* methods = call_support("methods", b.instance);
             if (!methods) {
@@ -1298,16 +1734,17 @@ namespace tap::python {
                     continue;
                 }
 
-                if (name == "prepare") {
+                if (m_bind_audio && name == "prepare") {
                     Py_INCREF(method);
                     b.prepare_function = method;
                 }
-                else if (name == "process") {
+                else if (m_bind_audio && name == "process") {
                     bind_process(method, b);
                 }
                 else if (is_reserved(name)) {
-                    announce(log_level::error,
-                             name + "() is reserved by the host and is not exposed as a message; rename the method");
+                    announce_kind(
+                        log_level::error,
+                        name + "() is reserved by the host and is not exposed as a message; rename the method");
                 }
                 else {
                     bind_message(name, method, b);
@@ -1333,8 +1770,8 @@ namespace tap::python {
             Py_XDECREF(owner);
             if (!plain) {
                 Py_XDECREF(fn);
-                announce(log_level::error, "process() must be a regular instance method (not a classmethod or "
-                                           "staticmethod); audio is not bound");
+                announce_kind(log_level::error, "process() must be a regular instance method (not a classmethod or "
+                                                "staticmethod); audio is not bound");
                 return;
             }
             // 2.4: the positional parameters are the signal inputs, all per vector (np.ndarray) or all
@@ -1352,7 +1789,7 @@ namespace tap::python {
                 var_inputs = var_inputs || p.parameter_kind == k_var_positional;
             }
             const auto fail = [&](const std::string& why) {
-                announce(log_level::error, "process() " + why + "; audio is not bound");
+                announce_kind(log_level::error, "process() " + why + "; audio is not bound");
                 Py_DECREF(fn);
             };
             if (var_inputs) {
@@ -1382,15 +1819,17 @@ namespace tap::python {
         }
 
         /// Bind a public method as a message, described by its signature. A keyword-only parameter
-        /// without a default cannot be passed from the host, so such a method is not exposed.
-        /// Caller holds the GIL.
+        /// without a default cannot be passed from the host, so such a method is not exposed. A last
+        /// positional parameter hinted list[...] or np.ndarray takes the atoms left after the others
+        /// (plan 9.1), and a return hinted tuple[...] spreads over as many outlets. Caller holds the GIL.
         void bind_message(const std::string& name, PyObject* method, binding& b) const {
             const auto sig = describe(method, name + "()");
             if (!sig) {
                 return;
             }
 
-            message_info info{name, {}, 0, std::nullopt};
+            message_info     info{name, {}, 0, std::nullopt};
+            const parameter* last = nullptr; // the last positional parameter
             for (const auto& p : sig->parameters) {
                 switch (p.parameter_kind) {
                 case k_positional_only:
@@ -1399,21 +1838,55 @@ namespace tap::python {
                     if (!p.has_default) {
                         info.required = info.argument_types.size();
                     }
+                    last = &p;
                     break;
                 case k_var_positional:
                     info.variadic = value_type_from_hint(p.kind);
                     break;
                 case k_keyword_only:
                     if (!p.has_default) {
-                        announce(log_level::error, name + "() has a keyword-only parameter '" + p.name
-                                                       + "' without a default, which a message cannot pass; it is not "
-                                                         "exposed as a message");
+                        announce_kind(log_level::error, name + "() has a keyword-only parameter '" + p.name
+                                                            + "' without a default, which a message cannot pass; it is "
+                                                              "not exposed as a message");
                         return;
                     }
                     break;
                 default: // **kwargs: nothing to pass
                     break;
                 }
+            }
+            if (last && !info.variadic) {
+                if (last->kind == "list") {
+                    info.rest      = rest_kind::list;
+                    info.rest_type = value_type_from_hint(last->element_kind);
+                }
+                else if (last->kind == "ndarray") {
+                    info.rest      = rest_kind::array;
+                    info.rest_type = value_type::real;
+                }
+            }
+
+            // the outlets: a tuple[...] of n members is n, one value each; a tuple that does not say
+            // how many is output as a list from one, which an object without audio says once — rather
+            // than leaving the method out, so that a class written for tap.python~ still loads whole
+            if (sig->return_count > 1 || (sig->return_count == 1 && sig->return_kind == "tuple")) {
+                if (static_cast<std::size_t>(sig->return_count) <= k_max_channels) {
+                    info.return_count = static_cast<std::size_t>(sig->return_count);
+                    info.spreads      = true;
+                }
+                else if (!m_bind_audio) {
+                    announce_kind(log_level::error,
+                                  name + "() is hinted to return " + std::to_string(sig->return_count)
+                                      + " values, more than the " + std::to_string(k_max_channels)
+                                      + " outlets an object can have; it is output as a list from one outlet");
+                }
+            }
+            else if (sig->return_count < 1 && !m_bind_audio) {
+                announce_kind(log_level::info,
+                              name
+                                  + "() is hinted to return a tuple without saying how many values, so it is output as "
+                                    "a list from one outlet; to output one value per outlet, say them: "
+                                    "tuple[int, str]");
             }
 
             Py_INCREF(method);

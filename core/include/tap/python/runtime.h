@@ -343,11 +343,20 @@ namespace tap::python {
         // staticmethods — found without running descriptors, so a property getter never runs just
         // because the class was loaded. Each callable is bound: call it with the arguments only.
         //
-        // describe(callable) -> ([(name, kind, parameter_kind, has_default)], return_kind, error,
-        // return_count, return_element_kind). parameter_kind is inspect.Parameter.kind as an int.
-        // return_count is how many values a return hint declares: 1, or n for tuple[a, b, ...] (-1
-        // when a tuple's length is not said: tuple, tuple[float, ...]); return_element_kind is the
-        // hint kind of the value, or of a tuple's first element.
+        // describe(callable) -> ([(name, kind, parameter_kind, has_default, element_kind)],
+        // return_kind, error, return_count, return_element_kind). parameter_kind is
+        // inspect.Parameter.kind as an int; element_kind is the kind of a list hint's elements
+        // ('float' for list[float], 'any' for a bare list or any other hint). return_count is how many
+        // values a return hint declares: 1, or n for tuple[a, b, ...] (-1 when a tuple's length is not
+        // said: tuple, tuple[float, ...]), a hint written as a string split only at its top level
+        // ('tuple[list[int], dict[str, int]]' is two); return_element_kind is the hint kind of the
+        // value, or of a tuple's first element.
+        //
+        // announce_due(module_name, kind) -> bool. Whether an object of `kind` ('audio' for
+        // tap.python~, 'control' for tap.python) still owes what is true of the class as that kind
+        // binds it — a name one host reserves and the other does not, how process() or a tuple
+        // return binds — for the source executed last: true once per (source, kind), so each kind
+        // says it once even when the other kind's object ran the save (plan 9.1, audit M5).
         //
         // WorkerStopped: raised into a process() that has not returned when its worker is stopped
         // (plan 8.3; worker.h). A BaseException, like KeyboardInterrupt, so that a class's
@@ -448,6 +457,21 @@ def _split_union(text):
     parts.append(text[start:])
     return [p.strip() for p in parts if p.strip() not in ('None', '')]
 
+def _split_top(text):
+    """The comma-separated arguments of a hint, split at its top level only, as written:
+    'list[int], dict[str, int]' is two."""
+    parts, depth, start = [], 0, 0
+    for i, c in enumerate(text):
+        if c in '[(':
+            depth += 1
+        elif c in '])':
+            depth -= 1
+        elif c == ',' and depth == 0:
+            parts.append(text[start:i])
+            start = i + 1
+    parts.append(text[start:])
+    return [p.strip() for p in parts]
+
 def _unwrap(hint):
     """Annotated[X, ...] and Final[X] are X, however deep."""
     while True:
@@ -537,7 +561,7 @@ def describe(fn):
             hints = {}
     parameters = [
         (p.name, hint_kind(hints.get(p.name, inspect.Parameter.empty)), int(p.kind),
-         p.default is not inspect.Parameter.empty)
+         p.default is not inspect.Parameter.empty, element_kind(hints.get(p.name, inspect.Parameter.empty)))
         for p in inspect.signature(fn).parameters.values()
     ]
     returned = hints.get('return', inspect.Parameter.empty)
@@ -556,7 +580,7 @@ def return_shape(hint):
             return return_shape(parts[0])
         for prefix in ('typing.Tuple[', 'Tuple[', 'tuple['):
             if text.startswith(prefix) and text.endswith(']'):
-                parts = [p.strip() for p in text[len(prefix):-1].split(',')]
+                parts = _split_top(text[len(prefix):-1])
                 if '...' in parts or parts == ['']:
                     return -1, 'any'
                 return len(parts), hint_kind(parts[0])
@@ -574,6 +598,45 @@ def return_shape(hint):
             return -1, 'any'
         return len(args), hint_kind(args[0])
     return 1, hint_kind(hint)
+
+_LIST = re.compile(r'(?:typing\.)?(?:List|list)\[(.*)\]')
+
+def element_kind(hint):
+    if hint is inspect.Parameter.empty:
+        return 'any'
+    if isinstance(hint, str):
+        text = hint.strip()
+        match = _OPTIONAL.fullmatch(text)
+        if match:
+            return element_kind(match.group(1))
+        match = _WRAPPED.fullmatch(text)
+        if match:
+            return element_kind(_first_argument(match.group(1)))
+        parts = _split_union(text)
+        if len(parts) == 1 and parts[0] != text:
+            return element_kind(parts[0])
+        match = _LIST.fullmatch(text)
+        return hint_kind(_first_argument(match.group(1))) if match else 'any'
+    hint = _unwrap(hint)
+    origin = typing.get_origin(hint)
+    if origin is typing.Union or origin is types.UnionType:
+        args = [a for a in typing.get_args(hint) if a is not type(None)]
+        return element_kind(args[0]) if len(args) == 1 else 'any'
+    if origin is list:
+        args = typing.get_args(hint)
+        return hint_kind(args[0]) if args else 'any'
+    return 'any'
+
+_announced = {}
+
+def announce_due(module_name, kind):
+    cached = _cache.get(module_name)
+    source = cached[0] if cached is not None else None
+    key = (module_name, kind)
+    if source is not None and _announced.get(key) is source:
+        return False
+    _announced[key] = source
+    return True
 )";
 
         /// Create the support module (initialize() calls this with the GIL held).
