@@ -98,7 +98,7 @@ returns. The rules reproduce how Max objects and `js` behave, so a patch sees wh
 | an `int` (anything with `__index__`: `np.int64`, an `IntEnum`) | an int (`t_atom_long`, 64-bit; a value past it is reported) |
 | a `float` (anything with `__float__` and no `__index__`: `np.float32`) | a float; a non-finite value passes through as the atom Max can carry (`tap.python~` zeroes them for the audio's sake; a control value is the class's to make) |
 | a `str` | `symbol <s>`: one symbol, whatever it holds (`"hello world"` is one symbol, `"60"` the symbol and not the number). *Decided by the 9.0 spike, in Max:* output as the message it names, the strings `list`, `int`, `float`, `symbol`, `bang` and `""` are not data — dropped, an error in every receiver, a real bang — while `symbol <s>` reaches `sel`, a message box's `$1` and every other receiver as itself ([what 9.0 found](#what-90-found), 6). To output the message a string names, return it in a list (`["start"]`, the next row) |
-| a sequence: a `list`, a `tuple` without a `tuple[…]` hint, a `range`, or a 1-D `np.ndarray` | a list, each element an atom by the rules above; if the first element is a `str`, the message it names with the rest as arguments (Max's own rule: `["note", 60, 100]` outputs `note 60 100`); an empty sequence outputs nothing; an element that is not an atom (`None`, a nested sequence) is reported and the list is not output |
+| a sequence: a `list`, a `tuple` without a `tuple[…]` hint, a `range`, or a 1-D `np.ndarray` (a 0-d one is its value) | a list, each element an atom by the rules above; if the first element is a `str`, the message it names with the rest as arguments (Max's own rule: `["note", 60, 100]` outputs `note 60 100`); an empty sequence outputs nothing; an element that is not an atom (`None`, a nested sequence) is reported and the list is not output |
 | a sequence of *n* values, from a method hinted `-> tuple[…]` with *n* members | one value per outlet, outlets *n*…1, right to left, each by these rules (`None` in a slot outputs nothing from that outlet); a result that is not a sequence of exactly *n* values is reported |
 | anything else: a `dict`, a `set`, `bytes`, a generator, a 2-D array, an object | reported, with its type; nothing output (a `dict` as a Max dictionary is a later item) |
 
@@ -176,14 +176,16 @@ races a widening reload against a second thread's messages (TSan on the Linux le
 did (D6):
 
 - **`value.h`** — beside `value` (one atom): `output_item`, a message to output — a selector or
-  none, and its atoms (what `outlet_anything` / `outlet_list` / `outlet_int` take) — and
-  `output`, the per-outlet items of one call. The conversion from a Python object to an
+  none, and its atoms (what `outlet_anything` / `outlet_list` / `outlet_int` take: no selector is
+  one number, the selector `list` a list, any other the message it names, a `str` being `symbol
+  <s>`) — and `output`, the per-outlet items of one call (empty: nothing at all). The conversion from a Python object to an
   `output_item` lives in the core (the table above; `np.bool_` recognized by its `__mro__` name as
   `hint_kind` does, without importing numpy), with its errors as diagnostics through the
   processor's log, so the Max side only maps items onto `outlet_*` calls.
-- **`processor.h`** — `message_info` gains `return_count` (from `describe()`'s `return_shape`,
-  made depth-aware for string hints); `outlet_count()` is the widest among the messages (at least
-  one); a new **`call_with_output()`** returns the converted `output` (empty for `None` or a
+- **`processor.h`** — `message_info` gains `return_count` and `spreads` (from `describe()`'s
+  `return_shape`, made depth-aware for string hints; a `tuple[…]` of more than 64 members is a list,
+  said once) and `rest`/`rest_type` for a last parameter hinted `list[…]` or `np.ndarray`;
+  `outlet_count()` is the widest among the messages (at least one); a new **`call_with_output()`** returns the converted `output` (empty for `None` or a
   failure) beside the existing `bool call()`, which `tap.python~` keeps (C++ cannot overload on the
   return type alone); the constructor's `bind_audio` — off, `process`/`prepare` are bound as
   messages, `has_process()` is false, `prepare()` is a no-op; the unsaid-length tuple rule applies
@@ -192,9 +194,13 @@ did (D6):
 - **Announce-once per kind (audit M5).** The class diagnostics that depend on the object kind — a
   name reserved by one host and not the other, the tuple rule — are announced once per *(file,
   kind)*, not once per file: the loader keeps what it announced for each kind against the source
-  it executed (`announce_due(name, kind)`), and a processor announces what its kind owes even when
-  the other kind ran the save. The `Loaded` line stays once per save, from whichever ran it, and
-  says what that object bound — "4 messages, 2 outlets" or "process() bound, one call per vector".
+  it executed (`announce_due(name, kind)`, the kinds `audio` and `control`), and a processor
+  announces what its kind owes even when the other kind ran the save. The `Loaded` line stays once
+  per save, from whichever ran it, and says what that object bound — "4 messages, 2 outlets" or
+  "process() bound, one call per vector". As built (9.1): a name its host reserves, everything
+  `process()`'s binding says, a keyword-only parameter and the tuple rules are per kind; what is
+  true of the class whatever binds it — a class that will not load or instantiate, a hint that does
+  not resolve, an attribute whose type changed — stays once per save.
 - **Tests** — `test_output.cpp`: every row of the table above from a fixture whose methods return
   each kind; the outlet count from the hints, object and string, nested; an unhinted tuple as a
   list against a hinted one as outlets; an unsaid-length tuple hint as a list with one notice; the
@@ -352,7 +358,7 @@ third was Windows-only.
     file database records each, and the Documentation window lists the package under Package
     Docs; an `extras/` patcher is in the Extras menu** (seen on the Mac; which of the window's
     tabs shows which file is 9.4's to look at, when it writes them).
-- [ ] **9.1 The core: output, outlets and the audio option.** `value.h`'s `output_item`/`output`
+- [x] **9.1 The core: output, outlets and the audio option** (#46). `value.h`'s `output_item`/`output`
   and the Python-to-output conversion; `message_info::return_count` (depth-aware for strings),
   `outlet_count()`, `call_with_output()`; `bind_audio`, gating the tuple rule; the
   `list[…]`/`np.ndarray` final parameter with the old behavior pinned first; announce-once per
