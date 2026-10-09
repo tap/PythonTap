@@ -1,4 +1,4 @@
-/// @file tap.python_tilde_filewatch.h
+/// @file tap.python_filewatch.h
 /// @brief Watches the class file, and delivers a save to the object as its filechanged message.
 // SPDX-License-Identifier: MIT
 // Copyright 2022-2026 Timothy Place.
@@ -22,7 +22,7 @@ namespace tap::python {
 
         struct file_watch_object {
             c74::max::t_object  header;
-            c74::max::t_object* target; // the tap.python~ object told of each save
+            c74::max::t_object* target; // the object told of each save
         };
 
         /// Called by Max's file watcher, on the main thread.

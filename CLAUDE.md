@@ -39,9 +39,13 @@ built yet.
   interval). `scripts/update-perf-docs.py` builds it (Release), runs it, and
   rewrites the ReadMe's generated performance tables — with `--max`, Max's CPU meter too, through
   `runtime-tests/run.py --session perf`. Never hand-edit those tables; measure on an idle machine.
-- **`source/projects/tap.python_tilde/`** — the Min external: package paths, the file watcher, atom
-  conversion, and mapping the core's descriptions onto `object_addattr`/`object_addmethod`. Its
-  `_test.cpp` drives the Max glue through min-api's mock kernel.
+- **`source/projects/tap.python_tilde/`** — the Min external (`tap.python_tilde.h`) over the shared
+  glue (plan 9.2), which `tap.python` (9.3) will use too: `tap.python_glue.h` — starting the runtime,
+  atom conversion, the reserved names (`reserved_messages(audio)`) and the guard, and mapping the
+  core's descriptions onto `object_addattr`/`object_addmethod`, with the C trampolines instantiated
+  per host type (`python_glue<Host>`, through `Host::self()`) — plus the package paths
+  (`tap.python_package.h`) and the file watcher (`tap.python_filewatch.h`). Its `_test.cpp` drives
+  the Max glue through min-api's mock kernel.
 - **`python/`** — the user's script folder in the package (and the examples: `default.py`,
   `numpy_gain.py`, `allpass.py`, `numpy_allpass.py` — the same filter per vector, checked equal
   sample for sample by the core battery — `stereo_width.py`, two inputs and two outputs, and
@@ -136,14 +140,14 @@ attaches all the zips + SHA256s to a release — a pre-release for 0.x, a draft 
 - Max calls some methods directly with C arguments (`A_CANT`): the file watcher's `filechanged`
   is one. min registers a `message<>` whose name it does not special-case with its `A_GIMME` wrapper,
   which such a call crashes — so
-  the watcher is owned by a nobox helper with the SDK's signature (`tap.python_tilde_filewatch.h`).
+  the watcher is owned by a nobox helper with the SDK's signature (`tap.python_filewatch.h`).
   Check the SDK's calling convention before exposing a Max-called method as a `message<>`.
   And read the SDK's return contract before testing a Max call's result: `object_getmethod()`
   answers `method_false()`, a function, not null, for a name an object does not have — a null
   test reserved every Python name in 1.0.0. **Never compare a function pointer Max returns with
   the address of a function this module imports:** across a DLL boundary the module's
   `&method_false` is its own import thunk (the SDK declares it without `dllimport`), so 1.0.1's
-  comparison reserved every name again, on Windows only. The object asks Max what it answers for a
+  comparison reserved every name again, on Windows only. The glue asks Max what it answers for a
   name no class can have (`not_found_method()`) and compares with that (`found_method()`, 1.0.2).
   And what the object itself registers can answer its name too — its *attributes* do, and the guard
   must leave them out, or a reload reserves every field (1.0.1, found in Max); its messages, added

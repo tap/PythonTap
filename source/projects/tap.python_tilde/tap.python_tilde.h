@@ -16,10 +16,9 @@
 // the include guards swallow those definitions and the external fails to link.
 #include <algorithm>
 #include <atomic>
-#include <cstring>
 #include <memory>
 #include <string>
-#include <unordered_map>
+#include <string_view>
 #include <vector>
 
 #include "c74_min.h"
@@ -29,11 +28,7 @@
 #include <mach/thread_policy.h>
 #include <pthread.h>
 #endif
-#include "tap.python_tilde_attribute.h"
-#include "tap.python_tilde_cglue.h"
-#include "tap.python_tilde_filewatch.h"
-#include "tap.python_tilde_message.h"
-#include "tap.python_tilde_package.h"
+#include "tap.python_glue.h" // what tap.python~ shares with tap.python (plan 9.2)
 
 using namespace c74::min;
 namespace runtime = tap::python;
@@ -74,7 +69,7 @@ class python : public object<python>, public vector_operator<> {
         "identifier. Without an argument, python/default.py is loaded."};
 
     // Sent on every save of the class file (by the watch the constructor starts — see
-    // tap.python_tilde_filewatch.h), and by a patcher to force a reload.
+    // tap.python_filewatch.h), and by a patcher to force a reload.
     message<> m_filechanged{this, "filechanged",
                             "Reload the Python file. The object's file watcher sends it when the file is saved; "
                             "send it yourself to force a reload.",
@@ -165,39 +160,12 @@ class python : public object<python>, public vector_operator<> {
             return; // this occurs during dummy construction
         }
 
-        const auto package = runtime::package_root();
-        m_scripts_dir      = package / "python";
-#ifdef TAP_PYTHON_HOME
-        // Linux development builds embed a system CPython instead of a support/ runtime
-        // (see this object's CMakeLists.txt)
-        const std::filesystem::path home{TAP_PYTHON_HOME};
-#else
-        const auto home = runtime::runtime_home(package); // support/, or support/<platform> (plan 4.8)
-#endif
-
-        if (!std::filesystem::exists(home)) {
-            cerr << "No Python runtime found at " << runtime::detail::utf8(home)
-                 << " — run scripts/install-runtime from the package root to install it." << endl;
+        const auto start = runtime::start_runtime();
+        if (!start.ok) {
+            cerr << start.error << endl;
             return;
         }
-
-        if (std::string error; !runtime::runtime_library_loadable(home, error)) {
-            cerr << error << endl;
-            return;
-        }
-
-        runtime::runtime_options options;
-        options.home           = home;
-        options.scripts_dir    = m_scripts_dir;
-        options.console        = console_line;
-        options.is_main_thread = is_main_thread; // Python's output posts from Max's main thread only (8.4)
-        options.console_ready  = console_ready;
-        const auto status      = runtime::initialize(options);
-        if (!status.ok) {
-            cerr << "failed to start Python from '" << runtime::detail::utf8(home) << "': " << status.error
-                 << " (run scripts/install-runtime to install the runtime)" << endl;
-            return;
-        }
+        m_scripts_dir = start.scripts_dir;
 
         if (args.empty()) {
             m_python_source = "default";
@@ -210,42 +178,28 @@ class python : public object<python>, public vector_operator<> {
                                   : to_string(args);
         }
 
-        const auto object_log = [this](const runtime::log_level level, const std::string_view text) {
-            if (level == runtime::log_level::error) {
-                cerr << std::string{text} << endl;
-            }
-            else {
-                cout << std::string{text} << endl;
-            }
-        };
         m_processor = std::make_unique<runtime::processor>(
-            m_python_source, object_log, reserved_messages(), [this] { m_reports.set(); },
-            [this](const std::string& name) { return answered_by_max(name); });
+            m_python_source, m_log, runtime::reserved_messages(true), [this] { m_reports.set(); },
+            [this](const std::string& name) { return m_members.answered_by_max(maxobj(), name); });
         m_worker = std::make_unique<runtime::worker>(
-            *m_processor, object_log, [this] { m_reports.set(); }, audio_thread_scheduling);
+            *m_processor, m_log, [this] { m_reports.set(); }, audio_thread_scheduling);
 
         update_source();
         create_ports(); // before min makes the Max inlets and outlets from its lists, after this
 
-        // watch the source file for changes (delivered as our 'filechanged' message) — only a plain
-        // file name: the core refuses anything else (e.g. "../x"), and so must the watcher
-        if (m_python_source.find_first_of("/\\.:") != std::string::npos) {
-            return;
-        }
-        const auto watched_file = m_scripts_dir / (m_python_source + ".py");
-        const auto watched_utf8 = runtime::detail::utf8(watched_file); // Max's paths are UTF-8 (8.7)
-        char       filename[c74::max::MAX_PATH_CHARS]{};
-        std::strncpy(filename, watched_utf8.c_str(), c74::max::MAX_PATH_CHARS - 1);
-        short              path_id{};
-        c74::max::t_fourcc filetype{};
-        if (c74::max::locatefile_extended(filename, &path_id, &filetype, nullptr, 0) == 0) {
-            // not maxobj() itself: see tap.python_tilde_filewatch.h
-            m_file_watch = std::make_unique<runtime::file_watch>(maxobj(), path_id, filename);
-        }
-        else {
-            cerr << "Unable to watch " << watched_utf8 << " for changes." << endl;
+        // watch the source file for changes, delivered as our 'filechanged' message
+        std::string watch_error;
+        m_file_watch = runtime::watch_source(maxobj(), m_scripts_dir, m_python_source, watch_error);
+        if (!watch_error.empty()) {
+            cerr << watch_error << endl;
         }
     }
+
+    /// The object Max calls a trampoline with (tap.python_glue.h).
+    static python* self(c74::max::t_object* x) { return &(wrapper_find_self<python>(x))->m_min_object; }
+
+    /// This object's Max class name, for an error in a trampoline.
+    static constexpr const char* k_max_name = "tap.python~";
 
     ~python() {
         m_file_watch.reset();
@@ -275,8 +229,8 @@ class python : public object<python>, public vector_operator<> {
         if (!m_processor || !m_processor->load()) {
             return; // the processor has reported why, and outputs silence until the next reload
         }
-        create_attributes();
-        create_messages();
+        m_members.create_attributes(maxobj(), *m_processor);
+        m_members.create_messages(maxobj(), *m_processor);
         adapt_ports();
     }
 
@@ -286,69 +240,15 @@ class python : public object<python>, public vector_operator<> {
         if (!m_processor || !m_processor->loaded()) {
             return;
         }
-        m_processor->call(name.c_str(), to_values(ac, av));
+        m_processor->call(name.c_str(), runtime::to_values(ac, av));
     }
 
     void attr_set(const symbol& name, const long argc, const c74::max::t_atom* argv) {
-        if (!m_processor || !m_processor->loaded()) {
-            return;
-        }
-        if (argc != 1) {
-            cerr << "Attributes with more than 1 arg not supported" << endl;
-            return;
-        }
-
-        auto found = m_python_attributes.find(name.c_str());
-        if (found == m_python_attributes.end()) {
-            return;
-        }
-
-        // the core converts to the field's hinted type (a bool field gets a bool)
-        m_processor->set_attribute(name.c_str(), to_values(argc, argv).front());
+        m_members.set_attribute(m_processor.get(), name.c_str(), argc, argv, m_log);
     }
 
     void attr_get(const symbol& name, long* argc, c74::max::t_atom** argv) {
-        if ((*argc) != 1 || !(*argv)) { // otherwise use memory passed in
-            if (*argc && *argv) {
-                c74::max::sysmem_freeptr(*argv);
-                *argv = NULL;
-            }
-            *argc = 1;
-            *argv = reinterpret_cast<c74::max::t_atom*>(c74::max::sysmem_newptr(sizeof(c74::max::t_atom) * (*argc)));
-        }
-        c74::max::atom_setfloat(*argv, 0.0); // default in case anything below fails
-
-        if (!m_processor || !m_processor->loaded()) {
-            return;
-        }
-
-        auto found = m_python_attributes.find(name.c_str());
-        if (found == m_python_attributes.end()) {
-            return;
-        }
-
-        // nothing to read (None, or a value that does not convert): the type's empty value
-        const auto type = found->second->value_type();
-        if (type == runtime::value_type::integer || type == runtime::value_type::boolean) {
-            c74::max::atom_setlong(*argv, 0);
-        }
-        else if (type == runtime::value_type::symbol) {
-            c74::max::atom_setsym(*argv, c74::max::gensym(""));
-        }
-
-        const auto result = m_processor->get_attribute(name.c_str(), type);
-        if (!result) {
-            return;
-        }
-        if (const auto* i = std::get_if<std::int64_t>(&*result)) {
-            c74::max::atom_setlong(*argv, static_cast<c74::max::t_atom_long>(*i));
-        }
-        else if (const auto* d = std::get_if<double>(&*result)) {
-            c74::max::atom_setfloat(*argv, *d);
-        }
-        else {
-            c74::max::atom_setsym(*argv, c74::max::gensym(std::get<std::string>(*result).c_str()));
-        }
+        m_members.get_attribute(m_processor.get(), name.c_str(), argc, argv);
     }
 
     /// The audio perform routine: the core calls the Python process() once per sample or per
@@ -376,32 +276,7 @@ class python : public object<python>, public vector_operator<> {
     }
 
     /// The names of the Max messages made for the class's methods (for the tests).
-    std::vector<std::string> python_message_names() const {
-        std::vector<std::string> names;
-        names.reserve(m_python_messages.size());
-        for (const auto& element : m_python_messages) {
-            names.push_back(element.first);
-        }
-        std::sort(names.begin(), names.end());
-        return names;
-    }
-
-    /// Whether object_getmethod() found a method: neither null nor `not_found`, what it answers for a
-    /// name the object does not have — Max's method_false(), as the SDK documents. 1.0.0 tested for
-    /// null alone, and 1.0.1 compared with the address of method_false as this module sees it, which
-    /// on Windows is the external's own import thunk (the SDK declares it without dllimport), never
-    /// what Max returns: either way every field and method of a class was "answered by Max", and the
-    /// object had no attributes and no messages. So `not_found` comes from Max (not_found_method()).
-    static bool found_method(const c74::max::method found, const c74::max::method not_found) {
-        return found != nullptr && found != not_found;
-    }
-
-    /// What object_getmethod() answers for a name the object does not have, asked of Max for one
-    /// no class can have (it has spaces): Max's method_false(), whatever its address looks like from
-    /// here. Main thread.
-    c74::max::method not_found_method() {
-        return c74::max::object_getmethod(maxobj(), c74::max::gensym("tap.python~ answers no such name"));
-    }
+    std::vector<std::string> python_message_names() const { return m_members.message_names(); }
 
   private:
     string                                 m_python_source{};
@@ -414,90 +289,18 @@ class python : public object<python>, public vector_operator<> {
     std::vector<std::unique_ptr<outlet<>>> m_more_outlets; // after the first
     bool                                   m_ports_made{};
     bool                                   m_ports_differ{};
-    std::unordered_map<std::string, std::unique_ptr<runtime::python_message>> m_python_messages;
-    std::unordered_map<std::string, std::unique_ptr<runtime::python_attr>>    m_python_attributes;
+    runtime::python_members<python>        m_members; // the Max attributes and messages made for the class
 
-    /// Messages and attributes the Max object handles itself, which a Python method or field must
-    /// never replace: min's own class methods, the messages Max sends every object, this object's
-    /// file watcher (a Python method named filechanged would silently disable hot reload), and its
-    /// own attributes (worker mode's, plan 2.5).
-    ///
-    /// Above all, every message Max sends with C arguments (plan 8.2, audit A3): a Python method
-    /// of such a name would be registered with the A_GIMME trampoline, and Max calling it with a
-    /// long or a pointer reads them as a symbol and an atom list — the crash 6.1 found for
-    /// filechanged, in its general form. The names are those min treats as A_CANT
-    /// (c74_min_message.h, message_type::cant; the MIN_WRAPPER_ADDMETHOD table in
-    /// c74_min_object_wrapper.h) plus Max's own dspstate, inputchanged and multichanneloutputs.
-    /// Anything the Max class already answers is reserved as well: answered_by_max().
-    static std::vector<std::string> reserved_messages() {
-        return {"anything",
-                "appendtodictionary",
-                "assist",
-                "dblclick",
-                "dictionary",
-                "dsp",
-                "dsp64",
-                "dspsetup",
-                "dspstate",
-                "edclose",
-                "filechanged",
-                "fileusage",
-                "focusgained",
-                "focuslost",
-                "getplaystate",
-                "getvalueof",
-                "inletinfo",
-                "inputchanged",
-                "jitclass_setup",
-                "key",
-                "latency",
-                "latencysamples",
-                "loadbang",
-                "maxclass_setup",
-                "maxob_setup",
-                "mode",
-                "mop_setup",
-                "mousedoubleclick",
-                "mousedown",
-                "mousedrag",
-                "mousedragdelta",
-                "mouseenter",
-                "mouseleave",
-                "mousemove",
-                "mouseup",
-                "mousewheel",
-                "mt_mousedown",
-                "mt_mousedrag",
-                "mt_mouseenter",
-                "mt_mouseleave",
-                "mt_mousemove",
-                "mt_mouseup",
-                "multichanneloutputs",
-                "notify",
-                "okclose",
-                "oksize",
-                "paint",
-                "patchlineupdate",
-                "preset",
-                "savestate",
-                "setup",
-                "setvalueof",
-                "signal"};
-    }
-
-    /// Whether the Max object already answers `name` itself — a method its class registered (min's
-    /// dsp64, assist, the ones above), which Max would call before anything added for a Python
-    /// method, or with C arguments. The messages and attributes this object added for the previous
-    /// incarnation's methods and fields are its own, not Max's: still registered while load() runs
-    /// (an attribute answers its name, as a message does), they must not make the class's names
-    /// reserved on a reload — 1.0.1 left out the attributes, so a reload lost every field. Main thread.
-    bool answered_by_max(const std::string& name) {
-        if (m_python_messages.find(name) != m_python_messages.end()
-            || m_python_attributes.find(name) != m_python_attributes.end()) {
-            return false;
+    /// What concerns this object, for the processor, the worker and the attributes: errors through
+    /// min's cerr, the rest through its cout.
+    runtime::log_function m_log{[this](const runtime::log_level level, const std::string_view text) {
+        if (level == runtime::log_level::error) {
+            cerr << std::string{text} << endl;
         }
-        return found_method(c74::max::object_getmethod(maxobj(), c74::max::gensym(name.c_str())), not_found_method());
-    }
+        else {
+            cout << std::string{text} << endl;
+        }
+    }};
 
     /// The worker thread's scheduling (plan 2.5): the real-time class an audio thread has, so that a
     /// busy machine does not hold it off for longer than its latency (measured in Max: an ordinary
@@ -527,75 +330,6 @@ class python : public object<python>, public vector_operator<> {
 #else
         (void)period; // Linux development builds: no host runs there
 #endif
-    }
-
-    /// Whether this is Max's main thread: where Python's output may be posted at once. On any other
-    /// thread — the audio thread, a worker, the scheduler — the core queues the line (plan 8.4).
-    static bool is_main_thread() { return c74::max::systhread_ismainthread() != 0; }
-
-    /// Called on the printing thread when the core queued a line: sets the process-wide qelem that
-    /// has the lines posted from the main thread. Real-time safe (qelem_set).
-    static void console_ready() {
-        static c74::max::t_qelem* s_flush =
-            c74::max::qelem_new(nullptr, reinterpret_cast<c74::max::method>(+[](void*) { runtime::flush_console(); }));
-        c74::max::qelem_set(s_flush);
-    }
-
-    /// Python's print() output and tracebacks, for every instance.
-    static void console_line(const runtime::log_level level, const std::string_view text) {
-        const std::string line{text};
-        if (level == runtime::log_level::error) {
-            c74::max::object_error(nullptr, "python: %s", line.c_str());
-        }
-        else {
-            c74::max::object_post(nullptr, "python: %s", line.c_str());
-        }
-    }
-
-    /// Max atoms as core values, keeping each atom's own type (the core coerces to the
-    /// hinted type with the same rules as atom_getlong/atom_getfloat/atom_getsym).
-    static std::vector<runtime::value> to_values(const long ac, const c74::max::t_atom* av) {
-        std::vector<runtime::value> values;
-        values.reserve(static_cast<std::size_t>(ac));
-        for (long i = 0; i < ac; ++i) {
-            const auto* atom = av + i;
-            switch (c74::max::atom_gettype(atom)) {
-            case c74::max::A_LONG:
-                values.emplace_back(static_cast<std::int64_t>(c74::max::atom_getlong(atom)));
-                break;
-            case c74::max::A_FLOAT:
-                values.emplace_back(static_cast<double>(c74::max::atom_getfloat(atom)));
-                break;
-            default:
-                values.emplace_back(std::string{c74::max::atom_getsym(atom)->s_name});
-                break;
-            }
-        }
-        return values;
-    }
-
-    /// Make the Max attributes match the class's annotated fields: remove the ones the class no
-    /// longer has, recreate the ones whose type changed, add the new ones. (The core has already
-    /// carried the values of those that stayed over to the new instance.)
-    void create_attributes() {
-        const auto& current = m_processor->attributes();
-        for (auto it = m_python_attributes.begin(); it != m_python_attributes.end();) {
-            const auto found = std::find_if(current.begin(), current.end(),
-                                            [&](const runtime::attribute_info& a) { return a.name == it->first; });
-            if (found == current.end() || found->type != it->second->value_type()) {
-                it->second->remove();
-                it = m_python_attributes.erase(it);
-            }
-            else {
-                ++it;
-            }
-        }
-        for (const auto& attribute : current) {
-            if (m_python_attributes.find(attribute.name) == m_python_attributes.end()) {
-                m_python_attributes[attribute.name] =
-                    std::make_unique<runtime::python_attr>(maxobj(), attribute.name, attribute.type);
-            }
-        }
     }
 
     /// A signal inlet for each input the class's process() declares, named for its parameter, and
@@ -710,18 +444,6 @@ class python : public object<python>, public vector_operator<> {
             const auto number = std::to_string(m_more_outlets.size() + 2);
             m_more_outlets.push_back(std::make_unique<outlet<>>(
                 this, "(signal) output " + number + " returned from the Python process() method", "signal"));
-        }
-    }
-
-    /// Replace the previous incarnation's Max messages with the class's current methods.
-    void create_messages() {
-        for (auto& element : m_python_messages) {
-            c74::max::object_deletemethod(maxobj(), c74::max::gensym(element.first.c_str()));
-        }
-        m_python_messages.clear();
-
-        for (const auto& message : m_processor->messages()) { // never names an attribute
-            m_python_messages[message.name] = std::make_unique<runtime::python_message>(maxobj(), message.name);
         }
     }
 };
