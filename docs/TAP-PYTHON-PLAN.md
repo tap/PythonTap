@@ -8,8 +8,9 @@ change — and the plan to build it (Phase 9 of the production plan, which point
 Drafted 2026-10-02 against 1.0.0 and audited the same day (`AUDIT-TAP-PYTHON-PLAN.md`: two
 blockers, six major findings, nine minor; its addendum of 2026-10-09 records what 1.0.1 and 1.0.2
 changed). **Revised 2026-10-09 against 1.0.2** for every finding; the [revision record](#revision-record)
-at the end says what each changed. Nothing is built yet. Tick the items below (with the PR) as they
-land, and keep the design current where a PR decides differently.
+at the end says what each changed. Nothing is built yet, but the 9.0 spike has run in Max on a Mac:
+its answers are under [9.0](#what-90-found-on-a-mac), and the design below follows them. Tick the
+items below (with the PR) as they land, and keep the design current where a PR decides differently.
 
 ## What it is for
 
@@ -50,7 +51,7 @@ ordinary Max object model, which is what makes it composable with `trigger`, `me
 | D8 | How output works | **A method's return value is output from the object's outlets, by its type; its return *hint* fixes how many outlets, at bind time.** No injected outlet API in 2.0 (nothing for the class to import, so it still runs in a notebook): `None` outputs nothing; a number or a string one atom; a sequence a list; a method hinted `-> tuple[A, B]` outputs one value per outlet, right to left. The object has as many outlets as the widest return hint among its methods (at least one), plus a dumpout outlet at the right, as Max objects with attributes do; a save that changes the count changes the outlets in place. The rules are in [Output](#output-what-a-method-returns). |
 | D9 | Inlets | **One inlet in the first release.** Messages are the methods; state is the attributes (`steps 8`, `@pulses 3`, attrui), which is what a right inlet is for in most Max objects. More inlets are a later option (how, in [Later](#later-not-planned)), not a 1.x promise. |
 | D10 | Threads | **A message runs on the thread it arrives on, holding the GIL while Python runs, and outputs on that thread after the GIL is released.** That is Max's main thread, the scheduler thread under Overdrive — or, with Scheduler in Audio Interrupt on, the audio thread itself, which the object says once per session and the ReadMe states as a limit. As every ordinary Max object does, and as `tap.python~`'s messages already do. No worker. The limits, in [Threads](#threads-and-the-gil). |
-| D11 | Code layout | **One binary registers both Max classes; the second is a plain SDK class, not a min class; the core gains one option.** *Why one binary (decided 2026-10-09, audit B1):* the core is header-only and keeps its process-wide state in function-local statics, so two externals would each start the interpreter — the second `PyImport_AppendInittab()` after `Py_Initialize()` aborts Max (reproduced with two shared objects in one process) — and, as 1.0.1's Windows failure showed, a function's address is not its identity across a DLL boundary. *Why a plain SDK class:* min keeps one file-scope `this_class` per translation unit and returns early from a second `wrap_as_max_external()` (`c74_min_api.h:325`, `c74_min_object_wrapper.h:780`); a second min class in a second translation unit would work by accident of internal linkage and violate the one-definition rule the moment a test instantiated its templates elsewhere. A plain class (`class_new`/`class_addmethod`/`class_register` in the same `ext_main`, after min's) is what the shared glue already speaks — `object_addattr`, `object_addmethod`, the nobox file watcher — and what the outlets need (M1). Max finds the object through the package's `init/` mapping (`objectfile`), with a stub external as the fallback; the 9.0 spike settles which. The core's `processor` takes `bind_audio` (true for `tap.python~`): with it off, `process` and `prepare` are plain methods and nothing is prepared. The shared glue moves into templates on the host object (`python_glue<Host>`) so both classes use one copy. |
+| D11 | Code layout | **One binary registers both Max classes; the second is a plain SDK class, not a min class; the core gains one option.** *Why one binary (decided 2026-10-09, audit B1):* the core is header-only and keeps its process-wide state in function-local statics, so two externals would each start the interpreter — the second `PyImport_AppendInittab()` after `Py_Initialize()` aborts Max (reproduced with two shared objects in one process) — and, as 1.0.1's Windows failure showed, a function's address is not its identity across a DLL boundary. *Why a plain SDK class:* min keeps one file-scope `this_class` per translation unit and returns early from a second `wrap_as_max_external()` (`c74_min_api.h:325`, `c74_min_object_wrapper.h:780`); a second min class in a second translation unit would work by accident of internal linkage and violate the one-definition rule the moment a test instantiated its templates elsewhere. A plain class (`class_new`/`class_addmethod`/`class_register` in the same `ext_main`, after min's) is what the shared glue already speaks — `object_addattr`, `object_addmethod`, the nobox file watcher — and what the outlets need (M1). Max finds the object through the package's `init/` mapping (`objectfile`), with a stub external as the fallback; the 9.0 spike found the mapping works (on the Mac; Windows still to run). The core's `processor` takes `bind_audio` (true for `tap.python~`): with it off, `process` and `prepare` are plain methods and nothing is prepared. The shared glue moves into templates on the host object (`python_glue<Host>`) so both classes use one copy. |
 
 ## The class contract
 
@@ -96,7 +97,7 @@ returns. The rules reproduce how Max objects and `js` behave, so a patch sees wh
 | `bool`, or numpy's `bool_` | an int, 0 or 1 |
 | an `int` (anything with `__index__`: `np.int64`, an `IntEnum`) | an int (`t_atom_long`, 64-bit; a value past it is reported) |
 | a `float` (anything with `__float__` and no `__index__`: `np.float32`) | a float; a non-finite value passes through as the atom Max can carry (`tap.python~` zeroes them for the audio's sake; a control value is the class's to make) |
-| a `str` | the message named by it, with no arguments (`"hello world"` is one symbol, as in `js`) — *or* `symbol <s>`: the 9.0 spike decides against real downstream objects (`route`, `sel`, `prepend`, a message box's `$1`), and says what happens to the selectors `int`, `float`, `list`, `symbol`, `bang` and `""` |
+| a `str` | `symbol <s>`: one symbol, whatever it holds (`"hello world"` is one symbol, `"60"` the symbol and not the number). *Decided by the 9.0 spike, in Max:* output as the message it names, the strings `list`, `int`, `float`, `symbol`, `bang` and `""` are not data — dropped, an error in every receiver, a real bang — while `symbol <s>` reaches `sel`, a message box's `$1` and every other receiver as itself ([what 9.0 found](#what-90-found-on-a-mac), 6). To output the message a string names, return it in a list (`["start"]`, the next row) |
 | a sequence: a `list`, a `tuple` without a `tuple[…]` hint, a `range`, or a 1-D `np.ndarray` | a list, each element an atom by the rules above; if the first element is a `str`, the message it names with the rest as arguments (Max's own rule: `["note", 60, 100]` outputs `note 60 100`); an empty sequence outputs nothing; an element that is not an atom (`None`, a nested sequence) is reported and the list is not output |
 | a sequence of *n* values, from a method hinted `-> tuple[…]` with *n* members | one value per outlet, outlets *n*…1, right to left, each by these rules (`None` in a slot outputs nothing from that outlet); a result that is not a sequence of exactly *n* values is reported |
 | anything else: a `dict`, a `set`, `bytes`, a generator, a 2-D array, an object | reported, with its type; nothing output (a `dict` as a Max dictionary is a later item) |
@@ -128,7 +129,7 @@ names the method, so such methods come last:
 - `scale.py`: a list in, scaled and offset by attributes with numpy, a list out — `def list(self,
   values: np.ndarray) -> np.ndarray`.
 - `note_name.py`: an int in, two outlets out — `def int(self, note: int) -> tuple[str, int]`
-  returns the pitch class and the octave, so `60` outputs `C` and `4`.
+  returns the pitch class and the octave, so `60` outputs `4` and `symbol C`.
 
 ## Threads and the GIL
 
@@ -159,8 +160,8 @@ races a widening reload against a second thread's messages (TSan on the Linux le
   message then runs Python *on the audio thread*, and waits there for the GIL behind a reload (a
   few milliseconds) — a dropout. `tap.python~`'s worker mode does not help, because the work
   itself is on the audio thread; CLAUDE.md's "the audio thread never takes the GIL" holds for a
-  patch without a `tap.python`. The object detects it (`systhread_isaudiothread()`) and says so
-  once per session; the ReadMe states it as a limit; an `@defer` attribute running messages on
+  patch without a `tap.python`. The object detects it (`systhread_isaudiothread()`, which 9.0
+  found true for exactly that case) and says so once per session; the ReadMe states it as a limit; an `@defer` attribute running messages on
   the main thread is the later remedy ([Later](#later-not-planned)).
 - The 0.5 ms switch interval (2.6) bounds how long a *bytecode* loop keeps the GIL from a waiting
   thread; a single long C call (a numpy operation on a large array) holds it throughout, as 2.6
@@ -216,17 +217,22 @@ registered by the project's own `ext_main` in `tap.python_tilde.cpp` after min's
   maps — the same members as the min object, through the shared glue.
 - **How Max finds it.** The package's `init/tap.python.txt` maps the object name to the file:
   `max objectfile tap.python tap.python~;` — the mapping Max's own `init/` text files use for
-  objects that live in a file of another name. *The spike confirms it on both platforms.* If Max
-  will not map it, the fallback is a stub external `tap.python.mxo` / `.mxe64` with no core in it,
-  whose `ext_main` has Max load `tap.python~`'s file (which registers both classes) and returns;
-  the spike tries that too if needed. `assemble-package.py` ships `init/`.
+  objects that live in a file of another name. *Verified on the Mac by 9.0:* a fresh Max finds
+  `[tap.python]` through it, and says `tap.python: No such object` without it; Windows is still to
+  run. If Max will not map it there, the fallback is a stub external `tap.python.mxo` / `.mxe64`
+  with no core in it, whose `ext_main` has Max load `tap.python~`'s file (which registers both
+  classes) and returns. `assemble-package.py` ships `init/` (since 9.0).
 - **Ports (audit M1).** In `new`, `outlet_new()` for the dumpout first (Max orders outlets by
   creation, right to left), stored with `object_obex_store(x, _sym_dumpout, …)` as the SDK's own
-  example does, then the value outlets from last to first. The object sends through the raw
-  pointers it holds, never through min. On a reload that changes the count, between the box's
-  `dynlet_begin` and `dynlet_end`: `outlet_delete` for the surplus, `outlet_insert_after` the last
-  value outlet for the new ones (never `outlet_append`, which would land them after the dumpout),
-  under the object's lock; without a box, the object keeps its outlets and says so once.
+  example does, then the value outlets from last to first. **And the class registers
+  `object_obex_dumpout` as its `dumpout` method** (`class_addmethod(c, (method)object_obex_dumpout,
+  "dumpout", A_CANT, 0)`, as Cycling '74's SDK examples do): 9.0 found that without it `get<attr>`
+  is dropped without a word. The object sends through the raw pointers it holds, never through
+  min. On a reload that changes the count, between the box's `dynlet_begin` and `dynlet_end`:
+  `outlet_delete` for the surplus, `outlet_insert_after` the last value outlet for the new ones
+  (never `outlet_append`, which would land them after the dumpout), under the object's lock;
+  without a box, the object keeps its outlets and says so once. 9.0 verified that this keeps the
+  dumpout last and the cords of every outlet that stays, the dumpout's included.
 - **Messages and output.** `message_gimme()` calls `call_with_output()` and, under the lock, maps
   each `output_item` onto `outlet_int`/`outlet_float`/`outlet_anything`/`outlet_list` on the right
   outlet, right to left.
@@ -235,17 +241,24 @@ registered by the project's own `ext_main` in `tap.python_tilde.cpp` after min's
   tried as one of the class's messages, then as an attribute set, then as `get<name>` (output from
   the dumpout), then as the class's Python `anything` if it has one, and otherwise posts that the
   object does not understand it, in Max's own words. The Python `anything` is never registered as
-  an instance method. *Unverified until the spike:* whether Max consults the object's instance
-  methods and attributes before a class-level `anything` at all (8.8 showed an added attribute's
-  name is found by `object_getmethod()`, which is consistent with it); the forwarder is correct
-  either way.
+  an instance method. *Verified by 9.0:* Max tries the object's instance attributes (set and
+  `get<attr>`) and instance methods before a class-level `anything`, and an instance method before
+  a class method of the same name, so the forwarder sees only what nothing else answers. But
+  **`int`, `float`, `bang` and `list` never reach a class-level `anything`** — Max says it does not
+  understand them (a list goes to an `int` method with its first atom if there is one) — so the
+  class also registers `int`, `float`, `bang` and `list` methods that forward the same way; a
+  Python method of one of those names, registered per instance as `tap.python~` does, answers
+  before them. `symbol foo` reaches `anything` with the selector `symbol` (or a Python `symbol`).
 - **The guard.** `answered_by_max()` as 1.0.2 has it — compare with what Max answers for a name no
-  class can have — leaving out the object's own messages, attributes, dumpout and forwarder. If
-  Max answers unknown names with the forwarder on a class that has one, the sentinel *is* the
-  forwarder and unknown names still read as "not found".
-- **Reserved names.** 8.2's list less the audio names; `anything` is answered by the forwarder and
-  is not reserved by the guard (the sentinel sees to it), and a glue test asserts a class's
-  `anything` is exposed.
+  class can have — leaving out the object's own messages, attributes, dumpout and forwarder.
+  *Verified by 9.0:* on a class with a class-level `anything`, `object_getmethod()` still answers
+  an unknown name with `method_false()`, the sentinel's answer — not the forwarder — so 1.0.2's
+  comparison works unchanged; it answers `anything` with the forwarder, and finds attributes,
+  `get<attr>` and class methods, while methods added with `object_addmethod()` answer as unknown
+  (as on `tap.python~`).
+- **Reserved names.** 8.2's list less the audio names, plus `dumpout` (the object's own, `A_CANT`,
+  which Max answers — 9.0); `anything` is answered by the forwarder and is not reserved by the
+  guard (it leaves the forwarder out), and a glue test asserts a class's `anything` is exposed.
 - **Threads.** The lock above; `systhread_isaudiothread()` on each message for the once-per-session
   notice; the console through the shared qelem (8.4).
 - **The rest** is the shared glue, templated on the host: the file watcher (6.1's nobox helper,
@@ -257,7 +270,7 @@ registered by the project's own `ext_main` in `tap.python_tilde.cpp` after min's
   the page min generates). The help patcher is by hand in Max, as 5.2 was.
 - **Glue test** (mock kernel, with the stubs made faithful — audit m5): `outlet_nth` returning the
   mock's real outlet ids, `object_obex_store`/`object_obex_dumpout` and `outlet_insert_after`
-  stubbed and recorded. `[tap.python euclid]` (made through the class's own `new`, as Max would)
+  stubbed and recorded, and the class's `dumpout` method asserted registered (9.0). `[tap.python euclid]` (made through the class's own `new`, as Max would)
   has one inlet, two outlets (one plus dumpout); a bang's list is in `object_getoutput(x, 0)`; a
   `note_name` int fills outlet 1 then outlet 0; `getsteps` reaches the dumpout; a `tuple[…]` save
   that widens the class records the dynlet calls; the forwarder's order with a class that has
@@ -310,21 +323,36 @@ row (1.0.0, 1.0.1, 1.0.1's Windows package) shipped what only a host platform co
 third was Windows-only.
 
 - [ ] **9.0 The spike, in Max on both platforms.** A throwaway second class in `tap.python~`'s
-  binary, enough to answer what only Max can, written into this plan before 9.1:
+  binary, enough to answer what only Max can, written into this plan before 9.1. **Run on a Mac
+  (2026-10-09, #43): every question answered — the verdicts below, the evidence in
+  [What 9.0 found](#what-90-found-on-a-mac). Windows: still to run** (questions 1, 3, 4 and 5 at
+  least; `runtime-tests/spike/README.md` says how). Verified in Max 9.1.5 (3db35fa476d), macOS
+  15.7.9, x86_64:
   - a plain SDK class registered beside min's in one `ext_main` loads, and both objects work in
-    one patch created in either order (D11);
+    one patch created in either order (D11) — **yes**;
   - `init/tap.python.txt`'s `objectfile` mapping makes `[tap.python]` load the file in a fresh
-    Max — or the stub external does;
-  - `outlet_insert_after` places an outlet before the dumpout, and patch cords survive it (M1);
-  - `get<attr>` reaches the obex-stored dumpout (M1);
+    Max — or the stub external does — **the mapping does; no stub needed on the Mac**;
+  - `outlet_insert_after` places an outlet before the dumpout, and patch cords survive it (M1) —
+    **yes, and `outlet_delete` removes exactly the outlets it is given, with their cords**;
+  - `get<attr>` reaches the obex-stored dumpout (M1) — **only if the class also registers
+    `object_obex_dumpout` as its `dumpout` method; without it, `get<attr>` is dropped silently**
+    (Ports now says so);
   - the dispatch order of a class-level `anything` against the object's instance methods and
-    attributes, and what `object_getmethod()` answers for an unknown name on such a class (M3);
+    attributes, and what `object_getmethod()` answers for an unknown name on such a class (M3) —
+    **instance attributes and methods first; `int`, `float`, `bang` and `list` never reach
+    `anything`; an unknown name is answered with `method_false()`, as on `tap.python~`** (the
+    forwarder and the guard now say so);
   - which thread a `metro`-driven message runs on with Overdrive on, and with Scheduler in Audio
-    Interrupt on (M4);
+    Interrupt on (M4) — **the main thread (Overdrive off), the scheduler thread (on), the audio
+    thread (on, with Audio Interrupt and audio running: `systhread_isaudiothread()` is 1)**;
   - `symbol` or `anything` for a `str` return, against `route`, `sel`, `prepend` and a message
-    box (m2) — *the maintainer's choice (2026-10-09): the spike decides*;
+    box (m2) — *the maintainer's choice (2026-10-09): the spike decides* — **`symbol <s>`** (the
+    output table now says so, and why);
   - where Max picks up a vignette (`.maxvig.xml`) and a tutorial (`.maxtut.xml`) dropped into
-    the package's `docs/`, and a patcher in `extras/`, for 9.4.
+    the package's `docs/`, and a patcher in `extras/`, for 9.4 — **Max's file database records
+    them anywhere under `docs/`, and an `extras/` patcher as the package's; that the
+    Documentation window and the Extras menu show them is still to be seen** (the run's screen
+    was locked).
 - [ ] **9.1 The core: output, outlets and the audio option.** `value.h`'s `output_item`/`output`
   and the Python-to-output conversion; `message_info::return_count` (depth-aware for strings),
   `outlet_count()`, `call_with_output()`; `bind_audio`, gating the tuple rule; the
@@ -342,14 +370,17 @@ third was Windows-only.
   `source/shared/tap/python_max/` or beside the object; `reserved_messages()` parameterized by the
   audio names. A pure move: `tap.python~`'s behavior, tests and the data-import check unchanged.
 - [ ] **9.3 The object.** `tap.python.h` and its TU in the project, registered by the project's
-  `ext_main`; ports with the dumpout and the lock; output mapping; the `anything` forwarder; dynamic
-  outlets on reload; the guard and the reserved names; the Scheduler-in-Audio-Interrupt notice,
+  `ext_main` (replacing the 9.0 spike's TU and its CMake option); ports with the dumpout, its
+  `dumpout` method and the lock; output mapping (a `str` as `symbol <s>`); the `anything` forwarder
+  with its class-level `int`, `float`, `bang` and `list` (9.0); dynamic outlets on reload; the
+  guard and the reserved names (`dumpout` among them); the Scheduler-in-Audio-Interrupt notice,
   with the audio-thread predicate injected as the main-thread one is (8.4) so the glue test can
-  drive it; `init/tap.python.txt` (or the stub); the glue test with faithful stubs, **and
+  drive it; `init/tap.python.txt` (added by 9.0); the glue test with faithful stubs, **and
   `linux-max-glue` gaining ASan/UBSan and TSan rows** — the lock and the reload race live in the
   glue, which CI builds without sanitizers today; the examples (`euclid.py`, `scale.py`,
-  `note_name.py`, `default.py`'s `bang`); `assemble-package.py` and `package-info.json.in`, with a
-  CI check that the assembled package lists `init/tap.python.txt`; CHANGELOG 2.0.0 started.
+  `note_name.py`, `default.py`'s `bang`); `package-info.json.in`, and a CI check that the assembled
+  package lists `init/tap.python.txt` (9.0 made `assemble-package.py` ship `init/`); CHANGELOG
+  2.0.0 started.
 - [ ] **9.4 Documentation, in Max's own system and the ReadMe.** The ReadMe section, the output
   table and the limits; CLAUDE.md. For the Documentation window: `docs/tap.python.maxref.xml` by
   hand, with see-also links between the two pages; a vignette, *Writing Max objects in Python* —
@@ -358,14 +389,20 @@ third was Windows-only.
   then per vector, a filter with `prepare()`, a control object (`euclid`). For the Extras menu, a
   *PythonTap Overview* patcher, named as the package's landing patcher in `package-info.json.in`
   (its `homepatcher` is empty today). The help patchers with tabs: `tap.python`'s from the start,
-  and `tap.python~`'s gaining the numpy, allpass and `mc.` tabs 5.2 asked for. Where Max reads the
-  vignette and tutorial files from inside `docs/` is what 9.0 found. CI checks for what is written
+  and `tap.python~`'s gaining the numpy, allpass and `mc.` tabs 5.2 asked for. 9.0 found Max
+  records a vignette and a tutorial anywhere under `docs/` (so `docs/vignettes/` and
+  `docs/tutorials/<name>-tut/`, as Cycling '74's packages lay them out), and an `extras/`
+  patcher as the package's; still to see that the window and the menu show them, and which folder
+  `homepatcher` reads (Max's Packages page says `patchers/`). CI checks for what is written
   by hand: the reference page, the vignette and the tutorials well-formed XML, and the help
   patchers' JSON as 5.2 checked by hand (ids unique, every line connects), in one script. All
   checked open in Max in 9.6.
 - [ ] **9.5 Runtime tests.** The patchers above in `make_patchers.py`; `run.py` aware of the
   second object (the `init/` mapping in the installed package, the `--package` mode, the
-  reference-page rule for `tap.python~`'s page only). The soak session (6.2) gains a
+  reference-page rule for `tap.python~`'s page only). What 9.0's runner learned: a fresh Max
+  needs Restore Windows on Launch off (a restored window loads the binary first); patchers are
+  opened with an "open document" event, never `max openfile` through the harness's OSC (it crashes
+  Max); and Max's log drops a `[print]`'s name. The soak session (6.2) gains a
   `tap.python` driven by a `metro` while its file is saved every second: every output checked,
   memory flat, the console counts exact.
 - [ ] **9.6 The release session, Mac and Windows.** Build, run the whole runtime suite on the Mac,
@@ -385,6 +422,155 @@ third was Windows-only.
   links — so that each fact has one home. *Decided 2026-10-09 (the maintainer):* the vignette is
   the short form, written separately — a few screens in Max's own conventions that point to the
   ReadMe and the book for the contract's facts — not generated from the book's source.
+
+## What 9.0 found, on a Mac
+
+Verified in Max 9.1.5 (3db35fa476d) on macOS 15.7.9, x86_64, 2026-10-09, with the spike built into
+`tap.python~`'s binary (`-DTAP_PYTHON_SPIKE=ON`, off by default; `tap.python_spike.cpp`). The
+patchers, the runner and how to repeat it — on Windows by hand — are in `runtime-tests/spike/`; the
+lines of Max's log behind every answer below are `runtime-tests/spike/results/macos.txt`. The
+spike's `tap.python` is a plain SDK class with no Python in it: a dumpout stored in the obex, value
+outlets, an instance attribute and instance methods, a class attribute, a class-level `anything`,
+and messages that ask Max things; a second class, `tap.python.spike.recorder`, posts each message
+it receives with its selector and atom types (Max's log drops a `[print]`'s name).
+
+**1. One binary, two classes, found through `init/` (D11).** In a fresh Max, a patcher holding only
+`[tap.python]`: with `init/tap.python.txt` (`max objectfile tap.python tap.python~;`) Max loads the
+`tap.python~` file, whose `ext_main` registers `tap.python~` (min) and then `tap.python`, and the
+object is made; with the file moved aside, `tap.python: No such object`. Both objects in one patch,
+each created first in its own fresh Max: both load, the spike's outlets output, and `tap.python~`
+(`default.py`) answers `greet`. The stub external is not needed on the Mac. A Max is fresh only if
+nothing loads the binary first: with **Restore Windows on Launch** on, a window left open at the
+last quit (`tap.python~`'s help patcher, here) is reopened at launch and loads it — 9.5's test of
+the mapping must see to that, as the spike's runner does.
+
+**2. Ports (M1).** The dumpout made first and the value outlets after it, last to first, give value
+outlets 0…n−1 and the dumpout last (`outlet_nth` against the pointers held). From two value
+outlets, with a cord from each and from the dumpout: `outlet_insert_after` the last value outlet,
+between the box's `dynlet_begin` and `dynlet_end`, makes a third value outlet before the dumpout;
+the dumpout's cord moves with it (now from outlet 3) and outlets 0 and 1 keep theirs; a cord made
+to the new outlet by scripting carries its output. Narrowing to one with `outlet_delete` on the
+last two removes exactly those and their cords, leaving the dumpout's (now from outlet 1); widening
+again adds an outlet with no cord, before the dumpout. The obex's dumpout stays the one made first
+throughout, and `object_obex_dumpout` reaches it after every change.
+
+**3. `get<attr>` (M1) — a change to Ports.** Storing the dumpout in the obex is not enough. With
+the class also registering `object_obex_dumpout` as its `dumpout` method (`A_CANT`), as Cycling
+'74's SDK examples do (`dbviewer.c`; `dict.edit.cpp` in max-devkit), `getsteps` calls the instance
+attribute's own getter and outputs `steps 5` from the dumpout (`steps 8` after `steps 8`), and a
+class attribute answers `getlevel` the same way. Without that method, `get<attr>` on either kind of
+attribute is **dropped silently**: no getter call, no output, no error, and the class's `anything`
+never sees it — although `object_attr_method()` resolves `getsteps` to the getter and
+`object_getmethod()` finds it. In passing: `object_attr_getdump()`, which its header says takes the
+attribute's name, strips three characters from the name it is given (`steps` came out as `ps`) —
+it wants the message, `getsteps`. The object has no use for it once the `dumpout` method exists.
+
+**4. `anything` and dispatch (M3).** On a class with a class-level `anything`:
+
+- *Instance attributes and methods come first.* `steps 8` calls the instance attribute's setter,
+  `getsteps` its getter; `hello 1 2` calls the method added with `object_addmethod()`; and where
+  the class and the instance both have a method of one name — `who`, and `bang`, a standard message
+  — the instance's answers. On the same class with none of them, `steps 8`, `getsteps` and
+  `hello 1 2` reach `anything`, and `who` and `bang` the class's methods.
+- *`int`, `float`, `bang` and `list` never reach a class-level `anything`.* Without a method of
+  the name, Max posts `doesn't understand "float"` (or `"int"`, `"bang"`); a list (`1 2 3`, `list
+  4 5`) goes to an `int` method with its first atom if there is one, and is otherwise not
+  understood as `int`. `symbol foo` reaches `anything` with the selector `symbol`; any other
+  selector reaches it with its arguments. So the forwarder needs class-level `int`, `float`, `bang`
+  and `list` methods beside `anything` (the `anything` item of the Max object now says so).
+- *`object_getmethod()`* answers an unknown name with `method_false()` — the same as for a name no
+  class can have, and equal to `method_false` as the module sees it on the Mac — on such a class
+  exactly as on `tap.python~`, which has no `anything`. So 1.0.2's guard works unchanged. It
+  answers `anything` with the class's `anything`; it finds instance and class attributes and their
+  `get<attr>` (`steps`, `getsteps`, `level`, `getlevel`), class methods (`who`, `outlets`,
+  `dumpout`, `dsp64` on `tap.python~`); and it answers methods added with `object_addmethod()` —
+  the spike's `hello` and `int`, `default.py`'s `greet` and `int` on `tap.python~` — with
+  `method_false()`, as unknown (`zgetfn()` finds them). `dumpout` is answered, so it joins the
+  reserved names.
+
+**5. Threads (M4).** A `[metro 100]` into a message box into the object; `systhread_*` noted on the
+thread the message came on:
+
+| Setting | The message ran on | `ismainthread` | `isaudiothread` | `istimerthread` |
+|---|---|---|---|---|
+| (`loadbang`, for reference) | the main thread | 1 | 0 | 1 |
+| Overdrive off | the main thread | 1 | 0 | 1 |
+| Overdrive on | the scheduler thread | 0 | 0 | 1 |
+| Overdrive and Scheduler in Audio Interrupt on, audio running | the audio thread | 0 | 1 | 1 |
+| the same, audio stopped | a scheduler thread | 0 | 0 | 1 |
+
+So `systhread_isaudiothread()` is true exactly when Python would run on the audio thread, and is
+the test for the Threads section's notice; `systhread_istimerthread()` is 1 in every case (with
+Overdrive off the main thread services the scheduler) and tells nothing. Max's log shows three
+different posting threads for the last three rows. The patcher put both settings back as it found
+them.
+
+**6. A `str` return (m2) — decided: `symbol <s>`.** Each string was output from one outlet as the
+message it names (`outlet_anything(o, gensym(s), 0, nullptr)`) and as `symbol <s>`, into `[route
+C 60]`, `[sel C 60]`, `[prepend got]` and a message box `[$1(`:
+
+| The string | As the message it names | As `symbol <s>` |
+|---|---|---|
+| `C` | `route` and `sel` match (a bang from `C`); `prepend` → `got C`; `$1` → `C` | `sel` matches; `route` does **not** (rejects `symbol C`); `prepend` → `got symbol C`; `$1` → `C` |
+| `hello world` | rejected by both, as the message `hello world`; `prepend` → `got "hello world"` | rejected by both as `symbol "hello world"`; `$1` → `hello world` |
+| `60`, `1.5` | the selector is the symbol `60`: matches neither `route 60` nor `sel 60`; `$1` → the symbol | the same: rejected as `symbol 60`; never the number |
+| `list` | **nothing reaches any receiver** | arrives as `symbol list` everywhere; `$1` re-emits it as `list` — nothing |
+| `int`, `float` | **`missing arguments for message "int"` from every receiver**, nothing received | arrives as `symbol int` everywhere; `$1` → the error |
+| `symbol` | the message box errors; `route` passes on `symbol` with no argument, `sel` `symbol ""` | arrives as `symbol symbol` |
+| `bang` | **a real bang**: the message box re-sends its last contents (here `1.5`) | arrives as `symbol bang`; `$1` → a bang |
+| `""` | a message with an empty selector, passed on by every receiver | arrives as `symbol ""` |
+
+As the message it names, six strings — `list`, `int`, `float`, `symbol`, `bang` and the empty one —
+are not data: dropped, an error in every receiver, a real bang. As `symbol <s>` every string
+reaches every receiver as itself, `sel` matches it, and a message box's `$1` gives back the bare
+word (only there do those six behave as messages again, as they would typed into the box). Max's
+own text objects output a single symbol (`sprintf symout`, `tosymbol`, `regexp @tosymbol`, by their
+reference pages), and `fromsymbol` is Max's documented way back to a message. So a `str` is output
+as `symbol <s>`. The costs, for the ReadMe: `[route C]` does not match it (use `[sel C]`, which
+matches either, or `[route symbol]` first), and `[prepend]` keeps the word `symbol` (to display a
+string, `[set $1(`). A class that means a message returns it in a list — `["start"]` — which names
+the message by the sequence row, so both are expressible and the safe one is the default.
+
+**7. Max's documentation system (for 9.4).** Vignettes, tutorials and an Extras patcher were copied
+into the package and Max was started; once its file database reported ready, it held:
+
+| Placed at | Recorded as |
+|---|---|
+| `docs/*.maxvig.xml`, `docs/vignettes/`, `docs/topics/` | `vignette` (XML Vignette file), each in its folder |
+| `docs/*.maxtut.xml`, `docs/tutorials/`, `docs/tutorials/<name>/` | `tutorial` (XML Tutorial file), each in its folder |
+| `docs/tutorials/<name>/*.maxpat` (a tutorial's patcher) | `patcher`, so the tutorial's `openfile` finds it by name |
+| `extras/PythonTap Spike Extras.maxpat` | `patcher` in `Package:/PythonTap/extras` |
+
+So Max reads the files from anywhere under `docs/`; 9.4 can lay them out as Cycling '74's packages
+do (`docs/vignettes/`, `docs/tutorials/<name>-tut/`). **Not yet seen:** that the Documentation
+window lists them and the Extras menu shows the patcher — the run's screen was locked; anyone can
+check by hand with `runtime-tests/spike/q7/` copied in. And Max's Packages page describes
+`homepatcher` as a patcher in the package's `patchers/` folder, where 9.4 plans the overview in
+`extras/`: 9.4 checks which `homepatcher` finds, or ships it in both.
+
+**For later items, learned on the way.** The harness's OSC dispatch (`oscar`) calls every method
+as `(symbol, argc, argv)`: `max openfile` — Max's, typed with two symbols — crashed Max reading
+`argc` as a symbol; the runner opens patchers with an "open document" event instead (9.5). Max's
+own log (`Logs/Max.log`) has every console line with its thread, but not a `[print]`'s name (9.5).
+And methods added with `object_addmethod()` are not found by `object_getmethod()` (4 above) —
+CLAUDE.md said an object's own messages answer their names, as its attributes do; only the
+attributes do, which the guard was right to leave out either way (CLAUDE.md now says so; the
+comment on `answered_by_max()` says the same, for 9.2's move to correct).
+
+**Still to run on Windows** (by hand, `runtime-tests/spike/README.md`), before 9.1:
+
+1. the `init/` mapping in Windows' Max, and the DLL build of the second class — the first
+   Windows compile of a plain SDK class beside min's — loading in either order (question 1);
+2. `get<attr>` with the `dumpout` method registered by the address of an imported function, which
+   on Windows is the module's import thunk (the 1.0.1 lesson) — Max calls it, so it should work;
+   verify (3);
+3. the guard's sentinel on a class with `anything`: what `object_getmethod()` answers for an
+   unknown name there (4) — the probe lines will say "not equal to `method_false` as this module
+   sees it", as expected; "SAME AS what it answers for a name no class has" is what matters;
+4. the threads, with Windows' audio drivers and Scheduler in Audio Interrupt (5).
+
+Questions 2 and 6 are Max's own message semantics and cheap to repeat; 7's window and menu can be
+checked on either platform.
 
 ## Later (not planned)
 
@@ -457,3 +643,21 @@ the vignette is written separately as the short form:*
   core tests for the new examples (9.1), and the audio-thread predicate injected so the
   Scheduler-in-Audio-Interrupt notice is testable without Max (9.3). Windows stays by hand: the
   runtime harness is macOS only, written down as a limit rather than fixed here.
+
+*2026-10-09, the 9.0 spike in Max on a Mac (Max 9.1.5; #43; Windows still to run) — answers in
+[What 9.0 found](#what-90-found-on-a-mac):*
+
+- **D11 / How Max finds it:** the `init/` mapping verified; `init/tap.python.txt` added and shipped.
+- **Ports:** the class registers `object_obex_dumpout` as its `dumpout` method, without which
+  `get<attr>` is silently dropped; `outlet_insert_after`/`outlet_delete` verified against the
+  dumpout and the cords.
+- **`anything`:** instance attributes and methods win over a class-level `anything`, and an
+  instance method over a class method of its name; `int`, `float`, `bang` and `list` never reach
+  `anything`, so the class registers forwarders for them too.
+- **The guard:** unknown names are answered with `method_false()` on a class with `anything` too —
+  1.0.2's comparison stands; `dumpout` joins the reserved names.
+- **Threads:** the main, scheduler and audio threads as D10 says; `systhread_isaudiothread()`
+  detects Scheduler in Audio Interrupt.
+- **Output:** a `str` is `symbol <s>` (the maintainer left it to the spike); a list names a
+  message.
+- **9.4 and 9.5:** where Max reads vignettes, tutorials and extras; what the runner learned.

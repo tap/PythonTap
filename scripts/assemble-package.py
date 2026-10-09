@@ -8,9 +8,9 @@ Run after building, with the runtime installed in support/ (scripts/install-runt
     python3 scripts/assemble-package.py --platform macos --output dist
 
 writes dist/PythonTap/, a Max package ready to zip: the externals for that platform, the help
-patcher, the reference page, the example scripts, the bundled runtime and packages, the package's
-own documents, and a licenses/ folder holding a copy of every third-party license that ships, with
-an index (licenses/README.md). Nothing is downloaded; it packages what the build left in the tree.
+patcher, the reference page, the example scripts, the init/ files Max reads at launch, the bundled
+runtime and packages, the package's own documents, and a licenses/ folder holding a copy of every
+third-party license that ships, with an index (licenses/README.md). Nothing is downloaded; it packages what the build left in the tree.
 It fails, rather than producing an incomplete package, if anything required is missing.
 
     python3 scripts/assemble-package.py --licenses-only --support support --output dist
@@ -52,7 +52,9 @@ EXTERNALS = {
 
 # Package content copied as-is (relative to the package root).
 DOCUMENTS = ["ReadMe.md", "License.md", "CHANGELOG.md", "icon.png", "package-info.json"]
-FOLDERS = ["help", "docs", "python"]
+# init/: text files Max reads at launch — tap.python.txt maps the object tap.python to the file
+# tap.python~, which registers both classes (docs/TAP-PYTHON-PLAN.md, D11; plan 9.0)
+FOLDERS = ["help", "docs", "python", "init"]
 
 # Never shipped from the copied folders.
 # maxtest_*.py: the runtime tests' fixtures, copied into python/ while runtime-tests/run.py runs

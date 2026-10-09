@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet href="./_c74_tut.xsl" type="text/xsl"?>
+<chapter name="PythonTap spike tutorial (docs/)">
+<openfile name="PythonTap spike tutorial" patch="pythontap-spike-tutorial.maxpat"/>
+<header>PythonTap spike tutorial (docs/)</header>
+<body>A placeholder from the tap.python plan's 9.0 spike (runtime-tests/spike/ in the PythonTap repository),
+placed at docs/ inside the package. If this tutorial is listed in the Documentation window, Max reads
+tutorials from there; its Open Tutorial button opens pythontap-spike-tutorial.maxpat.</body>
+</chapter>

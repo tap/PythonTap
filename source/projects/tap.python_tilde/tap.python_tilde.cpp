@@ -90,4 +90,15 @@ namespace tap::python {
 
 } // namespace tap::python
 
+#if defined(TAP_PYTHON_SPIKE)
+// Plan 9.0, the spike (throwaway; -DTAP_PYTHON_SPIKE=ON, off by default): this binary also
+// registers a plain SDK class, tap.python, after min's (tap.python_spike.cpp).
+void tap_python_spike_register();
+
+void ext_main(void* r) {
+    c74::min::wrap_as_max_external<python>("python", __FILE__, r);
+    tap_python_spike_register();
+}
+#else
 MIN_EXTERNAL(python);
+#endif
