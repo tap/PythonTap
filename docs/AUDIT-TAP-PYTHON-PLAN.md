@@ -327,3 +327,42 @@ should say the `list[…]` parameter "only adds".
 7. **Key announce-once per object kind** (M5).
 8. **Gate or record the contract changes**, with tests pinning today's behavior first (M6).
 9. **Fix the minor items** in the text and the planned tests.
+
+## Addendum, 2026-10-09: after 1.0.1 and 1.0.2
+
+The audit above was written against 1.0.0 with PR #37's fix. Since then the Mac session (8.8) ran,
+1.0.1 was tagged and then superseded, and 1.0.2 was released. What that changed, and did not:
+
+- **The verdict and every finding stand.** Nothing since has answered a Max-only question the audit
+  raised, and the two blockers are untouched.
+- **B1 is reinforced.** 1.0.1 failed on Windows because the external's `&method_false` is its own
+  import thunk, not the function Max returns: a function's address is not its identity across a
+  DLL boundary. Two externals, each with its own copy of the core, would carry two of every
+  function the core hands to CPython as well as two of every static. One core is the first
+  decision to make, as B1 says.
+- **B2's prerequisite is met, and the spike needs Windows too.** 8.8 ran on 2026-10-07 (the whole
+  suite passes; two items stay by hand), so "run 8.8 before 9.2" is done. But 1.0.0, 1.0.1 and the
+  Windows package of 1.0.1 each shipped something only a host platform could show, and the third
+  was Windows-only. The 9.0 spike runs on a Mac *and* on Windows, before 9.1.
+- **M3's guard half is likely resolved by 1.0.2's design**, which asks Max what it answers for a
+  nonsense name and compares every lookup with that (`not_found_method()`). If a class-level
+  `anything` makes Max answer every unknown name with the forwarder, the sentinel is the forwarder
+  too, so unknown names still read as "not found"; if Max answers `method_false()` regardless, the
+  sentinel is that. Either way the guard no longer needs to know what "not found" looks like. The
+  other half of M3, the dispatch order between `anything`, instance methods and instance
+  attributes, is still unverified. One piece of evidence from 8.8: an attribute the object adds
+  with `object_addattr` *is* found by `object_getmethod()` under its name (why a reload reserved
+  every field in 1.0.1), so attribute names take part in the object's own lookup. That is
+  consistent with attributes winning over `anything`; it is not proof, and stays a spike item.
+- **A new rule for the plan's guard, from 1.0.1:** everything the object itself registers answers
+  its name — messages, attributes, and for `tap.python` the dumpout and any per-object `anything`
+  forwarder — and the guard must leave all of it out, as `answered_by_max()` now leaves out its
+  own messages and attributes.
+- **Stale references in the text above:** "run 8.8 before 9.2" (done); the glue test's kernel
+  "answers from a fixed list" (it now also models added attributes and a Max-side "not found"
+  that is not the module's `method_false`); and `found_method()` "treats null and
+  `method_false()` alike", which describes 1.0.1 — 1.0.2 compares with what Max answers. The
+  plan's 9.2 moves the 1.0.2 code.
+- **The icon is now guarded.** TapHouse v6's drift check compares each Max package's `icon.png`
+  with its own render, byte for byte; `tap.python`'s package would share it (one package), so
+  nothing new is needed for Phase 9.
