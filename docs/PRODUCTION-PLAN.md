@@ -818,7 +818,7 @@ row shipped what only a host platform could show.
   `anything` forwarder, dynamic outlets on reload, the guard, the Scheduler-in-Audio-Interrupt
   notice; `init/tap.python.txt`; the glue test with faithful stubs; the examples (`euclid.py`,
   `scale.py`, `note_name.py`, `default.py`'s `bang`); packaging; `linux-max-glue` gains sanitizer
-  rows for the lock and the reload race; CHANGELOG 1.1.0 started.
+  rows for the lock and the reload race; CHANGELOG 2.0.0 started.
 - [ ] **9.4 Documentation, in Max's own system and the ReadMe:** the ReadMe section, output
   table and limits, CLAUDE.md; `docs/tap.python.maxref.xml` by hand (a plain SDK class has no min
   generator); a vignette and three tutorials with patchers for the Documentation window; an
@@ -828,8 +828,8 @@ row shipped what only a host platform could show.
   the second object; the soak session gains a `metro`-driven `tap.python` under saves.
 - [ ] **9.6 The release session, Mac and Windows:** the whole suite on the Mac, the help patcher
   checked and re-saved, Max's page for `tap.python~` committed, the hand checks; the package by
-  hand on Windows; then tag `v1.1.0`.
-- [ ] **9.7 The book:** after 1.1.0, the family's mdBook under `book/`, published by CI, with the
+  hand on Windows; then tag `v2.0.0`.
+- [ ] **9.7 The book:** after 2.0.0, the family's mdBook under `book/`, published by CI, with the
   examples and performance tables pulled from what ships; the ReadMe becomes the front door.
 
 ## Sequencing (one PR each)
@@ -850,7 +850,7 @@ row shipped what only a host platform could show.
 12. Phase 9 — `tap.python`: 9.0 (the spike in Max, on a Mac and on Windows, first), then 9.1
     (the core, no Max change), 9.2 (the shared glue, a pure move), 9.3 (the object), 9.4 and 9.5
     (docs and runtime tests, independent of each other), then the release session 9.6 on both
-    platforms and `v1.1.0`; then 9.7, the book. 8.8 ran on 2026-10-07; its two by-hand items can
+    platforms and `v2.0.0`; then 9.7, the book. 8.8 ran on 2026-10-07; its two by-hand items can
     ride along with 9.6.
 
 ## External prerequisites
