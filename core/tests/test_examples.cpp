@@ -209,3 +209,73 @@ SCENARIO("stereo_width.py has two inputs and two outputs, and sets the width") {
         CHECK_FALSE(p.set_attribute("width", -1.0));
     }
 }
+
+// ---- tap.python's examples: a Python class as a Max object without audio (plan 9.1) ----------------
+
+namespace {
+
+    output_item list_of(std::vector<value> atoms) {
+        return {std::string{"list"}, std::move(atoms)};
+    }
+
+    std::vector<value> ints(const std::vector<std::int64_t>& numbers) {
+        return {numbers.begin(), numbers.end()};
+    }
+
+} // namespace
+
+SCENARIO("euclid.py outputs a Euclidean rhythm from its two attributes") {
+    ensure_runtime();
+    if (!importable("attrs")) {
+        SKIP("attrs is not importable by the embedded interpreter");
+    }
+    processor p{"euclid", {}, {}, {}, {}, false};
+    REQUIRE(p.load());
+    REQUIRE(p.attributes().size() == 2);
+    CHECK(p.attributes()[0].name == "steps");
+    CHECK(p.attributes()[1].name == "pulses");
+    CHECK(p.outlet_count() == 1);
+
+    CHECK(p.call_with_output("bang", {}) == output{list_of(ints({1, 0, 0, 1, 0, 0, 1, 0}))});
+    REQUIRE(p.set_attribute("steps", std::int64_t{5}));
+    REQUIRE(p.set_attribute("pulses", std::int64_t{2}));
+    CHECK(p.call_with_output("bang", {}) == output{list_of(ints({1, 0, 0, 1, 0}))});
+    REQUIRE(p.set_attribute("pulses", std::int64_t{0}));
+    CHECK(p.call_with_output("bang", {}) == output{list_of(ints({0, 0, 0, 0, 0}))});
+    REQUIRE(p.set_attribute("pulses", std::int64_t{9}));
+    CHECK(p.call_with_output("bang", {}) == output{list_of(ints({1, 1, 1, 1, 1}))});
+}
+
+SCENARIO("scale.py takes a list as one array, and outputs the array as a list") {
+    ensure_runtime();
+    if (!importable("attrs") || !importable("numpy")) {
+        SKIP("attrs and numpy are not importable by the embedded interpreter");
+    }
+    processor p{"scale", {}, {}, {}, {}, false};
+    REQUIRE(p.load());
+    CHECK(p.call_with_output("list", std::vector<value>{std::int64_t{1}, 2.0, std::int64_t{3}})
+          == output{list_of({1.0, 2.0, 3.0})});
+    REQUIRE(p.set_attribute("factor", 2.0));
+    REQUIRE(p.set_attribute("offset", 1.0));
+    CHECK(p.call_with_output("list", std::vector<value>{std::int64_t{1}, 2.0, std::int64_t{3}})
+          == output{list_of({3.0, 5.0, 7.0})});
+}
+
+SCENARIO("note_name.py names a MIDI note from two outlets: the pitch class and the octave") {
+    ensure_runtime();
+    if (!importable("attrs")) {
+        SKIP("attrs is not importable by the embedded interpreter");
+    }
+    processor p{"note_name", {}, {}, {}, {}, false};
+    REQUIRE(p.load());
+    CHECK(p.outlet_count() == 2);
+
+    const auto name = [&](const std::int64_t note) { return p.call_with_output("int", std::vector<value>{note}); };
+    const auto pair = [](const std::string& pitch_class, const std::int64_t octave) {
+        return output{output_item{std::string{"symbol"}, {pitch_class}}, output_item{std::nullopt, {octave}}};
+    };
+    CHECK(name(60) == pair("C", 4));
+    CHECK(name(61) == pair("C#", 4));
+    CHECK(name(0) == pair("C", -1));
+    CHECK(name(127) == pair("G", 9));
+}
