@@ -808,7 +808,8 @@ row shipped what only a host platform could show.
 - [ ] **9.1 The core:** output items and their conversion in `value.h`; `message_info::return_count`
   (depth-aware for string hints), `outlet_count()`, `call_with_output()`; the `bind_audio` option,
   gating the tuple rule; a last parameter hinted `list[…]` or `np.ndarray` taking the remaining
-  atoms (both objects; the old behavior pinned first, the change recorded); announce-once per
+  atoms (both objects; the old behavior pinned first, the change recorded — a contract change, so
+  the release is 2.0.0, decided 2026-10-09); announce-once per
   (file, kind); the `Loaded` line per binding. `test_output.cpp`, the output table over its edges, the
   new examples on known inputs, and a bench row for a message call. `tap.python~` unchanged and green.
 - [ ] **9.2 The shared glue:** the attribute, message, trampoline, file-watcher and package headers
