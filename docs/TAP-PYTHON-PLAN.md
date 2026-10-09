@@ -70,7 +70,7 @@ settings* paragraphs, plus output:
   the remaining atoms as one list (or a float64 array) — `def list(self, values: np.ndarray) ->
   np.ndarray` is a list in and a list out. This last mapping lands in the core, so `tap.python~`'s
   messages get it too; it is a change to what such a parameter received before (the empty
-  symbol), recorded as one (9.1).
+  symbol), recorded as one (9.1) — and the reason the release is 2.0.0 (decided 2026-10-09).
 - **Output** — below.
 - **Hot reload, errors, console** — as `tap.python~`: a save reloads keeping attribute values; a
   broken save is reported once and the object outputs nothing until a save fixes it; an exception
@@ -286,9 +286,10 @@ registered by the project's own `ext_main` in `tap.python_tilde.cpp` after min's
   landing patcher; help patchers with tabs for both objects. CLAUDE.md: the second class, the
   shared glue, D11's reasons. `CHANGELOG.md`: 2.0.0 — a new object; the `list[…]` parameter
   recorded as a change to what `tap.python~` passes such a parameter (the empty symbol before),
-  pinned by a test of the old behavior first; whether that needs 2.0 under the CHANGELOG's rule
-  is the maintainer's call, and the plan's position is that a hint which never carried a value is
-  not a contract a class could have relied on. The book (9.7) follows the release.
+  pinned by a test of the old behavior first. *Decided 2026-10-09 (the maintainer):* that is a
+  contract change under the CHANGELOG's rule, so the release that carries `tap.python` is **2.0.0**,
+  not 1.1 — the rule is applied as written, however unlikely a class relied on a hint that carried
+  the empty symbol. The book (9.7) follows the release.
 - **Runtime tests in Max** (`runtime-tests/`): `make_patchers.py` gains a non-signal `python()`
   box; new patchers `tap.python.*.maxtest.maxpat`: load (no argument, each example, through the
   `init/` mapping in a fresh Max); every output row through `[print]`-free checks (a list into
@@ -321,7 +322,7 @@ third was Windows-only.
   - which thread a `metro`-driven message runs on with Overdrive on, and with Scheduler in Audio
     Interrupt on (M4);
   - `symbol` or `anything` for a `str` return, against `route`, `sel`, `prepend` and a message
-    box (m2);
+    box (m2) — *the maintainer's choice (2026-10-09): the spike decides*;
   - where Max picks up a vignette (`.maxvig.xml`) and a tutorial (`.maxtut.xml`) dropped into
     the package's `docs/`, and a patcher in `extras/`, for 9.4.
 - [ ] **9.1 The core: output, outlets and the audio option.** `value.h`'s `output_item`/`output`
@@ -381,8 +382,9 @@ third was Windows-only.
   mdBook's include directive straight from `python/*.py`, and the performance tables are written
   into the book by `scripts/update-perf-docs.py` beside the ReadMe's, so neither can drift from
   what ships. The ReadMe then shrinks to the front door — what it is, install, a quick start, and
-  links — so that each fact has one home. *Decide in the PR:* whether the vignette and the book
-  share source (one Markdown rendered two ways) or the vignette stays the short form.
+  links — so that each fact has one home. *Decided 2026-10-09 (the maintainer):* the vignette is
+  the short form, written separately — a few screens in Max's own conventions that point to the
+  ReadMe and the book for the contract's facts — not generated from the book's source.
 
 ## Later (not planned)
 
@@ -438,7 +440,10 @@ Written down so they are decided rather than rediscovered; none is promised by 2
 - **Addendum:** the guard rule from 1.0.1 and 1.0.2 (compare with what Max answers; leave out what
   the object registers), Windows in the spike and the release session.
 
-*2026-10-09, after the maintainer's review — documentation and test coverage:*
+*2026-10-09, after the maintainer's review — documentation and test coverage; and the three
+decisions put to the maintainer: the release is 2.0.0 (the `list[…]` parameter is a contract
+change, the CHANGELOG's rule applied as written); the `str` return is the spike's to decide;
+the vignette is written separately as the short form:*
 
 - **Documentation** was reference pages and help files only. 9.4 now covers Max's own system — a
   vignette, three tutorials with patchers, an Extras overview and landing patcher, help tabs —
