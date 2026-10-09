@@ -31,6 +31,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+# with -File, "-Only q2,q3" arrives as one string
+$Only = @($Only | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
 
 $Spike    = $PSScriptRoot
 $Root     = (Resolve-Path (Join-Path $Spike '..\..')).Path
