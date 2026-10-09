@@ -5,12 +5,14 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdarg>
 #include <cstdint>
+#include <cstdio>
 #include <deque>
 #include <fstream>
 #include <iostream>
 #include <map>
-#include <sstream>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <unordered_set>
@@ -40,6 +42,26 @@ namespace attributes {
         added.clear();
     }
 } // namespace attributes
+
+// What the objects say in the Max console (object_post, object_warn, object_error), recorded while a
+// scenario listens: the mock kernel prints them to its own std::cout and std::cerr, which a test
+// cannot redirect on Windows, where the kernel is a DLL. Printed as the mock prints them, too.
+namespace console {
+    std::mutex  lock;
+    std::string said;
+    bool        listening{};
+
+    void say(std::ostream& stream, const char* format, va_list arguments) {
+        char text[4096];
+        std::vsnprintf(text, sizeof text, format, arguments);
+        stream << text;
+        const std::lock_guard<std::mutex> guard{lock};
+        if (listening) {
+            said += text;
+            said += '\n';
+        }
+    }
+} // namespace console
 
 // How many times a qelem was set (tap.python's notice from the audio thread sets one).
 namespace qelems {
@@ -256,6 +278,25 @@ namespace c74 {
         short systhread_isaudiothread() {
             return audio_thread::now.load() ? 1 : 0;
         }
+        // in place of the mock kernel's, which print the same: so that a test can hear them
+        void object_post(t_object*, const char* format, ...) {
+            va_list arguments;
+            va_start(arguments, format);
+            console::say(std::cout, format, arguments);
+            va_end(arguments);
+        }
+        void object_warn(t_object*, const char* format, ...) {
+            va_list arguments;
+            va_start(arguments, format);
+            console::say(std::cout, format, arguments);
+            va_end(arguments);
+        }
+        void object_error(t_object*, const char* format, ...) {
+            va_list arguments;
+            va_start(arguments, format);
+            console::say(std::cerr, format, arguments);
+            va_end(arguments);
+        }
         t_dspchain* dspchain_fromobject(t_object*) {
             static int s_chain;
             return reinterpret_cast<t_dspchain*>(&s_chain);
@@ -267,8 +308,11 @@ namespace c74 {
     } // namespace max
 } // namespace c74
 
-#include "tap.python.h"         // tap.python: its class is tap.python.cpp, compiled beside this test
 #include "tap.python_tilde.cpp" // include the object source so we can instantiate it
+
+// after it, whose c74_min.h must come first: tap.python, whose class is tap.python.cpp, compiled
+// beside this test
+#include "tap.python.h"
 
 // The Max glue, end to end through the mock kernel. The test binary lands in <package>/tests/,
 // and package_root() resolves the package from there, so the object starts the real embedded
@@ -853,17 +897,18 @@ namespace {
         }
     }
 
-    /// What the mock kernel posts while `fn` runs: object_post and object_warn write std::cout,
-    /// object_error std::cerr.
+    /// What the objects say in the console while `fn` runs.
     template <class Fn>
     std::string console_of(Fn&& fn) {
-        std::ostringstream text;
-        auto*              out = std::cout.rdbuf(text.rdbuf());
-        auto*              err = std::cerr.rdbuf(text.rdbuf());
+        {
+            const std::lock_guard<std::mutex> guard{console::lock};
+            console::said.clear();
+            console::listening = true;
+        }
         fn();
-        std::cout.rdbuf(out);
-        std::cerr.rdbuf(err);
-        return text.str();
+        const std::lock_guard<std::mutex> guard{console::lock};
+        console::listening = false;
+        return console::said;
     }
 
     bool contains(const std::string& text, const std::string& part) {
