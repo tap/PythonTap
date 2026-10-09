@@ -324,7 +324,7 @@ third was Windows-only.
 
 - [x] **9.0 The spike, in Max on both platforms.** A throwaway second class in `tap.python~`'s
   binary, enough to answer what only Max can, written into this plan before 9.1. **Run on a Mac
-  (2026-10-09, #43) and on Windows (2026-10-09, #44): every question answered, the same on both —
+  (2026-10-09, #43) and on Windows (2026-10-09, #45): every question answered, the same on both —
   the verdicts below, the evidence in [What 9.0 found](#what-90-found).** Verified in Max 9.1.5
   (3db35fa476d) on macOS 15.7.9 x86_64 and on Windows 11 x64 (a Parallels VM):
   - a plain SDK class registered beside min's in one `ext_main` loads, and both objects work in
@@ -670,7 +670,7 @@ the vignette is written separately as the short form:*
   message.
 - **9.4 and 9.5:** where Max reads vignettes, tutorials and extras; what the runner learned.
 
-*2026-10-09, the 9.0 spike on Windows (Max 9.1.5 in a Windows 11 VM; #44) — 9.0 done:*
+*2026-10-09, the 9.0 spike on Windows (Max 9.1.5 in a Windows 11 VM; #45) — 9.0 done:*
 
 - **Every answer the same as on the Mac:** the `init/` mapping (so no stub), the plain SDK class in
   the `.mxe64`, the ports and the dumpout method (registered through the import thunk), the

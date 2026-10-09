@@ -1,0 +1,409 @@
+# The plan 9.0 spike in Max 9.1.5.3db35fa476d, Microsoft Windows 11 Home 10.0.26200 AMD64
+# (written by runtime-tests/spike/run_spike_windows.ps1: the lines of interest from Max's log)
+
+## session q1-control
+
+[2026-10-09 13:33:13.626774 error] [11840] tap.python: No such object
+
+## session q1-mapping
+
+[2026-10-09 13:34:17.061817 info] [6036] spike: tap.python registered by tap.python~'s ext_main, after tap.python~ (plan 9.0 spike build)
+[2026-10-09 13:34:17.061884 info] [6036] spike: new tap.python: 2 value outlet(s) + dumpout, steps 8; main thread 1
+
+## session q1-spike-first
+
+[2026-10-09 13:35:17.450419 info] [11368] spike: tap.python registered by tap.python~'s ext_main, after tap.python~ (plan 9.0 spike build)
+[2026-10-09 13:35:17.450534 info] [11368] spike: new tap.python: 2 value outlet(s) + dumpout, steps 8; main thread 1
+[2026-10-09 13:35:17.542318 info] [11368] Loaded default.py: process() bound, one call per sample
+[2026-10-09 13:35:17.711326 info] [11368] q1 spike-first begin
+[2026-10-09 13:35:17.711365 info] [11368] spike: fire
+[2026-10-09 13:35:17.711407 info] [11368] recorder q1-spike: selector 'int', 1 atom(s): 1 (int)
+[2026-10-09 13:35:17.711412 info] [11368] recorder q1-spike: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:35:17.746760 info] [11368] python: hello q1, from python!
+[2026-10-09 13:35:17.940152 info] [11368] q1 spike-first end
+
+## session q1-tilde-first
+
+[2026-10-09 13:36:19.179057 info] [5196] spike: tap.python registered by tap.python~'s ext_main, after tap.python~ (plan 9.0 spike build)
+[2026-10-09 13:36:19.283722 info] [5196] Loaded default.py: process() bound, one call per sample
+[2026-10-09 13:36:19.286722 info] [5196] spike: new tap.python: 2 value outlet(s) + dumpout, steps 8; main thread 1
+[2026-10-09 13:36:19.494447 info] [5196] q1 tilde-first begin
+[2026-10-09 13:36:19.494490 info] [5196] spike: fire
+[2026-10-09 13:36:19.494534 info] [5196] recorder q1-spike: selector 'int', 1 atom(s): 1 (int)
+[2026-10-09 13:36:19.494538 info] [5196] recorder q1-spike: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:36:19.494605 info] [5196] python: hello q1, from python!
+[2026-10-09 13:36:19.661442 info] [5196] q1 tilde-first end
+
+## session q2-outlets
+
+[2026-10-09 13:37:20.568015 info] [6564] spike: tap.python registered by tap.python~'s ext_main, after tap.python~ (plan 9.0 spike build)
+[2026-10-09 13:37:20.568074 info] [6564] spike: new tap.python: 2 value outlet(s) + dumpout, steps 8; main thread 1
+[2026-10-09 13:37:20.786763 info] [6564] q2 begin: two value outlets and the dumpout
+[2026-10-09 13:37:20.786817 info] [6564] spike: describe: outlet_count 3 (2 value outlet(s) held + dumpout)
+[2026-10-09 13:37:20.786825 info] [6564] spike: describe:   outlet_nth(0) is value outlet 0
+[2026-10-09 13:37:20.786828 info] [6564] spike: describe:   outlet_nth(1) is value outlet 1
+[2026-10-09 13:37:20.786832 info] [6564] spike: describe:   outlet_nth(2) is the dumpout
+[2026-10-09 13:37:20.786836 info] [6564] spike: describe: the obex's dumpout is the one made first
+[2026-10-09 13:37:20.786870 info] [6564] spike: describe:   cord from outlet 2 to [tap.python.spike.recorder] inlet 0
+[2026-10-09 13:37:20.786875 info] [6564] spike: describe:   cord from outlet 1 to [tap.python.spike.recorder] inlet 0
+[2026-10-09 13:37:20.786879 info] [6564] spike: describe:   cord from outlet 0 to [tap.python.spike.recorder] inlet 0
+[2026-10-09 13:37:20.786883 info] [6564] spike: describe: 3 cord(s) from this box
+[2026-10-09 13:37:20.786888 info] [6564] spike: fire
+[2026-10-09 13:37:20.786905 info] [6564] recorder q2-dumpout: selector 'fired', 0 atom(s)
+[2026-10-09 13:37:20.786934 info] [6564] recorder q2-outlet-1: selector 'int', 1 atom(s): 1 (int)
+[2026-10-09 13:37:20.786944 info] [6564] recorder q2-outlet-0: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:37:20.818821 info] [6564] q2 widen: outlets 3
+[2026-10-09 13:37:20.864541 info] [6564] spike: outlets: 2 -> 3 value outlet(s)
+[2026-10-09 13:37:20.864941 info] [6564] spike: describe: outlet_count 4 (3 value outlet(s) held + dumpout)
+[2026-10-09 13:37:20.864972 info] [6564] spike: describe:   outlet_nth(0) is value outlet 0
+[2026-10-09 13:37:20.864976 info] [6564] spike: describe:   outlet_nth(1) is value outlet 1
+[2026-10-09 13:37:20.864979 info] [6564] spike: describe:   outlet_nth(2) is value outlet 2
+[2026-10-09 13:37:20.864982 info] [6564] spike: describe:   outlet_nth(3) is the dumpout
+[2026-10-09 13:37:20.864987 info] [6564] spike: describe: the obex's dumpout is the one made first
+[2026-10-09 13:37:20.865016 info] [6564] spike: describe:   cord from outlet 3 to [tap.python.spike.recorder] inlet 0
+[2026-10-09 13:37:20.865020 info] [6564] spike: describe:   cord from outlet 1 to [tap.python.spike.recorder] inlet 0
+[2026-10-09 13:37:20.865024 info] [6564] spike: describe:   cord from outlet 0 to [tap.python.spike.recorder] inlet 0
+[2026-10-09 13:37:20.865129 info] [6564] spike: describe: 3 cord(s) from this box
+[2026-10-09 13:37:21.059294 info] [6564] spike: describe: outlet_count 4 (3 value outlet(s) held + dumpout)
+[2026-10-09 13:37:21.059335 info] [6564] spike: describe:   outlet_nth(0) is value outlet 0
+[2026-10-09 13:37:21.059338 info] [6564] spike: describe:   outlet_nth(1) is value outlet 1
+[2026-10-09 13:37:21.059341 info] [6564] spike: describe:   outlet_nth(2) is value outlet 2
+[2026-10-09 13:37:21.059345 info] [6564] spike: describe:   outlet_nth(3) is the dumpout
+[2026-10-09 13:37:21.059349 info] [6564] spike: describe: the obex's dumpout is the one made first
+[2026-10-09 13:37:21.059364 info] [6564] spike: describe:   cord from outlet 2 to newprint inlet 0
+[2026-10-09 13:37:21.059388 info] [6564] spike: describe:   cord from outlet 3 to [tap.python.spike.recorder] inlet 0
+[2026-10-09 13:37:21.059392 info] [6564] spike: describe:   cord from outlet 1 to [tap.python.spike.recorder] inlet 0
+[2026-10-09 13:37:21.059396 info] [6564] spike: describe:   cord from outlet 0 to [tap.python.spike.recorder] inlet 0
+[2026-10-09 13:37:21.059398 info] [6564] spike: describe: 4 cord(s) from this box
+[2026-10-09 13:37:21.059484 info] [6564] spike: fire
+[2026-10-09 13:37:21.059490 info] [6564] recorder q2-dumpout: selector 'fired', 0 atom(s)
+[2026-10-09 13:37:21.059511 info] [6564] recorder q2-new: selector 'int', 1 atom(s): 2 (int)
+[2026-10-09 13:37:21.059516 info] [6564] recorder q2-outlet-1: selector 'int', 1 atom(s): 1 (int)
+[2026-10-09 13:37:21.059519 info] [6564] recorder q2-outlet-0: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:37:21.159311 info] [6564] q2 narrow: outlets 1
+[2026-10-09 13:37:21.209311 info] [6564] spike: outlets: 3 -> 1 value outlet(s)
+[2026-10-09 13:37:21.214674 info] [6564] spike: describe: outlet_count 2 (1 value outlet(s) held + dumpout)
+[2026-10-09 13:37:21.214706 info] [6564] spike: describe:   outlet_nth(0) is value outlet 0
+[2026-10-09 13:37:21.214710 info] [6564] spike: describe:   outlet_nth(1) is the dumpout
+[2026-10-09 13:37:21.214714 info] [6564] spike: describe: the obex's dumpout is the one made first
+[2026-10-09 13:37:21.214738 info] [6564] spike: describe:   cord from outlet 1 to [tap.python.spike.recorder] inlet 0
+[2026-10-09 13:37:21.214742 info] [6564] spike: describe:   cord from outlet 0 to [tap.python.spike.recorder] inlet 0
+[2026-10-09 13:37:21.214745 info] [6564] spike: describe: 2 cord(s) from this box
+[2026-10-09 13:37:21.214750 info] [6564] spike: fire
+[2026-10-09 13:37:21.214755 info] [6564] recorder q2-dumpout: selector 'fired', 0 atom(s)
+[2026-10-09 13:37:21.214760 info] [6564] recorder q2-outlet-0: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:37:21.309967 info] [6564] q2 widen again: outlets 2
+[2026-10-09 13:37:21.359307 info] [6564] spike: outlets: 1 -> 2 value outlet(s)
+[2026-10-09 13:37:21.359527 info] [6564] spike: describe: outlet_count 3 (2 value outlet(s) held + dumpout)
+[2026-10-09 13:37:21.359552 info] [6564] spike: describe:   outlet_nth(0) is value outlet 0
+[2026-10-09 13:37:21.359556 info] [6564] spike: describe:   outlet_nth(1) is value outlet 1
+[2026-10-09 13:37:21.359558 info] [6564] spike: describe:   outlet_nth(2) is the dumpout
+[2026-10-09 13:37:21.359562 info] [6564] spike: describe: the obex's dumpout is the one made first
+[2026-10-09 13:37:21.359585 info] [6564] spike: describe:   cord from outlet 2 to [tap.python.spike.recorder] inlet 0
+[2026-10-09 13:37:21.359634 info] [6564] spike: describe:   cord from outlet 0 to [tap.python.spike.recorder] inlet 0
+[2026-10-09 13:37:21.359638 info] [6564] spike: describe: 2 cord(s) from this box
+[2026-10-09 13:37:21.359645 info] [6564] spike: fire
+[2026-10-09 13:37:21.359650 info] [6564] recorder q2-dumpout: selector 'fired', 0 atom(s)
+[2026-10-09 13:37:21.359656 info] [6564] recorder q2-outlet-0: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:37:21.559286 info] [6564] q2 end
+
+## session q3-dumpout
+
+[2026-10-09 13:38:21.819173 info] [4680] spike: tap.python registered by tap.python~'s ext_main, after tap.python~ (plan 9.0 spike build)
+[2026-10-09 13:38:21.819237 info] [4680] spike: steps setter called (instance attribute) <- 5
+[2026-10-09 13:38:21.819242 info] [4680] spike: new tap.python: 1 value outlet(s) + dumpout, steps 5; main thread 1
+[2026-10-09 13:38:21.819429 info] [4680] spike: steps setter called (instance attribute) <- 5
+[2026-10-09 13:38:21.819469 info] [4680] spike: new tap.python.spike.nodumpout: 1 value outlet(s) + dumpout, steps 5; main thread 1
+[2026-10-09 13:38:22.034199 info] [4680] q3 tap.python: the instance attribute steps
+[2026-10-09 13:38:22.034247 info] [4680] spike: steps getter called (instance attribute) -> 5
+[2026-10-09 13:38:22.034274 info] [4680] recorder q3-dumpout: selector 'steps', 1 atom(s): 5 (int)
+[2026-10-09 13:38:22.034283 info] [4680] spike: steps setter called (instance attribute) <- 8
+[2026-10-09 13:38:22.034291 info] [4680] spike: steps getter called (instance attribute) -> 8
+[2026-10-09 13:38:22.034295 info] [4680] recorder q3-dumpout: selector 'steps', 1 atom(s): 8 (int)
+[2026-10-09 13:38:22.034302 info] [4680] q3 tap.python: the class attribute level
+[2026-10-09 13:38:22.061756 info] [4680] recorder q3-dumpout: selector 'level', 1 atom(s): 1 (int)
+[2026-10-09 13:38:22.061792 info] [4680] recorder q3-dumpout: selector 'level', 1 atom(s): 3 (int)
+[2026-10-09 13:38:22.114191 info] [4680] q3 tap.python: object_attr_getdump and object_attr_method
+[2026-10-09 13:38:22.159788 info] [4680] spike: getdump steps: calling object_attr_getdump()
+[2026-10-09 13:38:22.159838 info] [4680] recorder q3-dumpout: selector 'ps', 0 atom(s)
+[2026-10-09 13:38:22.159847 info] [4680] spike: getdump level: calling object_attr_getdump()
+[2026-10-09 13:38:22.159851 info] [4680] recorder q3-dumpout: selector 'el', 0 atom(s)
+[2026-10-09 13:38:22.159863 info] [4680] spike: attrmethod 'getsteps': object_attr_method found a method, attribute found, get 1 (steps' own getter)
+[2026-10-09 13:38:22.159868 info] [4680] spike: attrmethod 'steps': object_attr_method found a method, attribute found, get 0 (steps' own setter)
+[2026-10-09 13:38:22.159876 info] [4680] spike: attrmethod 'getlevel': object_attr_method found a method, attribute found, get 1
+[2026-10-09 13:38:22.159881 info] [4680] spike: attrmethod 'level': object_attr_method found a method, attribute found, get 0
+[2026-10-09 13:38:22.159893 info] [4680] spike: probe 'getsteps' on this tap.python: object_getmethod is a function; differs from what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn null
+[2026-10-09 13:38:22.159900 info] [4680] spike: probe 'dumpout' on this tap.python: object_getmethod is a function; differs from what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn non-null
+[2026-10-09 13:38:22.307849 info] [4680] q3 tap.python.spike.nodumpout: the instance attribute steps
+[2026-10-09 13:38:22.357871 info] [4680] spike: steps setter called (instance attribute) <- 8
+[2026-10-09 13:38:22.407810 info] [4680] q3 tap.python.spike.nodumpout: the class attribute level
+[2026-10-09 13:38:22.507792 info] [4680] q3 tap.python.spike.nodumpout: object_attr_getdump and object_attr_method
+[2026-10-09 13:38:22.557792 info] [4680] spike: getdump steps: calling object_attr_getdump()
+[2026-10-09 13:38:22.557826 info] [4680] spike: getdump level: calling object_attr_getdump()
+[2026-10-09 13:38:22.557842 info] [4680] spike: attrmethod 'getsteps': object_attr_method found a method, attribute found, get 1 (steps' own getter)
+[2026-10-09 13:38:22.557848 info] [4680] spike: attrmethod 'steps': object_attr_method found a method, attribute found, get 0 (steps' own setter)
+[2026-10-09 13:38:22.557854 info] [4680] spike: attrmethod 'getlevel': object_attr_method found a method, attribute found, get 1
+[2026-10-09 13:38:22.557858 info] [4680] spike: attrmethod 'level': object_attr_method found a method, attribute found, get 0
+[2026-10-09 13:38:22.557869 info] [4680] spike: probe 'getsteps' on this tap.python.spike.nodumpout: object_getmethod is a function; differs from what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn null
+[2026-10-09 13:38:22.557876 info] [4680] spike: probe 'dumpout' on this tap.python.spike.nodumpout: object_getmethod is a function; SAME AS what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn null
+[2026-10-09 13:38:22.707758 info] [4680] q3 end
+
+## session q4-dispatch
+
+[2026-10-09 13:39:22.769776 info] [10280] spike: tap.python registered by tap.python~'s ext_main, after tap.python~ (plan 9.0 spike build)
+[2026-10-09 13:39:22.769863 info] [10280] spike: new tap.python: 1 value outlet(s) + dumpout, steps 8; main thread 1
+[2026-10-09 13:39:22.770062 info] [10280] spike: new tap.python (bare: no instance attribute or methods): 1 value outlet(s) + dumpout, steps 8; main thread 1
+[2026-10-09 13:39:22.898618 info] [10280] Loaded default.py: process() bound, one call per sample
+[2026-10-09 13:39:23.159684 info] [10280] q4 begin: dispatch on the spike
+[2026-10-09 13:39:23.159735 info] [10280] spike: steps setter called (instance attribute) <- 8
+[2026-10-09 13:39:23.159747 info] [10280] spike: steps getter called (instance attribute) -> 8
+[2026-10-09 13:39:23.159771 info] [10280] recorder q4-dumpout: selector 'steps', 1 atom(s): 8 (int)
+[2026-10-09 13:39:23.159778 info] [10280] spike: instance method hello called (object_addmethod, A_GIMME): 1 2
+[2026-10-09 13:39:23.159783 info] [10280] spike: who: the INSTANCE method (object_addmethod) answered
+[2026-10-09 13:39:23.159802 info] [10280] spike: instance method int called (object_addmethod, A_LONG): 5
+[2026-10-09 13:39:23.159808 error] [10280] doesn't understand "float"
+[2026-10-09 13:39:23.159812 info] [10280] spike: bang: the INSTANCE method (object_addmethod) answered
+[2026-10-09 13:39:23.159817 info] [10280] spike: instance method int called (object_addmethod, A_LONG): 1
+[2026-10-09 13:39:23.159821 info] [10280] spike: instance method int called (object_addmethod, A_LONG): 4
+[2026-10-09 13:39:23.159827 info] [10280] spike: class anything received: selector 'symbol', 1 argument(s): foo
+[2026-10-09 13:39:23.159833 info] [10280] spike: class anything received: selector 'foo', 2 argument(s): 1 2
+[2026-10-09 13:39:23.159841 info] [10280] q4 dispatch on the bare spike
+[2026-10-09 13:39:23.159848 info] [10280] spike: class anything received: selector 'steps', 1 argument(s): 8
+[2026-10-09 13:39:23.159852 info] [10280] spike: class anything received: selector 'getsteps', 0 argument(s): 
+[2026-10-09 13:39:23.159857 info] [10280] spike: class anything received: selector 'hello', 2 argument(s): 1 2
+[2026-10-09 13:39:23.159861 info] [10280] spike: who: the CLASS method (class_addmethod) answered
+[2026-10-09 13:39:23.159864 error] [10280] doesn't understand "int"
+[2026-10-09 13:39:23.159867 error] [10280] doesn't understand "float"
+[2026-10-09 13:39:23.159871 info] [10280] spike: bang: the CLASS method (class_addmethod) answered
+[2026-10-09 13:39:23.159874 error] [10280] doesn't understand "int"
+[2026-10-09 13:39:23.159878 error] [10280] doesn't understand "int"
+[2026-10-09 13:39:23.159882 info] [10280] spike: class anything received: selector 'symbol', 1 argument(s): foo
+[2026-10-09 13:39:23.159887 info] [10280] spike: class anything received: selector 'foo', 2 argument(s): 1 2
+[2026-10-09 13:39:23.159895 info] [10280] q4 probes on the spike (it has a class-level anything)
+[2026-10-09 13:39:23.159906 info] [10280] spike: probe 'foo' on this tap.python: object_getmethod is a function; SAME AS what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn null
+[2026-10-09 13:39:23.159914 info] [10280] spike: probe 'anything' on this tap.python: object_getmethod is this class's anything; differs from what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn non-null
+[2026-10-09 13:39:23.159920 info] [10280] spike: probe 'steps' on this tap.python: object_getmethod is a function; differs from what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn null
+[2026-10-09 13:39:23.159927 info] [10280] spike: probe 'getsteps' on this tap.python: object_getmethod is a function; differs from what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn null
+[2026-10-09 13:39:23.159933 info] [10280] spike: probe 'level' on this tap.python: object_getmethod is a function; differs from what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn null
+[2026-10-09 13:39:23.159940 info] [10280] spike: probe 'getlevel' on this tap.python: object_getmethod is a function; differs from what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn null
+[2026-10-09 13:39:23.159946 info] [10280] spike: probe 'hello' on this tap.python: object_getmethod is a function; SAME AS what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn non-null
+[2026-10-09 13:39:23.159952 info] [10280] spike: probe 'who' on this tap.python: object_getmethod is a function; differs from what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn non-null
+[2026-10-09 13:39:23.159957 info] [10280] spike: probe 'int' on this tap.python: object_getmethod is a function; SAME AS what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn non-null
+[2026-10-09 13:39:23.159963 info] [10280] spike: probe 'float' on this tap.python: object_getmethod is a function; SAME AS what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn null
+[2026-10-09 13:39:23.159969 info] [10280] spike: probe 'bang' on this tap.python: object_getmethod is a function; differs from what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn non-null
+[2026-10-09 13:39:23.159975 info] [10280] spike: probe 'list' on this tap.python: object_getmethod is a function; SAME AS what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn null
+[2026-10-09 13:39:23.159981 info] [10280] spike: probe 'symbol' on this tap.python: object_getmethod is a function; SAME AS what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn null
+[2026-10-09 13:39:23.159988 info] [10280] spike: probe 'outlets' on this tap.python: object_getmethod is a function; differs from what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn non-null
+[2026-10-09 13:39:23.272297 info] [10280] q4 probes on tap.python~ (no anything)
+[2026-10-09 13:39:23.303964 info] [10280] spike: probe 'foo' on tilde (tap.python~): object_getmethod is a function; SAME AS what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn null
+[2026-10-09 13:39:23.304016 info] [10280] spike: probe 'anything' on tilde (tap.python~): object_getmethod is a function; SAME AS what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn null
+[2026-10-09 13:39:23.304037 info] [10280] spike: probe 'gain' on tilde (tap.python~): object_getmethod is a function; differs from what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn null
+[2026-10-09 13:39:23.304058 info] [10280] spike: probe 'greet' on tilde (tap.python~): object_getmethod is a function; SAME AS what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn non-null
+[2026-10-09 13:39:23.304078 info] [10280] spike: probe 'int' on tilde (tap.python~): object_getmethod is a function; SAME AS what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn non-null
+[2026-10-09 13:39:23.304098 info] [10280] spike: probe 'dsp64' on tilde (tap.python~): object_getmethod is a function; differs from what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn non-null
+[2026-10-09 13:39:23.304117 info] [10280] spike: probe 'bang' on tilde (tap.python~): object_getmethod is a function; SAME AS what it answers for a name no class has (which is a function, not equal to method_false as this module sees it); zgetfn null
+[2026-10-09 13:39:23.453932 info] [10280] q4 end
+
+## session q5-threads
+
+[2026-10-09 13:40:29.988006 info] [11108] spike: tap.python registered by tap.python~'s ext_main, after tap.python~ (plan 9.0 spike build)
+[2026-10-09 13:40:29.988083 info] [11108] spike: new tap.python: 1 value outlet(s) + dumpout, steps 8; main thread 1
+[2026-10-09 13:40:30.009590 info] [11108] recorder q5-takeover: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:40:30.009627 info] [11108] recorder q5-overdrive: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:40:30.271748 info] [11108] spike: thread 'loadbang': main 1, audio 0, timer 1, thread id 872648
+[2026-10-09 13:40:30.271924 info] [11108] recorder q5-overdrive: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:40:30.271960 info] [11108] recorder q5-takeover: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:40:30.300058 info] [11108] recorder q5-takeover: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:40:30.300100 info] [11108] recorder q5-overdrive: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:40:30.300224 info] [11108] recorder q5-overdrive: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:40:30.300279 info] [11108] recorder q5-takeover: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:40:30.356364 info] [11108] q5 phase overdrive-off
+[2026-10-09 13:40:30.386139 info] [11108] spike: thread 'overdrive-off': main 1, audio 0, timer 1, thread id 872648
+[2026-10-09 13:40:30.474284 info] [11108] spike: thread 'overdrive-off': main 1, audio 0, timer 1, thread id 872648
+[2026-10-09 13:40:30.574268 info] [11108] spike: thread 'overdrive-off': main 1, audio 0, timer 1, thread id 872648
+[2026-10-09 13:40:30.674269 info] [11108] spike: thread 'overdrive-off': main 1, audio 0, timer 1, thread id 872648
+[2026-10-09 13:40:30.774244 info] [11108] spike: thread 'overdrive-off': main 1, audio 0, timer 1, thread id 872648
+[2026-10-09 13:40:30.874252 info] [11108] spike: thread 'overdrive-off': main 1, audio 0, timer 1, thread id 872648
+[2026-10-09 13:40:31.174161 info] [4348] recorder q5-overdrive: selector 'int', 1 atom(s): 1 (int)
+[2026-10-09 13:40:31.184171 info] [4348] recorder q5-takeover: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:40:31.274165 info] [4348] q5 phase overdrive-on
+[2026-10-09 13:40:31.324261 info] [11108] spike: thread 'overdrive-on': main 0, audio 0, timer 1, thread id 663929
+[2026-10-09 13:40:31.424227 info] [11108] spike: thread 'overdrive-on': main 0, audio 0, timer 1, thread id 663929
+[2026-10-09 13:40:31.524228 info] [11108] spike: thread 'overdrive-on': main 0, audio 0, timer 1, thread id 663929
+[2026-10-09 13:40:31.624212 info] [11108] spike: thread 'overdrive-on': main 0, audio 0, timer 1, thread id 663929
+[2026-10-09 13:40:31.724241 info] [11108] spike: thread 'overdrive-on': main 0, audio 0, timer 1, thread id 663929
+[2026-10-09 13:40:31.824218 info] [11108] spike: thread 'overdrive-on': main 0, audio 0, timer 1, thread id 663929
+[2026-10-09 13:40:32.024497 info] [11108] recorder q5-takeover: selector 'int', 1 atom(s): 1 (int)
+[2026-10-09 13:40:32.024543 info] [11108] recorder q5-overdrive: selector 'int', 1 atom(s): 1 (int)
+[2026-10-09 13:40:32.027368 info] [11108] recorder q5-takeover: selector 'int', 1 atom(s): 1 (int)
+[2026-10-09 13:40:32.027412 info] [11108] recorder q5-overdrive: selector 'int', 1 atom(s): 1 (int)
+[2026-10-09 13:40:32.027433 info] [11108] recorder q5-dsp-running: selector 'int', 1 atom(s): 1 (int)
+[2026-10-09 13:40:32.027440 info] [11108] recorder q5-takeover: selector 'int', 1 atom(s): 1 (int)
+[2026-10-09 13:40:32.027443 info] [11108] recorder q5-overdrive: selector 'int', 1 atom(s): 1 (int)
+[2026-10-09 13:40:32.308494 info] [1996] recorder q5-overdrive: selector 'int', 1 atom(s): 1 (int)
+[2026-10-09 13:40:32.321174 info] [1996] recorder q5-takeover: selector 'int', 1 atom(s): 1 (int)
+[2026-10-09 13:40:34.414569 info] [1996] q5 phase overdrive-on-audio-interrupt-on-audio-running
+[2026-10-09 13:40:34.458012 info] [11108] spike: thread 'overdrive-on-audio-interrupt-on-audio-running': main 0, audio 1, timer 1, thread id 602980
+[2026-10-09 13:40:34.567978 info] [11108] spike: thread 'overdrive-on-audio-interrupt-on-audio-running': main 0, audio 1, timer 1, thread id 602980
+[2026-10-09 13:40:34.659895 info] [11108] spike: thread 'overdrive-on-audio-interrupt-on-audio-running': main 0, audio 1, timer 1, thread id 602980
+[2026-10-09 13:40:34.762103 info] [11108] spike: thread 'overdrive-on-audio-interrupt-on-audio-running': main 0, audio 1, timer 1, thread id 602980
+[2026-10-09 13:40:34.854376 info] [11108] spike: thread 'overdrive-on-audio-interrupt-on-audio-running': main 0, audio 1, timer 1, thread id 602980
+[2026-10-09 13:40:34.956104 info] [11108] spike: thread 'overdrive-on-audio-interrupt-on-audio-running': main 0, audio 1, timer 1, thread id 602980
+[2026-10-09 13:40:35.273684 info] [11108] recorder q5-dsp-running: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:40:35.273744 info] [11108] recorder q5-takeover: selector 'int', 1 atom(s): 1 (int)
+[2026-10-09 13:40:35.273751 info] [11108] recorder q5-overdrive: selector 'int', 1 atom(s): 1 (int)
+[2026-10-09 13:40:35.273759 info] [11108] recorder q5-takeover: selector 'int', 1 atom(s): 1 (int)
+[2026-10-09 13:40:35.273762 info] [11108] recorder q5-overdrive: selector 'int', 1 atom(s): 1 (int)
+[2026-10-09 13:40:35.316297 info] [8464] q5 phase overdrive-on-audio-interrupt-on-audio-stopped
+[2026-10-09 13:40:35.366361 info] [11108] spike: thread 'overdrive-on-audio-interrupt-on-audio-stopped': main 0, audio 0, timer 1, thread id 336826
+[2026-10-09 13:40:35.466257 info] [11108] spike: thread 'overdrive-on-audio-interrupt-on-audio-stopped': main 0, audio 0, timer 1, thread id 336826
+[2026-10-09 13:40:35.566283 info] [11108] spike: thread 'overdrive-on-audio-interrupt-on-audio-stopped': main 0, audio 0, timer 1, thread id 336826
+[2026-10-09 13:40:35.666274 info] [11108] spike: thread 'overdrive-on-audio-interrupt-on-audio-stopped': main 0, audio 0, timer 1, thread id 336826
+[2026-10-09 13:40:35.766279 info] [11108] spike: thread 'overdrive-on-audio-interrupt-on-audio-stopped': main 0, audio 0, timer 1, thread id 336826
+[2026-10-09 13:40:35.866264 info] [11108] spike: thread 'overdrive-on-audio-interrupt-on-audio-stopped': main 0, audio 0, timer 1, thread id 336826
+[2026-10-09 13:40:36.066178 info] [8464] q5 putting Overdrive and Audio Interrupt back
+[2026-10-09 13:40:36.116179 info] [8464] recorder q5-was-overdrive: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:40:36.136480 info] [11108] recorder q5-was-takeover: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:40:36.136910 info] [11108] recorder q5-takeover: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:40:36.136935 info] [11108] recorder q5-overdrive: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:40:36.266608 info] [11108] recorder q5-overdrive: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:40:36.279237 info] [11108] recorder q5-takeover: selector 'int', 1 atom(s): 0 (int)
+[2026-10-09 13:40:36.466254 info] [11108] q5 end
+
+## session q6-strings
+
+[2026-10-09 13:41:33.606894 info] [10716] spike: tap.python registered by tap.python~'s ext_main, after tap.python~ (plan 9.0 spike build)
+[2026-10-09 13:41:33.606984 info] [10716] spike: new tap.python: 1 value outlet(s) + dumpout, steps 8; main thread 1
+[2026-10-09 13:41:33.843205 info] [10716] q6 begin
+[2026-10-09 13:41:33.843254 info] [10716] spike: q6 ---- as a message: 'C'
+[2026-10-09 13:41:33.843280 info] [10716] recorder q6-msgbox: selector 'C', 0 atom(s)
+[2026-10-09 13:41:33.843293 info] [10716] recorder q6-prepend: selector 'got', 1 atom(s): 'C' (symbol)
+[2026-10-09 13:41:33.843303 info] [10716] recorder q6-sel-C: selector 'bang', 0 atom(s)
+[2026-10-09 13:41:33.843314 info] [10716] recorder q6-route-C: selector 'bang', 0 atom(s)
+[2026-10-09 13:41:33.843322 info] [10716] recorder q6-raw: selector 'C', 0 atom(s)
+[2026-10-09 13:41:33.843327 info] [10716] spike: q6 ---- as a message: 'hello world'
+[2026-10-09 13:41:33.843332 info] [10716] recorder q6-msgbox: selector 'hello world', 0 atom(s)
+[2026-10-09 13:41:33.843337 info] [10716] recorder q6-prepend: selector 'got', 1 atom(s): 'hello world' (symbol)
+[2026-10-09 13:41:33.843347 info] [10716] recorder q6-sel-reject: selector 'hello world', 0 atom(s)
+[2026-10-09 13:41:33.843356 info] [10716] recorder q6-route-reject: selector 'hello world', 0 atom(s)
+[2026-10-09 13:41:33.843358 info] [10716] recorder q6-raw: selector 'hello world', 0 atom(s)
+[2026-10-09 13:41:33.843364 info] [10716] spike: q6 ---- as a message: '60'
+[2026-10-09 13:41:33.843368 info] [10716] recorder q6-msgbox: selector '60', 0 atom(s)
+[2026-10-09 13:41:33.843371 info] [10716] recorder q6-prepend: selector 'got', 1 atom(s): '60' (symbol)
+[2026-10-09 13:41:33.843374 info] [10716] recorder q6-sel-reject: selector '60', 0 atom(s)
+[2026-10-09 13:41:33.843376 info] [10716] recorder q6-route-reject: selector '60', 0 atom(s)
+[2026-10-09 13:41:33.843378 info] [10716] recorder q6-raw: selector '60', 0 atom(s)
+[2026-10-09 13:41:33.843386 info] [10716] spike: q6 ---- as a message: '1.5'
+[2026-10-09 13:41:33.843390 info] [10716] recorder q6-msgbox: selector '1.5', 0 atom(s)
+[2026-10-09 13:41:33.843393 info] [10716] recorder q6-prepend: selector 'got', 1 atom(s): '1.5' (symbol)
+[2026-10-09 13:41:33.843396 info] [10716] recorder q6-sel-reject: selector '1.5', 0 atom(s)
+[2026-10-09 13:41:33.843398 info] [10716] recorder q6-route-reject: selector '1.5', 0 atom(s)
+[2026-10-09 13:41:33.843400 info] [10716] recorder q6-raw: selector '1.5', 0 atom(s)
+[2026-10-09 13:41:33.843405 info] [10716] spike: q6 ---- as a message: 'list'
+[2026-10-09 13:41:33.843422 info] [10716] spike: q6 ---- as a message: 'int'
+[2026-10-09 13:41:33.843432 error] [10716] missing arguments for message "int"
+[2026-10-09 13:41:33.843440 error] [10716] missing arguments for message "int"
+[2026-10-09 13:41:33.843448 error] [10716] missing arguments for message "int"
+[2026-10-09 13:41:33.843455 error] [10716] missing arguments for message "int"
+[2026-10-09 13:41:33.843457 error] [10716] missing arguments for message "int"
+[2026-10-09 13:41:33.843462 info] [10716] spike: q6 ---- as a message: 'float'
+[2026-10-09 13:41:33.843465 error] [10716] missing arguments for message "float"
+[2026-10-09 13:41:33.843466 error] [10716] missing arguments for message "float"
+[2026-10-09 13:41:33.843468 error] [10716] missing arguments for message "float"
+[2026-10-09 13:41:33.843470 error] [10716] missing arguments for message "float"
+[2026-10-09 13:41:33.843472 error] [10716] missing arguments for message "float"
+[2026-10-09 13:41:33.843476 info] [10716] spike: q6 ---- as a message: 'symbol'
+[2026-10-09 13:41:33.843478 error] [10716] missing arguments for message "symbol"
+[2026-10-09 13:41:33.843481 info] [10716] recorder q6-prepend: selector 'got', 1 atom(s): 'symbol' (symbol)
+[2026-10-09 13:41:33.843485 info] [10716] recorder q6-sel-reject: selector 'symbol', 1 atom(s): '' (symbol)
+[2026-10-09 13:41:33.843487 info] [10716] recorder q6-route-reject: selector 'symbol', 0 atom(s)
+[2026-10-09 13:41:33.843489 info] [10716] recorder q6-raw: selector 'symbol', 0 atom(s)
+[2026-10-09 13:41:33.843494 info] [10716] spike: q6 ---- as a message: 'bang'
+[2026-10-09 13:41:33.843498 info] [10716] recorder q6-msgbox: selector '1.5', 0 atom(s)
+[2026-10-09 13:41:33.843501 info] [10716] recorder q6-prepend: selector 'got', 1 atom(s): 'bang' (symbol)
+[2026-10-09 13:41:33.843504 info] [10716] recorder q6-sel-reject: selector 'symbol', 1 atom(s): 'bang' (symbol)
+[2026-10-09 13:41:33.843507 info] [10716] recorder q6-route-reject: selector 'bang', 0 atom(s)
+[2026-10-09 13:41:33.843509 info] [10716] recorder q6-raw: selector 'bang', 0 atom(s)
+[2026-10-09 13:41:33.843513 info] [10716] spike: q6 ---- as a message: ''
+[2026-10-09 13:41:33.843517 info] [10716] recorder q6-msgbox: selector '', 0 atom(s)
+[2026-10-09 13:41:33.843520 info] [10716] recorder q6-prepend: selector 'got', 1 atom(s): '' (symbol)
+[2026-10-09 13:41:33.843523 info] [10716] recorder q6-sel-reject: selector '', 0 atom(s)
+[2026-10-09 13:41:33.843525 info] [10716] recorder q6-route-reject: selector '', 0 atom(s)
+[2026-10-09 13:41:33.843527 info] [10716] recorder q6-raw: selector '', 0 atom(s)
+[2026-10-09 13:41:33.928080 info] [10716] spike: q6 ---- as symbol: 'C'
+[2026-10-09 13:41:33.928134 info] [10716] recorder q6-msgbox: selector 'C', 0 atom(s)
+[2026-10-09 13:41:33.928147 info] [10716] recorder q6-prepend: selector 'got', 2 atom(s): 'symbol' (symbol), 'C' (symbol)
+[2026-10-09 13:41:33.928153 info] [10716] recorder q6-sel-C: selector 'bang', 0 atom(s)
+[2026-10-09 13:41:33.928159 info] [10716] recorder q6-route-reject: selector 'symbol', 1 atom(s): 'C' (symbol)
+[2026-10-09 13:41:33.928163 info] [10716] recorder q6-raw: selector 'symbol', 1 atom(s): 'C' (symbol)
+[2026-10-09 13:41:33.928175 info] [10716] spike: q6 ---- as symbol: 'hello world'
+[2026-10-09 13:41:33.928179 info] [10716] recorder q6-msgbox: selector 'hello world', 0 atom(s)
+[2026-10-09 13:41:33.928185 info] [10716] recorder q6-prepend: selector 'got', 2 atom(s): 'symbol' (symbol), 'hello world' (symbol)
+[2026-10-09 13:41:33.928190 info] [10716] recorder q6-sel-reject: selector 'symbol', 1 atom(s): 'hello world' (symbol)
+[2026-10-09 13:41:33.928193 info] [10716] recorder q6-route-reject: selector 'symbol', 1 atom(s): 'hello world' (symbol)
+[2026-10-09 13:41:33.928196 info] [10716] recorder q6-raw: selector 'symbol', 1 atom(s): 'hello world' (symbol)
+[2026-10-09 13:41:33.928203 info] [10716] spike: q6 ---- as symbol: '60'
+[2026-10-09 13:41:33.928207 info] [10716] recorder q6-msgbox: selector '60', 0 atom(s)
+[2026-10-09 13:41:33.928212 info] [10716] recorder q6-prepend: selector 'got', 2 atom(s): 'symbol' (symbol), '60' (symbol)
+[2026-10-09 13:41:33.928215 info] [10716] recorder q6-sel-reject: selector 'symbol', 1 atom(s): '60' (symbol)
+[2026-10-09 13:41:33.928218 info] [10716] recorder q6-route-reject: selector 'symbol', 1 atom(s): '60' (symbol)
+[2026-10-09 13:41:33.928221 info] [10716] recorder q6-raw: selector 'symbol', 1 atom(s): '60' (symbol)
+[2026-10-09 13:41:33.928229 info] [10716] spike: q6 ---- as symbol: '1.5'
+[2026-10-09 13:41:33.928233 info] [10716] recorder q6-msgbox: selector '1.5', 0 atom(s)
+[2026-10-09 13:41:33.928237 info] [10716] recorder q6-prepend: selector 'got', 2 atom(s): 'symbol' (symbol), '1.5' (symbol)
+[2026-10-09 13:41:33.928240 info] [10716] recorder q6-sel-reject: selector 'symbol', 1 atom(s): '1.5' (symbol)
+[2026-10-09 13:41:33.928243 info] [10716] recorder q6-route-reject: selector 'symbol', 1 atom(s): '1.5' (symbol)
+[2026-10-09 13:41:33.928246 info] [10716] recorder q6-raw: selector 'symbol', 1 atom(s): '1.5' (symbol)
+[2026-10-09 13:41:33.928251 info] [10716] spike: q6 ---- as symbol: 'list'
+[2026-10-09 13:41:33.928257 info] [10716] recorder q6-prepend: selector 'got', 2 atom(s): 'symbol' (symbol), 'list' (symbol)
+[2026-10-09 13:41:33.928260 info] [10716] recorder q6-sel-reject: selector 'symbol', 1 atom(s): 'list' (symbol)
+[2026-10-09 13:41:33.928263 info] [10716] recorder q6-route-reject: selector 'symbol', 1 atom(s): 'list' (symbol)
+[2026-10-09 13:41:33.928266 info] [10716] recorder q6-raw: selector 'symbol', 1 atom(s): 'list' (symbol)
+[2026-10-09 13:41:33.928270 info] [10716] spike: q6 ---- as symbol: 'int'
+[2026-10-09 13:41:33.928283 info] [10716] trying to register object, but no obex pointer
+[2026-10-09 13:41:33.928285 error] [10716] missing arguments for message "int"
+[2026-10-09 13:41:33.928289 info] [10716] recorder q6-prepend: selector 'got', 2 atom(s): 'symbol' (symbol), 'int' (symbol)
+[2026-10-09 13:41:33.928293 info] [10716] recorder q6-sel-reject: selector 'symbol', 1 atom(s): 'int' (symbol)
+[2026-10-09 13:41:33.928296 info] [10716] recorder q6-route-reject: selector 'symbol', 1 atom(s): 'int' (symbol)
+[2026-10-09 13:41:33.928299 info] [10716] recorder q6-raw: selector 'symbol', 1 atom(s): 'int' (symbol)
+[2026-10-09 13:41:33.928304 info] [10716] spike: q6 ---- as symbol: 'float'
+[2026-10-09 13:41:33.928310 info] [10716] trying to register object, but no obex pointer
+[2026-10-09 13:41:33.928311 error] [10716] missing arguments for message "float"
+[2026-10-09 13:41:33.928315 info] [10716] recorder q6-prepend: selector 'got', 2 atom(s): 'symbol' (symbol), 'float' (symbol)
+[2026-10-09 13:41:33.928318 info] [10716] recorder q6-sel-reject: selector 'symbol', 1 atom(s): 'float' (symbol)
+[2026-10-09 13:41:33.928322 info] [10716] recorder q6-route-reject: selector 'symbol', 1 atom(s): 'float' (symbol)
+[2026-10-09 13:41:33.928325 info] [10716] recorder q6-raw: selector 'symbol', 1 atom(s): 'float' (symbol)
+[2026-10-09 13:41:33.928329 info] [10716] spike: q6 ---- as symbol: 'symbol'
+[2026-10-09 13:41:33.928333 info] [10716] recorder q6-msgbox: selector 'symbol', 0 atom(s)
+[2026-10-09 13:41:33.928337 info] [10716] recorder q6-prepend: selector 'got', 2 atom(s): 'symbol' (symbol), 'symbol' (symbol)
+[2026-10-09 13:41:33.928340 info] [10716] recorder q6-sel-reject: selector 'symbol', 1 atom(s): 'symbol' (symbol)
+[2026-10-09 13:41:33.928345 info] [10716] recorder q6-route-reject: selector 'symbol', 1 atom(s): 'symbol' (symbol)
+[2026-10-09 13:41:33.928348 info] [10716] recorder q6-raw: selector 'symbol', 1 atom(s): 'symbol' (symbol)
+[2026-10-09 13:41:33.928357 info] [10716] spike: q6 ---- as symbol: 'bang'
+[2026-10-09 13:41:33.928361 info] [10716] recorder q6-msgbox: selector 'bang', 0 atom(s)
+[2026-10-09 13:41:33.928365 info] [10716] recorder q6-prepend: selector 'got', 2 atom(s): 'symbol' (symbol), 'bang' (symbol)
+[2026-10-09 13:41:33.928368 info] [10716] recorder q6-sel-reject: selector 'symbol', 1 atom(s): 'bang' (symbol)
+[2026-10-09 13:41:33.928371 info] [10716] recorder q6-route-reject: selector 'symbol', 1 atom(s): 'bang' (symbol)
+[2026-10-09 13:41:33.928373 info] [10716] recorder q6-raw: selector 'symbol', 1 atom(s): 'bang' (symbol)
+[2026-10-09 13:41:33.928378 info] [10716] spike: q6 ---- as symbol: ''
+[2026-10-09 13:41:33.928381 info] [10716] recorder q6-msgbox: selector '', 0 atom(s)
+[2026-10-09 13:41:33.928385 info] [10716] recorder q6-prepend: selector 'got', 2 atom(s): 'symbol' (symbol), '' (symbol)
+[2026-10-09 13:41:33.928388 info] [10716] recorder q6-sel-reject: selector 'symbol', 1 atom(s): '' (symbol)
+[2026-10-09 13:41:33.928391 info] [10716] recorder q6-route-reject: selector 'symbol', 1 atom(s): '' (symbol)
+[2026-10-09 13:41:33.928394 info] [10716] recorder q6-raw: selector 'symbol', 1 atom(s): '' (symbol)
+[2026-10-09 13:41:34.144122 info] [10716] q6 end
+
+## session q7
+
+
+Max's file database had NOT finished its update when Max quit, so what follows is incomplete:
+Max's file database (c--program files-cycling '74-max 9-max.x64.maxdb), for the files q7 put in the package:
+  pythontap-spike-tut-docs.maxtut.xml: NOT in the database
+  pythontap-spike-vig-docs.maxvig.xml: NOT in the database
+  pythontap-spike-vig-topics.maxvig.xml: NOT in the database
+  pythontap-spike-tut-tutorials.maxtut.xml: NOT in the database
+  pythontap-spike-tut-nested.maxtut.xml: NOT in the database
+  pythontap-spike-tutorial.maxpat: NOT in the database
+  pythontap-spike-vig-vignettes.maxvig.xml: NOT in the database
+  PythonTap Spike Extras.maxpat: NOT in the database
+
