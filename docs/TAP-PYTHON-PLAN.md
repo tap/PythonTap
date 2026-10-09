@@ -373,10 +373,18 @@ third was Windows-only.
   running, a message with 64 numbers in and out measured 5.6 µs for the bridge alone and 15 µs for
   `scale.py`, and `main` and the branch measured alike back to back.)* No Max code changes; `tap.python~`'s battery and glue test unchanged and green; the
   audio bench numbers unchanged (the audio path does not touch the new code).
-- [ ] **9.2 The shared glue.** `tap.python_tilde_{attribute,message,cglue,filewatch,package}.h`
+- [x] **9.2 The shared glue** (#47). `tap.python_tilde_{attribute,message,cglue,filewatch,package}.h`
   become `python_glue<Host>` (the trampolines instantiated per host through `Host::self()`), in
   `source/shared/tap/python_max/` or beside the object; `reserved_messages()` parameterized by the
   audio names. A pure move: `tap.python~`'s behavior, tests and the data-import check unchanged.
+  *(Done beside the object, as one binary builds both: `tap.python_glue.h` holds `python_attr`,
+  `python_message` and `python_members` (the attributes and messages made for a class, their
+  reconciliation, attribute access and the guard) on the host, the trampolines, `start_runtime()`,
+  `watch_source()` and `to_values()`; the file watcher and package paths are
+  `tap.python_{filewatch,package}.h`. The same 53 reserved names in the same order; the glue test
+  pins what an audio object reserves beyond every object's; every runtime test passes in Max 9.1.5.
+  For 9.3: `reserved_messages(false)` still has 8.2's `anything`, which `tap.python`, exposing a
+  class's `anything`, takes out — and adds `dumpout`.)*
 - [ ] **9.3 The object.** `tap.python.h` and its TU in the project, registered by the project's
   `ext_main` (replacing the 9.0 spike's TU and its CMake option); ports with the dumpout, its
   `dumpout` method and the lock; output mapping (a `str` as `symbol <s>`); the `anything` forwarder
@@ -579,7 +587,7 @@ own log (`Logs/Max.log`) has every console line with its thread, but not a `[pri
 And methods added with `object_addmethod()` are not found by `object_getmethod()` (4 above) —
 CLAUDE.md said an object's own messages answer their names, as its attributes do; only the
 attributes do, which the guard was right to leave out either way (CLAUDE.md now says so; the
-comment on `answered_by_max()` says the same, for 9.2's move to correct).
+comment on `answered_by_max()` said the same, and 9.2's move corrected it).
 
 **On Windows, learned on the way** (for 9.5 and 9.6, which run Windows by hand). A patcher opened
 together with Max (`Max.exe "<patcher>"`, as Explorer opens one) had its scheduler held for

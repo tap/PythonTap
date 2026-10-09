@@ -815,7 +815,7 @@ row shipped what only a host platform could show.
   the release is 2.0.0, decided 2026-10-09); announce-once per
   (file, kind); the `Loaded` line per binding. `test_output.cpp`, the output table over its edges, the
   new examples on known inputs, and a bench row for a message call. `tap.python~` unchanged and green.
-- [ ] **9.2 The shared glue:** the attribute, message, trampoline, file-watcher and package headers
+- [x] **9.2 The shared glue** (#47)**:** the attribute, message, trampoline, file-watcher and package headers
   as `python_glue<Host>`; `reserved_messages()` parameterized by the audio names. A pure move.
 - [ ] **9.3 The object:** `tap.python.h` in the project, a plain SDK class registered by the
   project's `ext_main` — ports with the dumpout and the object's lock, the output mapping, the
