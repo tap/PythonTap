@@ -14,6 +14,10 @@
 //   tap_python_bench --json out.json  # also write the measurements (scripts/update-perf-docs.py)
 //   tap_python_bench --seconds 4 --runs 7
 //
+// It also times a message to an object without audio (tap.python, plan 9.1): a list of 64 numbers
+// through processor::call_with_output(), converted in and back out, as the external's messages are
+// called from Max's main or scheduler thread.
+//
 // Run it on an otherwise idle machine, from a Release build.
 
 #include <algorithm>
@@ -22,6 +26,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <numbers>
 #include <string>
@@ -50,6 +55,20 @@ namespace {
         {"numpy_gain", "per vector: numpy_gain.py, a gain"},
         {"numpy_allpass", "per vector: numpy_allpass.py, the same allpass filter"},
     };
+    // Messages to an object without audio, each with a list of k_message_atoms numbers: the bridge
+    // alone, then an example doing numpy work.
+    struct message_subject {
+        const char* name;        // the class file
+        const char* message;     // the method
+        const char* description; // for the table
+    };
+    constexpr message_subject k_message_subjects[] = {
+        {"bench_list_identity", "list", "returns its list (the bridge alone)"},
+        {"scale", "list", "scale.py, the list as one array, scaled with numpy"},
+    };
+    constexpr std::size_t k_message_atoms = 64;
+    constexpr std::size_t k_message_calls = 20000; // per round
+
     constexpr double      k_sample_rates[] = {48000.0, 96000.0};
     constexpr std::size_t k_vector_sizes[] = {64, 512}; // Max's default signal vector, and a large one
 
@@ -94,7 +113,38 @@ namespace {
         return elapsed.count() / seconds_of_audio;
     }
 
-    void write_json(const std::string& path, const std::vector<measurement>& results) {
+    /// One message subject, and the time each round's call took.
+    struct call_measurement {
+        std::string         subject;
+        std::string         description;
+        std::vector<double> seconds; // per call, one per round
+
+        double fastest() const { return *std::min_element(seconds.begin(), seconds.end()); }
+
+        double median() const {
+            auto sorted = seconds;
+            std::sort(sorted.begin(), sorted.end());
+            return sorted[sorted.size() / 2];
+        }
+    };
+
+    /// The time one call of `message` with `args` takes on `p`, from `calls` of them.
+    double call_once(processor& p, const char* message, const std::vector<tap::python::value>& args,
+                     const std::size_t calls) {
+        const auto start = std::chrono::steady_clock::now();
+        for (std::size_t i = 0; i < calls; ++i) {
+            const auto out = p.call_with_output(message, args);
+            if (out.empty()) {
+                std::fprintf(stderr, "%s output nothing\n", message);
+                std::exit(1);
+            }
+        }
+        const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
+        return elapsed.count() / static_cast<double>(calls);
+    }
+
+    void write_json(const std::string& path, const std::vector<measurement>& results,
+                    const std::vector<call_measurement>& calls) {
         std::ofstream out{path};
         out << "{\n  \"python\": \"" << Py_GetVersion() << "\",\n  \"measurements\": [\n";
         for (std::size_t i = 0; i < results.size(); ++i) {
@@ -103,6 +153,13 @@ namespace {
                 << "\", \"block\": " << (r.block ? "true" : "false") << ", \"sample_rate\": " << r.sample_rate
                 << ", \"vector_size\": " << r.vector_size << ", \"load\": " << r.load()
                 << ", \"median\": " << r.median() << "}" << (i + 1 < results.size() ? ",\n" : "\n");
+        }
+        out << "  ],\n  \"calls\": [\n";
+        for (std::size_t i = 0; i < calls.size(); ++i) {
+            const auto& c = calls[i];
+            out << "    {\"subject\": \"" << c.subject << "\", \"description\": \"" << c.description
+                << "\", \"atoms\": " << k_message_atoms << ", \"seconds\": " << c.fastest()
+                << ", \"median\": " << c.median() << "}" << (i + 1 < calls.size() ? ",\n" : "\n");
         }
         out << "  ]\n}\n";
     }
@@ -164,12 +221,36 @@ int main(int argc, char** argv) {
             }
         }
     }
+    std::vector<std::unique_ptr<processor>> message_processors;
+    std::vector<call_measurement>           calls;
+    std::vector<tap::python::value>         list_args;
+    for (std::size_t i = 0; i < k_message_atoms; ++i) {
+        list_args.emplace_back(0.5 * static_cast<double>(i));
+    }
+    for (const auto& s : k_message_subjects) {
+        message_processors.push_back(std::make_unique<processor>(s.name, log, std::vector<std::string>{},
+                                                                 std::function<void()>{},
+                                                                 std::function<bool(const std::string&)>{}, false));
+        if (!message_processors.back()->load()) {
+            std::fprintf(stderr, "could not load %s (are attrs and numpy importable?)\n", s.name);
+            return 1;
+        }
+        calls.push_back({s.name, s.description, {}});
+    }
+
     for (int round = -1; round < runs; ++round) { // round -1 warms up, untimed
         for (std::size_t i = 0; i < results.size(); ++i) {
             auto&        r    = results[i];
             const double load = run_once(*processors[owner[i]], r.sample_rate, r.vector_size, audio_seconds);
             if (round >= 0) {
                 r.loads.push_back(load);
+            }
+        }
+        for (std::size_t i = 0; i < calls.size(); ++i) {
+            const double seconds =
+                call_once(*message_processors[i], k_message_subjects[i].message, list_args, k_message_calls);
+            if (round >= 0) {
+                calls[i].seconds.push_back(seconds);
             }
         }
     }
@@ -183,8 +264,14 @@ int main(int argc, char** argv) {
                     load * 100.0, r.median() * 100.0, per_call, r.block ? "us/vector" : "ns/sample");
     }
 
+    std::printf("\n%-22s %-9s %-9s %s\n", "message", "atoms", "fastest", "median");
+    for (const auto& c : calls) {
+        std::printf("%-22s %-9zu %6.2f us %6.2f us\n", c.subject.c_str(), k_message_atoms, c.fastest() * 1e6,
+                    c.median() * 1e6);
+    }
+
     if (!json_path.empty()) {
-        write_json(json_path, results);
+        write_json(json_path, results, calls);
     }
     return 0;
 }

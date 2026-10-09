@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright 2022-2026 Timothy Place.
-"""Measure what process() costs and write the table into ReadMe.md (plan 6.3).
+"""Measure what process() costs, and a tap.python message, and write them into ReadMe.md (plan 6.3, 9.1).
 
     python3 scripts/update-perf-docs.py              # build core/bench (Release), run it, update ReadMe.md
     python3 scripts/update-perf-docs.py --max        # also measure in Max (macOS; quit Max first)
@@ -145,6 +145,23 @@ def comparison(results: dict) -> list[str]:
             "vector takes two, and 96 at 96 kHz, so it takes one — a delay shorter than the vector costs more."]
 
 
+def messages(results: dict) -> list[str]:
+    """A sentence on what a tap.python message costs, from the measurements (plan 9.1)."""
+    calls = {c["subject"]: c for c in results.get("calls", [])}
+    if "bench_list_identity" not in calls or "scale" not in calls:
+        return []
+    atoms = calls["bench_list_identity"]["atoms"]
+
+    def microseconds(subject: str) -> str:
+        return f"{calls[subject]['seconds'] * 1e6:.2g} µs"
+
+    return ["", f"A message to `tap.python` with a list of {atoms} numbers, each converted in and the list the "
+            f"method returns converted back out — called as Max's main or scheduler thread calls it, never the "
+            f"audio thread — costs {microseconds('bench_list_identity')} when the class returns the list as it "
+            f"came (the bridge alone), and {microseconds('scale')} for `scale.py`, which takes it as one numpy "
+            f"array."]
+
+
 def table(results: dict, python: Path) -> str:
     rows: dict[tuple, dict] = {}
     for m in results["measurements"]:
@@ -162,6 +179,7 @@ def table(results: dict, python: Path) -> str:
         lines.append(f"| {description} — {form} | {cost(row[48000.0])} | {percent(row[48000.0]['load'])} | "
                      f"{percent(row[96000.0]['load'])} |")
     lines += comparison(results)
+    lines += messages(results)
     lines += [
         "",
         f"The share of one core: each row timed once per round for seven rounds, interleaved, keeping its "
