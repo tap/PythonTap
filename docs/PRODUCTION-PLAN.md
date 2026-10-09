@@ -817,7 +817,7 @@ row shipped what only a host platform could show.
   new examples on known inputs, and a bench row for a message call. `tap.python~` unchanged and green.
 - [x] **9.2 The shared glue** (#47)**:** the attribute, message, trampoline, file-watcher and package headers
   as `python_glue<Host>`; `reserved_messages()` parameterized by the audio names. A pure move.
-- [ ] **9.3 The object:** `tap.python.h` in the project, a plain SDK class registered by the
+- [x] **9.3 The object** (#48)**:** `tap.python.h` in the project, a plain SDK class registered by the
   project's `ext_main` — ports with the dumpout and the object's lock, the output mapping, the
   `anything` forwarder, dynamic outlets on reload, the guard, the Scheduler-in-Audio-Interrupt
   notice; `init/tap.python.txt`; the glue test with faithful stubs; the examples (`euclid.py`,
