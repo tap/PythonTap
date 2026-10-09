@@ -9,8 +9,11 @@
 #   powershell -ExecutionPolicy Bypass -File runtime-tests\spike\run_spike_windows.ps1 -Only q2,q3
 #
 # The Windows counterpart of run_spike.py, which needs the macOS-only harness: each patcher runs in
-# a fresh Max of its own, started as Explorer starts it (Max.exe "<patcher>") together with a small
-# patcher that sends Max `; max clean; max quit` once the patcher under test has had its time. Max
+# a fresh Max of its own, started as Explorer starts it (Max.exe "<patcher>") with a small starter
+# patcher that waits for Max to finish starting up — a patcher opened with Max itself was found to
+# have its main thread held for seconds after loading, which collapsed q5's timeline — then opens
+# the patcher under test (`; max openfile`, by name: hence PythonTap-spike in Packages) and, once
+# it has had its time, sends `; max clean; max quit`. Max
 # must be quit first, and the package (and runtime-tests\spike, for the patchers) must be in a
 # Packages folder — C:\ProgramData\Max 9\Packages\PythonTap and ...\PythonTap-spike as junctions
 # to this checkout and to runtime-tests\spike, say. What Max said comes from its own log
@@ -65,22 +68,40 @@ $Interesting = "spike|recorder|\bq[1-7]\b|tap\.python|No such object|python:|Loa
                "missing arguments|obex|error\]|crash|maxdb update complete"
 $Noise = "RNBO|rnbo|j\.loader|bach|Could not load package|Error 126 loading external"
 
-function Write-QuitPatcher([int]$Seconds) {
-    $path = Join-Path $Logs "spike-quit-$Seconds.maxpat"
-    $ms = $Seconds * 1000
-    $json = @"
-{ "patcher": { "fileversion": 1, "appversion": { "major": 9, "minor": 1, "revision": 5, "architecture": "x64", "modernui": 1 },
-  "classnamespace": "box", "rect": [ 900.0, 600.0, 320.0, 160.0 ],
-  "boxes": [
-    { "box": { "id": "obj-1", "maxclass": "comment", "text": "spike: quits Max after $Seconds s (run_spike_windows.ps1)", "numinlets": 1, "numoutlets": 0, "patching_rect": [ 20.0, 10.0, 280.0, 20.0 ] } },
-    { "box": { "id": "obj-2", "maxclass": "newobj", "text": "loadbang", "numinlets": 1, "numoutlets": 1, "outlettype": [ "bang" ], "patching_rect": [ 20.0, 40.0, 60.0, 22.0 ] } },
-    { "box": { "id": "obj-3", "maxclass": "newobj", "text": "delay $ms", "numinlets": 2, "numoutlets": 1, "outlettype": [ "bang" ], "patching_rect": [ 20.0, 70.0, 90.0, 22.0 ] } },
-    { "box": { "id": "obj-4", "maxclass": "message", "text": "; max clean; max quit", "numinlets": 2, "numoutlets": 1, "outlettype": [ "" ], "patching_rect": [ 20.0, 100.0, 150.0, 22.0 ] } }
-  ],
-  "lines": [ { "patchline": { "source": [ "obj-2", 0 ], "destination": [ "obj-3", 0 ] } },
-             { "patchline": { "source": [ "obj-3", 0 ], "destination": [ "obj-4", 0 ] } } ] } }
-"@
-    Set-Content -Path $path -Value $json -Encoding ASCII
+$Settle = 15  # seconds for Max to finish starting up before the patcher under test opens
+
+# The starter: waits $Settle seconds, opens each patcher by name in turn, giving each $Seconds, and
+# then has Max quit. It holds no tap.python, so for q1 the Max stays fresh until the patcher opens.
+function Write-StarterPatcher([string]$Name, [string[]]$Which, [int]$Seconds) {
+    $steps = @()
+    $at = $Settle
+    foreach ($patcher in $Which) {
+        $steps += , @($at, "; max openfile spike$($steps.Count) tap.python.spike-$patcher.maxpat")
+        $at += $Seconds
+    }
+    if (-not $Which.Count) { $at += $Seconds }
+    $steps += , @($at, '; max clean; max quit')
+
+    $boxes = @(@{ box = [ordered]@{ id = 'obj-0'; maxclass = 'newobj'; text = 'loadbang'; numinlets = 1; numoutlets = 1
+                                     outlettype = @('bang'); patching_rect = @(20.0, 20.0, 60.0, 22.0) } })
+    $lines = @()
+    $n = 1
+    foreach ($step in $steps) {
+        $y = 20.0 + 30.0 * $n
+        $boxes += @{ box = [ordered]@{ id = "obj-d$n"; maxclass = 'newobj'; text = "delay $($step[0] * 1000)"; numinlets = 2
+                                       numoutlets = 1; outlettype = @('bang'); patching_rect = @(20.0, $y, 90.0, 22.0) } }
+        $boxes += @{ box = [ordered]@{ id = "obj-m$n"; maxclass = 'message'; text = $step[1]; numinlets = 2; numoutlets = 1
+                                       outlettype = @(''); patching_rect = @(130.0, $y, 420.0, 22.0) } }
+        $lines += @{ patchline = @{ source = @('obj-0', 0); destination = @("obj-d$n", 0) } }
+        $lines += @{ patchline = @{ source = @("obj-d$n", 0); destination = @("obj-m$n", 0) } }
+        $n++
+    }
+    $patcher = @{ patcher = [ordered]@{
+        fileversion = 1; classnamespace = 'box'; rect = @(900.0, 500.0, 580.0, 300.0)
+        appversion = [ordered]@{ major = 9; minor = 1; revision = 5; architecture = 'x64'; modernui = 1 }
+        boxes = $boxes; lines = $lines } }
+    $path = Join-Path $Logs "spike-windows-start-$Name.maxpat"
+    [System.IO.File]::WriteAllText($path, ($patcher | ConvertTo-Json -Depth 10))
     return $path
 }
 
@@ -147,16 +168,14 @@ function Invoke-Session([string]$Name, [string[]]$Which, [int]$Seconds) {
     if ($Name -eq 'q7') { $copied = Install-Q7 }
     try {
         Clear-CrashRecovery
-        $arguments = @()
         foreach ($patcher in $Which) {
-            $path = Join-Path $Patchers "tap.python.spike-$patcher.maxpat"
-            Write-Host "  opening $(Split-Path $path -Leaf)"
-            $arguments += "`"$path`""
+            if (-not (Test-Path (Join-Path $Patchers "tap.python.spike-$patcher.maxpat"))) { throw "no patcher $patcher" }
+            Write-Host "  opening tap.python.spike-$patcher.maxpat"
         }
-        $arguments += "`"$(Write-QuitPatcher $Seconds)`""
+        $starter = Write-StarterPatcher $Name $Which $Seconds
         $started = Get-Date
-        $process = Start-Process $Max -ArgumentList $arguments -PassThru
-        $deadline = $started.AddSeconds($Seconds + 180)
+        $process = Start-Process $Max -ArgumentList "`"$starter`"" -PassThru
+        $deadline = $started.AddSeconds($Settle + $Seconds * [Math]::Max(1, $Which.Count) + 180)
         while (-not $process.HasExited -and (Get-Date) -lt $deadline) {
             Start-Sleep -Seconds 2
             if ($Name -eq 'q7' -and (Test-Path $MaxLog) -and
