@@ -413,7 +413,13 @@ third was Windows-only.
   out of the glue test's sanitizer build: min calls a member before constructing the object, on
   purpose. Verified in Max 9.1.5 on the Mac with a scratch patcher, not committed — `tap.python`
   through `init/`, euclid's list, `getsteps` from the dumpout, note_name's two outlets, default's
-  bang, scale through numpy — and every `tap.python~` runtime test; Windows in Max comes at 9.6.)*
+  bang, scale through numpy — and every `tap.python~` runtime test. And on Windows 11 (the
+  Parallels VM, MSVC), the glue test passing and the same checks in Max 9.1.5 read from its log:
+  `tap.python` through `init/`, euclid's list and `steps 5` from the dumpout, note_name's `4` and
+  then `symbol C` — right to left, which the mock cannot show — default's `1.`, scale's `2. 4. 6.`,
+  and Max's `doesn't understand "nonesuch"` from the forwarder. The Windows glue test found the one
+  fault: its console checks redirected `std::cout`, which a DLL's kernel does not share; the test
+  now stubs `object_post`/`object_warn`/`object_error` to hear them.)*
 - [ ] **9.4 Documentation, in Max's own system and the ReadMe.** The ReadMe section, the output
   table and the limits; CLAUDE.md. For the Documentation window: `docs/tap.python.maxref.xml` by
   hand, with see-also links between the two pages; a vignette, *Writing Max objects in Python* —
