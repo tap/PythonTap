@@ -809,21 +809,28 @@ row shipped what only a host platform could show.
   (depth-aware for string hints), `outlet_count()`, `call_with_output()`; the `bind_audio` option,
   gating the tuple rule; a last parameter hinted `list[…]` or `np.ndarray` taking the remaining
   atoms (both objects; the old behavior pinned first, the change recorded); announce-once per
-  (file, kind); the `Loaded` line per binding. `test_output.cpp`. `tap.python~` unchanged and green.
+  (file, kind); the `Loaded` line per binding. `test_output.cpp`, the output table over its edges, the
+  new examples on known inputs, and a bench row for a message call. `tap.python~` unchanged and green.
 - [ ] **9.2 The shared glue:** the attribute, message, trampoline, file-watcher and package headers
   as `python_glue<Host>`; `reserved_messages()` parameterized by the audio names. A pure move.
 - [ ] **9.3 The object:** `tap.python.h` in the project, a plain SDK class registered by the
   project's `ext_main` — ports with the dumpout and the object's lock, the output mapping, the
   `anything` forwarder, dynamic outlets on reload, the guard, the Scheduler-in-Audio-Interrupt
   notice; `init/tap.python.txt`; the glue test with faithful stubs; the examples (`euclid.py`,
-  `scale.py`, `note_name.py`, `default.py`'s `bang`); packaging; CHANGELOG 1.1.0 started.
-- [ ] **9.4 Documentation:** the ReadMe section, output table and limits, CLAUDE.md, the help
-  patcher, `docs/tap.python.maxref.xml` by hand (a plain SDK class has no min generator).
+  `scale.py`, `note_name.py`, `default.py`'s `bang`); packaging; `linux-max-glue` gains sanitizer
+  rows for the lock and the reload race; CHANGELOG 1.1.0 started.
+- [ ] **9.4 Documentation, in Max's own system and the ReadMe:** the ReadMe section, output
+  table and limits, CLAUDE.md; `docs/tap.python.maxref.xml` by hand (a plain SDK class has no min
+  generator); a vignette and three tutorials with patchers for the Documentation window; an
+  Extras overview named as the landing patcher; help patchers with tabs for both objects; CI
+  checks for the hand-made XML and JSON.
 - [ ] **9.5 Runtime tests:** the `tap.python.*` patchers in `make_patchers.py`; `run.py` aware of
-  the second object.
+  the second object; the soak session gains a `metro`-driven `tap.python` under saves.
 - [ ] **9.6 The release session, Mac and Windows:** the whole suite on the Mac, the help patcher
   checked and re-saved, Max's page for `tap.python~` committed, the hand checks; the package by
   hand on Windows; then tag `v1.1.0`.
+- [ ] **9.7 The book:** after 1.1.0, the family's mdBook under `book/`, published by CI, with the
+  examples and performance tables pulled from what ships; the ReadMe becomes the front door.
 
 ## Sequencing (one PR each)
 
@@ -843,7 +850,8 @@ row shipped what only a host platform could show.
 12. Phase 9 — `tap.python`: 9.0 (the spike in Max, on a Mac and on Windows, first), then 9.1
     (the core, no Max change), 9.2 (the shared glue, a pure move), 9.3 (the object), 9.4 and 9.5
     (docs and runtime tests, independent of each other), then the release session 9.6 on both
-    platforms and `v1.1.0`. 8.8 ran on 2026-10-07; its two by-hand items can ride along with 9.6.
+    platforms and `v1.1.0`; then 9.7, the book. 8.8 ran on 2026-10-07; its two by-hand items can
+    ride along with 9.6.
 
 ## External prerequisites
 
