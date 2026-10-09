@@ -37,6 +37,7 @@ add_executable(tap_python_core_tests
     test_channels.cpp
     test_worker.cpp
     test_console.cpp
+    test_output.cpp
 )
 target_link_libraries(tap_python_core_tests PRIVATE tap::python Python3::Python Catch2::Catch2WithMain)
 
