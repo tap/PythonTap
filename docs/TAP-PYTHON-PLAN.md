@@ -8,7 +8,7 @@ change — and the plan to build it (Phase 9 of the production plan, which point
 Drafted 2026-10-02 against 1.0.0 and audited the same day (`AUDIT-TAP-PYTHON-PLAN.md`: two
 blockers, six major findings, nine minor; its addendum of 2026-10-09 records what 1.0.1 and 1.0.2
 changed). **Revised 2026-10-09 against 1.0.2** for every finding; the [revision record](#revision-record)
-at the end says what each changed. 9.0 to 9.5 are built — the spike ran in Max on a Mac
+at the end says what each changed. 9.0 to 9.6 are done, and 2.0.0 released — the spike ran in Max on a Mac
 and on Windows: its answers are under [9.0](#what-90-found), and the design below follows them. Tick the
 items below (with the PR) as they land, and keep the design current where a PR decides differently.
 
@@ -371,7 +371,7 @@ third was Windows-only.
   examples on known inputs. A `core/bench` row for a message call with a list of 64 atoms, written
   by `scripts/update-perf-docs.py` with the others, so the ReadMe's performance sentence is
   measured. *(9.1: the row and the script's sentence are in; the ReadMe's table is regenerated on
-  the next measurement on an idle machine, 9.6 at the latest — on 2026-10-09, with macOS's indexing
+  the next measurement on an idle machine — not in 9.6 after all, whose Mac was busy: after 2.0.0 — on 2026-10-09, with macOS's indexing
   running, a message with 64 numbers in and out measured 5.6 µs for the bridge alone and 15 µs for
   `scale.py`, and `main` and the branch measured alike back to back.)* No Max code changes; `tap.python~`'s battery and glue test unchanged and green; the
   audio bench numbers unchanged (the audio path does not touch the new code).
@@ -474,12 +474,21 @@ third was Windows-only.
   passed all 18 of its checks, the `tap.python` answering every message of a 10 ms metro correctly
   for 60 minutes of saves: Max's memory 658 MB a minute in, 663 MB at the end (peak 675), 3601
   executions of the file, Python's object count between 18,700 and 22,000 throughout.)*
-- [ ] **9.6 The release session, Mac and Windows.** Build, run the whole runtime suite on the Mac,
+- [x] **9.6 The release session, Mac and Windows** (#51). Build, run the whole runtime suite on the Mac,
   check the help patcher and re-save it, commit the page Max writes for `tap.python~`, the hand
   checks the tests cannot make (`get<attr>` through the dumpout in a patcher, attrui on a
   `tap.python`, a `tap.python~` and a `tap.python` on one file saved while audio runs); on
   Windows, the package by hand: both objects load through the mapping, attributes and messages
-  work, a reload keeps them. Then tag `v2.0.0`.
+  work, a reload keeps them. Then tag `v2.0.0`. *(2026-10-10, Max 9.1.5. The Mac: every runtime
+  test (21), the help files, the tutorials' patchers and the Overview saved by Max — the same boxes
+  and cords — and the hand checks: an `attrui` on a `tap.python` lists, reads and sets its class's
+  attributes, `get<attr>` comes from the dumpout; one file for both kinds saved while audio runs is
+  `tap.python.shared`'s. Windows 11: the glue test and `check-docs.py`, and in Max both objects and
+  `mc.tap.python~` through `init/`, attributes and messages, a reload keeping their values, the help
+  files open with their tabs and the see-also. The ReadMe's performance tables are not regenerated:
+  the Mac was not idle (media analysis on a core, load average 4; the same code measured 25–50%
+  slower), so Sep 30's stay, by the maintainer's decision, and the message sentence 9.1 measured
+  joins them when the Mac is next idle, after the tag. v2.0.0 is tagged on #51's merge.)*
 - [ ] **9.7 The book.** After 2.0.0, the family's shape: an mdBook under `book/` (TapHouse's icon
   rule already knows `book/book.toml` and guards `book/theme/favicon.*`), built and published by
   CI. Chapters from the ReadMe's sections — install, writing a class, audio, worker mode, control
