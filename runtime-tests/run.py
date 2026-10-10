@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright 2022-2026 Timothy Place.
-"""Run tap.python~'s runtime tests inside a real Max (plan 6.1, 6.4).
+"""Run PythonTap's runtime tests inside a real Max (plan 6.1, 6.4; tap.python's, 9.5).
 
     python3 runtime-tests/run.py                     # everything: both sessions below
     python3 runtime-tests/run.py --session main      # just the tests with the runtime installed
@@ -25,6 +25,11 @@ and quits it when done, so do not run it while Max is open. Two sessions:
                      reloads, Max's DSP CPU and Python's object count goes to logs/soak.summary.
     perf             (only when asked for) Max's own DSP CPU meter with instances of the shipped
                      examples, averaged into logs/perf.json (scripts/update-perf-docs.py --max).
+
+For the run Max's "Restore Windows on Launch" is off and its crash-recovery workspaces are moved
+aside to logs/ — a window Max reopened would load tap.python~'s binary before the first test, which
+must find tap.python through the package's init/ mapping (plan 9.0) — and its preference files are put
+back as they were afterwards. tap.python's load test is the first patcher the main session opens.
 
 It installs the harness into Packages as max-test (a copy: Max loads extensions only from a real
 folder; it stays installed), links runtime-tests/ in as PythonTap-runtime-tests for the run, and
@@ -58,8 +63,13 @@ SCRIPTS_DIR = PACKAGE / "python"
 SUPPORT = PACKAGE / "support"
 SUPPORT_ASIDE = PACKAGE / "support.maxtest-aside"
 EXTERNAL = PACKAGE / "externals" / "tap.python~.mxo"
-# The reference page min rewrites from the object's descriptions (plan 6.8)
+# The reference page min rewrites from the object's descriptions (plan 6.8); tap.python's is written
+# by hand (plan 9.4), and nothing should ever rewrite it
 REFPAGE = ROOT / "docs" / "tap.python~.maxref.xml"
+HAND_REFPAGE = ROOT / "docs" / "tap.python.maxref.xml"
+# Max finds tap.python, and mc.tap.python~, only through these lines (plans 9.0 and 9.4)
+INIT = "init/tap.python.txt"
+INIT_LINES = ["max objectfile tap.python tap.python~;", "max objectfile mc.tap.python~ mc.wrapper~ tap.python~;"]
 OSCAR = HARNESS / "extensions" / "oscar.mxo"
 
 # Must match misc/max-test-config.json: Max listens on one port and sends to the other.
@@ -70,6 +80,14 @@ HOST = "127.0.0.1"
 # The harness is installed as a copy (see install_harness); the tests are linked in.
 TEST_PACKAGE = "PythonTap-runtime-tests"
 HARNESS_STAMP = "INSTALLED-BY-PYTHONTAP.txt"
+
+# Max's own files: its preferences (put back after the run) and the workspaces it reopens at launch
+MAX9 = Path.home() / "Library" / "Application Support" / "Cycling '74" / "Max 9"
+SETTINGS = MAX9 / "Settings"
+CRASH_RECOVERY = MAX9 / "Crash Recovery"
+PREFERENCES = ["maxpreferences.maxpref", "audioprefs.txt", "Core Audio@.txt", "recentitems.txt"]
+# The first patcher the main session opens: Max must find tap.python through init/, in a fresh Max
+FIRST = "tap.python.load.maxtest.maxpat"
 
 # The without-runtime patchers are not named *.maxtest.maxpat, so that the harness's own "run
 # everything" never picks them up in a session that has a runtime.
@@ -379,6 +397,11 @@ def check_prerequisites(max_app: Path, packages: Path) -> None:
         raise RunError(f"another tap.python~ is installed, which Max could load instead: {others[0]}")
     if not (HARNESS / "source").is_dir():
         raise RunError("the max-test submodule is missing — git submodule update --init --recursive")
+    init = PACKAGE / INIT
+    said = init.read_text(encoding="utf-8").splitlines() if init.exists() else []
+    missing = [line for line in INIT_LINES if line not in said]
+    if missing:
+        raise RunError(f"{init} does not map {missing[0]!r} — Max would not find the object")
 
 
 def build_oscar() -> None:
@@ -432,6 +455,35 @@ def copy_fixtures() -> list[Path]:
         shutil.copyfile(fixture, destination)
         copied.append(destination)
     return copied
+
+
+def back_up_preferences() -> Path:
+    """Copy Max's preference files aside (restore_preferences() puts them back), then turn off
+    Restore Windows on Launch for the run, and move aside the workspaces Max would reopen at launch
+    (kept in logs/): a window reopened at launch would load the binary before the first test."""
+    backup = LOGS / "preferences-before"
+    shutil.rmtree(backup, ignore_errors=True)
+    backup.mkdir(parents=True)
+    for name in PREFERENCES:
+        if (SETTINGS / name).exists():
+            shutil.copy2(SETTINGS / name, backup / name)
+    preferences = SETTINGS / "maxpreferences.maxpref"
+    if preferences.exists():
+        document = json.loads(preferences.read_text())
+        if document.get("preferences", {}).get("restorewindows"):
+            document["preferences"]["restorewindows"] = 0
+            preferences.write_text(json.dumps(document, indent=4) + "\n")
+    aside = LOGS / "crash-recovery"
+    for workspace in CRASH_RECOVERY.glob("maxworkspace-*.txt"):
+        aside.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(workspace), str(aside / workspace.name))
+    return backup
+
+
+def restore_preferences(backup: Path) -> None:
+    for name in PREFERENCES:
+        if (backup / name).exists():
+            shutil.copy2(backup / name, SETTINGS / name)
 
 
 def restore_support() -> None:
@@ -514,13 +566,16 @@ def main() -> int:
     main_tests = sorted(p.name for p in PATCHERS.glob("*.maxtest.maxpat"))
     if args.only:
         main_tests = [t for t in main_tests if any(o in t for o in args.only)]
+    main_tests.sort(key=lambda name: name != FIRST)  # stable: the rest stay in order
 
     link: Path | None = None
     fixtures: list[Path] = []
     failures: list[str] = []
+    preferences: Path | None = None
     try:
         restore_support()  # a previous run that was killed may have left it aside
         check_prerequisites(args.max, args.packages)
+        preferences = back_up_preferences()
         build_oscar()
         install_harness(args.packages)
         link = link_test_package(args.packages)
@@ -557,12 +612,17 @@ def main() -> int:
             fixture.unlink(missing_ok=True)
         if link and not args.keep_link:
             link.unlink(missing_ok=True)
+        if preferences:
+            restore_preferences(preferences)
 
     print()
     if PACKAGE == ROOT and REFPAGE.exists() and subprocess.run(
             ["git", "-C", str(ROOT), "diff", "--quiet", "--", str(REFPAGE)]).returncode == 1:
         # min rewrites it when Max loads an external newer than it (plan 6.8)
         print(f"Max rewrote {REFPAGE.relative_to(ROOT)} from the object's descriptions: review and commit it.")
+    if PACKAGE == ROOT and HAND_REFPAGE.exists() and subprocess.run(
+            ["git", "-C", str(ROOT), "diff", "--quiet", "--", str(HAND_REFPAGE)]).returncode == 1:
+        print(f"{HAND_REFPAGE.relative_to(ROOT)} changed during the run, but it is written by hand: look at why.")
     if failures:
         print(f"{len(failures)} failure(s):")
         for failure in failures:
