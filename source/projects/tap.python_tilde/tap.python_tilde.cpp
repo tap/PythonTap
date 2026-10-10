@@ -7,15 +7,12 @@
 // The trampolines Max calls for the attributes and messages made for a Python class are
 // python_glue<python>'s (tap.python_glue.h), instantiated by the object's members.
 
-#if defined(TAP_PYTHON_SPIKE)
-// Plan 9.0, the spike (throwaway; -DTAP_PYTHON_SPIKE=ON, off by default): this binary also
-// registers a plain SDK class, tap.python, after min's (tap.python_spike.cpp).
-void tap_python_spike_register();
+// The binary registers two classes (docs/TAP-PYTHON-PLAN.md, D11): tap.python~ (min's), then
+// tap.python, a plain SDK class (tap.python.cpp), which Max finds here through the package's
+// init/tap.python.txt.
+void tap_python_register();
 
 void ext_main(void* r) {
     c74::min::wrap_as_max_external<python>("python", __FILE__, r);
-    tap_python_spike_register();
+    tap_python_register();
 }
-#else
-MIN_EXTERNAL(python);
-#endif

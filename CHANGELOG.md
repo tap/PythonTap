@@ -11,6 +11,30 @@ The release that brings `tap.python`, a Python class as a Max object without aud
 (`docs/TAP-PYTHON-PLAN.md`, Phase 9 of the production plan). Its entries are added as the phase
 lands.
 
+### Added — `tap.python`, a Python class as a Max object without audio
+
+- **`[tap.python name]`** loads `python/name.py` as `tap.python~` does — the same loader, attributes,
+  messages, hot reload, console and error guards, and the same file may serve both — and **outputs
+  what each method returns**: `None` nothing, a number or a `str` one value (a `str` as `symbol
+  <s>`), a list or a 1-D array a list, a list whose first element is a `str` the message it names,
+  and a method hinted `-> tuple[…]` of *n* members one value per outlet, right to left. The object
+  has as many outlets as the widest such hint, plus a dumpout at the right that answers
+  `get<attribute>`; a save that changes the count changes the outlets in place, keeping their patch
+  cords. `process()` and `prepare()` are ordinary messages there. A method named `anything` answers
+  every message the class has no method for, with the selector first. It lives in `tap.python~`'s
+  binary, and Max finds it through the package's `init/tap.python.txt` (plan 9.3).
+- **Messages run on the thread they arrive on**, as an ordinary Max object's do. With Scheduler in
+  Audio Interrupt on that is the audio thread, which the object says once per session.
+- **`default.py` has a `bang`**, which returns the gain: `[tap.python]` with no argument outputs it.
+  In `tap.python~` a `bang` now calls that method, its result dropped there as every method's is.
+
+### Fixed
+
+- **`tap.python~`: an attribute set or read on the scheduler thread while the class reloaded**
+  raced the reload's changes to the object's list of attributes, read on one thread while written
+  on the other. The list now has a lock of its own. Found while building `tap.python`, which looks
+  names up on any thread by design; never seen in Max.
+
 ### Changed — a last parameter hinted `list[…]` or `np.ndarray` takes the remaining atoms
 
 - **A message's last parameter hinted `list[float]`, `list[int]`, `list[str]`, `list` or

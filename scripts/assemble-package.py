@@ -56,6 +56,14 @@ DOCUMENTS = ["ReadMe.md", "License.md", "CHANGELOG.md", "icon.png", "package-inf
 # tap.python~, which registers both classes (docs/TAP-PYTHON-PLAN.md, D11; plan 9.0)
 FOLDERS = ["help", "docs", "python", "init"]
 
+# What a package must hold, checked once it is assembled or merged, so that a release cannot lack
+# it: above all init/tap.python.txt, the mapping without which Max does not find tap.python in
+# tap.python~'s binary ("tap.python: No such object", plan 9.0) — with the line it must say.
+REQUIRED = {
+    "init/tap.python.txt": "max objectfile tap.python tap.python~;",
+    "python/default.py": None,
+}
+
 # Never shipped from the copied folders.
 # maxtest_*.py: the runtime tests' fixtures, copied into python/ while runtime-tests/run.py runs
 # PRODUCTION-PLAN.md, *-PLAN.md, AUDIT-*.md: the development roadmap, plans and audits in docs/, beside the
@@ -233,8 +241,19 @@ def assemble(platform: str, output: Path, expected_version: str | None) -> Path:
     shutil.copytree(support, package / "support", symlinks=True, ignore=IGNORED)
 
     licenses = collect_licenses(support, package / "licenses")
+    check_complete(package)
     print(f"assembled {package} (version {version}, {len(licenses)} license files)")
     return package
+
+
+def check_complete(package: Path) -> None:
+    """Fail unless `package` holds everything REQUIRED, each saying what it must."""
+    for name, line in REQUIRED.items():
+        path = package / name
+        if not path.is_file():
+            raise AssemblyError(f"the package has no {name}")
+        if line is not None and line not in path.read_text(encoding="utf-8").splitlines():
+            raise AssemblyError(f"the package's {name} does not say {line!r}")
 
 
 def same_content(a: Path, b: Path) -> bool:
@@ -348,6 +367,7 @@ def merge_folders(packages: dict[str, Path], output: Path) -> Path:
         lines.append(f"- [{platform}]({platform}/README.md)")
     (package / "licenses" / "README.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+    check_complete(package)
     print(f"merged {package} ({', '.join(p for p in RUNTIME_PLATFORMS if p in packages)})")
     return package
 

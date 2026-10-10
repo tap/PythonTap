@@ -71,10 +71,12 @@ include_directories(
 
 set(SOURCE_FILES
     ${PROJECT_NAME}.h
+    tap.python.h
     tap.python_glue.h
     tap.python_filewatch.h
     tap.python_package.h
     ${PROJECT_NAME}.cpp
+    tap.python.cpp
 )
 
 add_library(
@@ -119,17 +121,6 @@ if (APPLE)
     set_target_properties(${PROJECT_NAME} PROPERTIES BUILD_WITH_INSTALL_RPATH ON)
 endif ()
 
-# Plan 9.0, the spike: a throwaway second Max class, tap.python — a plain SDK class registered by
-# this external's ext_main after min's — built only to answer in Max what docs/TAP-PYTHON-PLAN.md
-# needs to know before 9.1 (the patchers are in runtime-tests/spike/). Off by default and never in a
-# release; the external only (the mock-kernel test compiles tap.python_tilde.cpp without it).
-option(TAP_PYTHON_SPIKE "Build the throwaway tap.python spike class (plan 9.0) into tap.python~" OFF)
-if (TAP_PYTHON_SPIKE)
-    message(STATUS "tap.python~: with the tap.python spike (plan 9.0) — not for release")
-    target_sources(${PROJECT_NAME} PRIVATE tap.python_spike.cpp)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE TAP_PYTHON_SPIKE)
-endif ()
-
 include(${C74_MIN_API_DIR}/script/min-posttarget.cmake)
 # (C++20 is forced on this target and its test by the root CMakeLists.txt.)
 
@@ -165,4 +156,23 @@ if (TARGET ${PROJECT_NAME}_test)
         get_filename_component(PYTHON_LIB_DIR "${PYTHON_LIB}" DIRECTORY)
         target_link_options(${PROJECT_NAME}_test PRIVATE "-Wl,-rpath,${PYTHON_LIB_DIR}")
     endif ()
+endif ()
+
+# Sanitizers for the glue test, as the core's battery has them (core/tests): tap.python's lock and
+# the race between a reload and a message on another thread live here (plan 9.3), so linux-max-glue
+# runs it under ASan/UBSan and TSan too. The external itself is not instrumented. The interpreter is
+# leaked at exit on purpose, so LeakSanitizer stays off.
+set(TAP_PYTHON_SANITIZE "" CACHE STRING
+    "Sanitizers for the glue test, e.g. 'address,undefined' or 'thread' (GCC/Clang)")
+if (TAP_PYTHON_SANITIZE AND TARGET ${PROJECT_NAME}_test)
+    set(_sanitize -fsanitize=${TAP_PYTHON_SANITIZE})
+    if (TAP_PYTHON_SANITIZE MATCHES "undefined")
+        # min's wrapper_new() calls a member of the object before constructing it, on purpose ("maxobj
+        # needs to be set prior to placement new", c74_min_object_wrapper.h), which the vptr check
+        # stops at in every test; the rest of UBSan stays on
+        list(APPEND _sanitize -fno-sanitize=vptr)
+    endif ()
+    target_compile_options(${PROJECT_NAME}_test PRIVATE ${_sanitize} -fno-omit-frame-pointer)
+    target_link_options(${PROJECT_NAME}_test PRIVATE ${_sanitize})
+    set_tests_properties(${PROJECT_NAME}_test PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
 endif ()

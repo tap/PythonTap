@@ -8,7 +8,7 @@ change — and the plan to build it (Phase 9 of the production plan, which point
 Drafted 2026-10-02 against 1.0.0 and audited the same day (`AUDIT-TAP-PYTHON-PLAN.md`: two
 blockers, six major findings, nine minor; its addendum of 2026-10-09 records what 1.0.1 and 1.0.2
 changed). **Revised 2026-10-09 against 1.0.2** for every finding; the [revision record](#revision-record)
-at the end says what each changed. Nothing is built yet, but the 9.0 spike has run in Max on a Mac
+at the end says what each changed. 9.0 to 9.3 are built — the spike ran in Max on a Mac
 and on Windows: its answers are under [9.0](#what-90-found), and the design below follows them. Tick the
 items below (with the PR) as they land, and keep the design current where a PR decides differently.
 
@@ -218,9 +218,10 @@ registered by the project's own `ext_main` in `tap.python_tilde.cpp` after min's
 - **The class.** `class_new("tap.python", new, free, sizeof(tap_python), nullptr, A_GIMME, 0)`,
   `assist` (`A_CANT`), `filechanged` (typed, as the watcher sends it), the standard messages the
   class's Python methods take through `python_message`, and a class-level `anything` forwarder;
-  `class_register(CLASS_BOX, c)`. The struct holds the `t_object`, the processor (`bind_audio`
-  off), the outlet pointers, the dumpout, the lock, the file watch and the attribute and message
-  maps — the same members as the min object, through the shared glue.
+  `class_register(CLASS_BOX, c)`. The struct holds the `t_object`, the obex and a pointer to the
+  object itself (`control_object`, as built), which holds the processor (`bind_audio` off), the
+  outlet pointers, the dumpout, the lock, the file watch and the attribute and message maps — the
+  same members as the min object, through the shared glue.
 - **How Max finds it.** The package's `init/tap.python.txt` maps the object name to the file:
   `max objectfile tap.python tap.python~;` — the mapping Max's own `init/` text files use for
   objects that live in a file of another name. *Verified by 9.0 on a Mac and on Windows:* a fresh
@@ -274,9 +275,10 @@ registered by the project's own `ext_main` in `tap.python_tilde.cpp` after min's
   no such generator, so `docs/tap.python.maxref.xml` is written by hand from the same source of
   truth, the contract above, and kept in step by review (CLAUDE.md's "never hand-edit" is about
   the page min generates). The help patcher is by hand in Max, as 5.2 was.
-- **Glue test** (mock kernel, with the stubs made faithful — audit m5): `outlet_nth` returning the
-  mock's real outlet ids, `object_obex_store`/`object_obex_dumpout` and `outlet_insert_after`
-  stubbed and recorded, and the class's `dumpout` method asserted registered (9.0). `[tap.python euclid]` (made through the class's own `new`, as Max would)
+- **Glue test** (mock kernel, with the stubs made faithful — audit m5): `object_obex_store`/
+  `object_obex_dumpout`, `outlet_insert_after` and the box's dynlets stubbed and recorded (the
+  object holds its outlet pointers and never asks `outlet_nth`, as built), and the class's
+  `dumpout` method asserted registered (9.0). `[tap.python euclid]` (made through the class's own `new`, as Max would)
   has one inlet, two outlets (one plus dumpout); a bang's list is in `object_getoutput(x, 0)`; a
   `note_name` int fills outlet 1 then outlet 0; `getsteps` reaches the dumpout; a `tuple[…]` save
   that widens the class records the dynlet calls; the forwarder's order with a class that has
@@ -385,7 +387,7 @@ third was Windows-only.
   pins what an audio object reserves beyond every object's; every runtime test passes in Max 9.1.5.
   For 9.3: `reserved_messages(false)` still has 8.2's `anything`, which `tap.python`, exposing a
   class's `anything`, takes out — and adds `dumpout`.)*
-- [ ] **9.3 The object.** `tap.python.h` and its TU in the project, registered by the project's
+- [x] **9.3 The object** (#48). `tap.python.h` and its TU in the project, registered by the project's
   `ext_main` (replacing the 9.0 spike's TU and its CMake option); ports with the dumpout, its
   `dumpout` method and the lock; output mapping (a `str` as `symbol <s>`); the `anything` forwarder
   with its class-level `int`, `float`, `bang` and `list` (9.0); dynamic outlets on reload; the
@@ -396,7 +398,28 @@ third was Windows-only.
   glue, which CI builds without sanitizers today; the examples (`euclid.py`, `scale.py`,
   `note_name.py`, `default.py`'s `bang`); `package-info.json.in`, and a CI check that the assembled
   package lists `init/tap.python.txt` (9.0 made `assemble-package.py` ship `init/`); CHANGELOG
-  2.0.0 started.
+  2.0.0 started. *(As built: `t_tap_python`, what Max allocates, holds the `t_object`, the obex and
+  a pointer to `control_object`, which holds the rest — the outlets, the lock, the processor, the
+  members. The object keeps its outlet pointers and never asks `outlet_nth`, so the stubs made
+  faithful are `object_obex_store`/`object_obex_dumpout`, `outlet_insert_after` (the mock kernel
+  cannot insert: the new outlet is made by its `outlet_new`, and the call recorded) and the box's
+  `dynlet_begin`/`dynlet_end` (through `object_method_imp`, which the SDK's `object_method` is on
+  64-bit); `tap.python~`'s `outlet_nth` stub is unchanged. The audio-thread notice is driven
+  through the kernel's `systhread_isaudiothread`, stubbed as the mock lacks it, rather than an
+  injected predicate, and posted by a qelem. The mock keeps no order across outlets, so
+  note_name's "outlet 1 then outlet 0" is the code's and 9.5's to show in Max (through `trigger`).
+  The glue's attribute and message maps took a lock of their own (a latent race in `tap.python~`
+  too, in the CHANGELOG), and its includes put CPython first again. UBSan's `vptr` check is left
+  out of the glue test's sanitizer build: min calls a member before constructing the object, on
+  purpose. Verified in Max 9.1.5 on the Mac with a scratch patcher, not committed — `tap.python`
+  through `init/`, euclid's list, `getsteps` from the dumpout, note_name's two outlets, default's
+  bang, scale through numpy — and every `tap.python~` runtime test. And on Windows 11 (the
+  Parallels VM, MSVC), the glue test passing and the same checks in Max 9.1.5 read from its log:
+  `tap.python` through `init/`, euclid's list and `steps 5` from the dumpout, note_name's `4` and
+  then `symbol C` — right to left, which the mock cannot show — default's `1.`, scale's `2. 4. 6.`,
+  and Max's `doesn't understand "nonesuch"` from the forwarder. The Windows glue test found the one
+  fault: its console checks redirected `std::cout`, which a DLL's kernel does not share; the test
+  now stubs `object_post`/`object_warn`/`object_error` to hear them.)*
 - [ ] **9.4 Documentation, in Max's own system and the ReadMe.** The ReadMe section, the output
   table and the limits; CLAUDE.md. For the Documentation window: `docs/tap.python.maxref.xml` by
   hand, with see-also links between the two pages; a vignette, *Writing Max objects in Python* —

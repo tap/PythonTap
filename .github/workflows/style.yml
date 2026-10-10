@@ -75,6 +75,7 @@ jobs:
             fi
           }
           check "$d/tap.python_tilde.cpp" -- -std=c++20 $inc -DC74_MIN_API
+          check "$d/tap.python.cpp" -- -std=c++20 $inc -DC74_MIN_API
           check "$d/tap.python_tilde_test.cpp" -- -std=c++20 $inc -DC74_MIN_API -DMIN_TEST -Isource/min-api/test -DCATCH_CONFIG_NO_CPP17_UNCAUGHT_EXCEPTIONS
           for f in core/tests/*.cpp core/bench/*.cpp; do
             check "$f" -p build-core
