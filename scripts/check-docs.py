@@ -32,6 +32,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
 BOOK = ROOT / "book" / "src"
+# Rendered by scripts/notebook-to-book.py at build time, so absent from a fresh checkout; CI's book
+# job renders it and builds the book with warnings as errors.
+GENERATED = {BOOK / "notebook.md"}
 
 problems: list[str] = []
 
@@ -152,6 +155,8 @@ def check_links(path: Path) -> None:
             continue
         file, _, heading = target.partition("#")
         destination = (path.parent / file) if file else path
+        if destination in GENERATED:
+            continue
         if not destination.exists():
             problem(path, f"links to {target}, which does not exist")
         elif heading and destination.suffix == ".md" and heading not in anchors(destination):
@@ -161,13 +166,12 @@ def check_links(path: Path) -> None:
 def check_book() -> None:
     summary = (BOOK / "SUMMARY.md").read_text(encoding="utf-8")
     listed = set(re.findall(r"\]\(([^)]+\.md)\)", summary))
-    generated = {"notebook.md"}  # rendered by scripts/notebook-to-book.py; CI's book job checks it
     for path in sorted(BOOK.glob("*.md")):
-        if path.name != "SUMMARY.md" and path.name not in listed:
+        if path.name != "SUMMARY.md" and path.name not in listed and path not in GENERATED:
             problem(path, "is not in SUMMARY.md")
-    for name in sorted(listed - {p.name for p in BOOK.glob("*.md")} - generated):
+    for name in sorted(listed - {p.name for p in BOOK.glob("*.md")} - {p.name for p in GENERATED}):
         problem(BOOK / "SUMMARY.md", f"lists {name}, which does not exist")
-    for path in sorted(BOOK.glob("*.md")):
+    for path in sorted(set(BOOK.glob("*.md")) - GENERATED):
         for include in re.findall(r"\{\{#include ([^}:\s]+)", path.read_text(encoding="utf-8")):
             if not (path.parent / include).exists():
                 problem(path, f"includes {include}, which does not exist")
