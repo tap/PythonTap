@@ -28,8 +28,20 @@ lands.
 - **`default.py` has a `bang`**, which returns the gain: `[tap.python]` with no argument outputs it.
   In `tap.python~` a `bang` now calls that method, its result dropped there as every method's is.
 
+- **Documentation in Max's own system** (plan 9.4): a reference page for `tap.python`, a guide —
+  *Writing Max Objects in Python* — and three tutorials with their patchers in the Documentation
+  window (Package Docs › PythonTap), the help patchers of both objects in tabs, and a *PythonTap
+  Overview* in the Extras menu, which is also the package's home patcher.
+
 ### Fixed
 
+- **`mc.tap.python~` was "No such object".** Max wraps an external in `mc.` through a mapping in
+  an `init/` file, as its own `init/` maps `mc.cycle~`; the package had none, so the ReadMe's "wrap
+  the object in `mc.`" did not work. `init/tap.python.txt` now maps `mc.tap.python~` to Max's MC
+  wrapper around `tap.python~` (found writing the help patcher's `mc.` tab). The wrapper passes a
+  class's attributes and messages to its instances through `setvalue` and `applyvalues`; a plain
+  message to every instance is not understood, as each instance's are its own. Pinned by a runtime
+  test in Max.
 - **`tap.python~`: an attribute set or read on the scheduler thread while the class reloaded**
   raced the reload's changes to the object's list of attributes, read on one thread while written
   on the other. The list now has a lock of its own. Found while building `tap.python`, which looks

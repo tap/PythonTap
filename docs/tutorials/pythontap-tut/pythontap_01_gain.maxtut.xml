@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?xml-stylesheet href="./_c74_tut.xsl" type="text/xsl"?>
+<chapter name="PythonTap Tutorial 1: A Gain, per Sample and per Vector">
+	<openfile name="PythonTap Tutorial 1" patch="pythontap_01_gain.maxpat"/>
+	<next name="pythontap_02_filter"/>
+
+	<header>PythonTap Tutorial 1: A Gain, per Sample and per Vector</header>
+
+	<subhead>A Python class as an audio object</subhead>
+	<body>
+		<o>tap.python~</o> runs a Python class as an audio object. The class lives in a file in the
+		PythonTap package's python folder; the object loads it, makes attributes of its typed fields and
+		messages of its methods, and calls its <m>process()</m> method on the signal. In this tutorial a
+		gain — the smallest audio object there is — is written two ways, and then you write your own.
+	</body>
+	<body><openpatchlink>Open the tutorial patcher</openpatchlink>, and turn on the audio with the speaker.</body>
+
+	<subhead>The class</subhead>
+	<body>
+		The left object, <m>[tap.python~ default]</m>, loads python/default.py and makes an object of the
+		class default in it — the file, the class and the argument share one name. Here is the part that
+		matters (open the file in any text editor to see the rest):
+	</body>
+	<code>from attrs import define, field
+
+@define
+class default:
+    gain: float = field(default = 1.0)
+
+    def process(self, x: float) -> float:
+        return x * self.gain</code>
+	<body>
+		The field <m>gain</m>, annotated <m>float</m>, is an attribute of the object: the <o>attrui</o>
+		above it sets it, and so would the message <m>gain 0.5</m> or <at>gain</at> 0.5 typed into the
+		object box. Its public methods are messages: <m>float 0.5</m> calls the class's method named
+		float, and <m>greet max</m> prints a line to the Max console.
+	</body>
+
+	<subhead>Once per sample</subhead>
+	<body>
+		<m>process()</m> is hinted to take a float and return one, so the object calls it once per
+		sample. That is the simplest way to write audio code, and the call itself is cheap — but every
+		line of Python in it runs tens of thousands of times a second.
+	</body>
+
+	<subhead>Once per vector</subhead>
+	<body>
+		The right object loads numpy_gain.py, the same gain written with numpy:
+	</body>
+	<code>    def process(self, x: np.ndarray) -> np.ndarray:
+        return x * self.gain</code>
+	<body>
+		Hinted with numpy arrays, <m>process()</m> is called once per signal vector, with the whole vector,
+		and numpy multiplies it at C speed. Switch between the two with the message boxes and watch the
+		CPU meter: for a gain the difference is small, but for anything with real work in it the vector
+		form is the one that keeps up.
+	</body>
+
+	<subhead>Your own</subhead>
+	<body>
+		Save a copy of default.py in the python folder as mygain.py, rename the class inside to mygain,
+		and type <m>tap.python~ mygain</m> into a new object box. Then change <m>process()</m> to soften
+		the peaks — <m>return math.tanh(x * self.gain)</m>, with <m>import math</m> at the top — and save:
+		the object loads the file again, keeping gain's value, and the audio carries on with the new code.
+		A mistake prints its traceback to the Max console, and the object outputs silence until a save
+		fixes it.
+	</body>
+
+	<subhead>Summary</subhead>
+	<body>
+		A class's typed fields are attributes, its methods messages, and its <m>process()</m> method runs
+		on the signal: once per sample when hinted with floats, once per vector when hinted with numpy
+		arrays. Saving the file reloads it in place.
+	</body>
+
+	<seealsolist>
+		<seealso name="tap.python~"/>
+		<seealso name="attrui"/>
+		<seealso name="adstatus"/>
+	</seealsolist>
+</chapter>

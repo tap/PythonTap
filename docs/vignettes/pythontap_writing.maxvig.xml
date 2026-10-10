@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?xml-stylesheet href="_c74_vig.xsl" type="text/xsl"?>
+<vignette name="Writing Max Objects in Python" package="PythonTap">
+	<metadatalist>
+		<metadata name="author">Tim Place</metadata>
+		<metadata name="tag">PythonTap</metadata>
+		<metadata name="tag">Python</metadata>
+		<metadata name="tag">Languages</metadata>
+	</metadatalist>
+
+	<h1>Writing Max Objects in Python</h1>
+
+	<p>
+		PythonTap runs a Python class as a Max object. You write the class in a file; the object loads
+		it, makes Max attributes of its fields and Max messages of its methods, and loads it again every
+		time you save the file. There are two objects:
+	</p>
+	<ul>
+		<li><o>tap.python~</o> runs the class as an audio object: its <m>process()</m> method runs on the signal.</li>
+		<li><o>tap.python</o> runs it as an ordinary object, without audio: what a method returns is what the object outputs.</li>
+	</ul>
+	<p>
+		Both come with CPython 3.13, numpy and attrs, and share one interpreter: Python's own modules,
+		anything you install into the package's runtime, and your own helper modules are there for every
+		class. This guide is the short form; the package's <a href="https://github.com/tap/PythonTap#readme">ReadMe</a>
+		says every rule in full, and the tutorials build three objects step by step.
+	</p>
+
+	<h2>The class and its file</h2>
+	<p>
+		Classes live in the package's python folder. <m>[tap.python~ name]</m> or <m>[tap.python name]</m> loads
+		python/name.py and instantiates the class name in it: the file, the class and the argument share
+		one name, which must be a valid Python identifier. Without an argument, python/default.py is
+		loaded. Open the file in any text editor; other files in the folder can be imported by the class
+		as helper modules.
+	</p>
+	<code>from attrs import define, field
+
+@define
+class default:
+    gain: float = field(default = 1.0)
+
+    def greet(self, name: str) -> None:
+        print(f"hello {name}, from python!")
+
+    def process(self, x: float) -> float:
+        return x * self.gain</code>
+
+	<h2>Fields are attributes, methods are messages</h2>
+	<ul>
+		<li>
+			<b>Attributes.</b> Each public field with a type annotation is a Max attribute: an int a long,
+			a float a float64, a bool an on/off toggle, anything else a symbol. Set it in the object box
+			(<at>gain</at> 0.5), by message (<m>gain 0.5</m>), with <o>attrui</o> or <o>getattr</o>.
+		</li>
+		<li>
+			<b>Messages.</b> Each public method is a message, called according to its signature: its type
+			hints convert the message's arguments, parameters with defaults are optional, and
+			<m>*args</m> takes any number. Methods named <m>int</m>, <m>float</m>, <m>symbol</m>,
+			<m>bang</m> and <m>list</m> answer those standard messages, and a last parameter hinted
+			list[float] or np.ndarray takes all the arguments left, as one list or array.
+		</li>
+		<li>
+			<b>Names Max keeps.</b> A few names belong to Max or the object (<m>dsp64</m>, <m>assist</m>,
+			<m>notify</m>, <m>filechanged</m>, ...): a method or field of such a name is not exposed, and the
+			console says so, so that you can rename it.
+		</li>
+	</ul>
+
+	<h2>Audio: tap.python~</h2>
+	<p>
+		A method named <m>process</m> runs on the signal, in one of two forms chosen by its type hints:
+		<m>process(self, x: float) -&gt; float</m> is called once per sample — simplest to write, but
+		every line of Python in it runs tens of thousands of times a second — and
+		<m>process(self, x: np.ndarray) -&gt; np.ndarray</m> once per signal vector, where numpy works on
+		the whole vector at C speed: the form for anything with real work in it. Its parameters are the
+		object's signal inlets and its return hint its outlets (tuple[np.ndarray, np.ndarray] for two), and
+		an optional <m>prepare(self, sample_rate: float, vector_size: int)</m> is told Max's audio
+		settings before the audio starts and whenever they change. Wrap the object in mc. to run one
+		instance per channel.
+	</p>
+	<p>
+		By default <m>process()</m> runs on the audio thread, so anything else holding Python's
+		interpreter — a reload, a message, another instance — holds the audio up meanwhile. With
+		<at>mode</at> worker it runs on a thread of its own, <at>latency</at> milliseconds behind the
+		audio, and the audio thread never waits for Python.
+	</p>
+
+	<h2>Control: tap.python</h2>
+	<p>
+		<o>tap.python</o> outputs what a method returns, before the message returns: nothing for None, a
+		number for a number, <m>symbol</m> and the string for a str, a list for a list or a numpy array —
+		or the message a list names, when its first element is a str — and, from a method hinted
+		<m>-&gt; tuple[str, int]</m>, one value per outlet, right to left. The object has as many outlets
+		as its widest such hint, and a dumpout at the right that answers <m>get</m> followed by an
+		attribute's name. A method named <m>anything</m> answers every message the class has no method
+		for, with the message's name first.
+	</p>
+	<code>from attrs import define, field
+
+@define
+class euclid:
+    steps: int = field(default = 8)
+    pulses: int = field(default = 3)
+
+    def bang(self) -&gt; list[int]:
+        steps = max(1, self.steps)
+        return [int((i * self.pulses) % steps &lt; self.pulses) for i in range(steps)]</code>
+	<p>
+		A message runs on the thread it arrives on, as any Max object's does: Max's main thread, or the
+		scheduler thread with Overdrive on — where a long method holds the scheduler for its duration.
+		With Scheduler in Audio Interrupt on, that is the audio thread, and the object says so once: send
+		such messages through <o>deferlow</o> to run them on the main thread instead.
+	</p>
+
+	<h2>Saving reloads</h2>
+	<p>
+		Save the file and the object loads it again, in place: the attributes and messages follow the new
+		class, attribute values carry over, and audio continues with the new code without a gap. A save
+		that changes <m>process()</m>'s inputs or outputs, or a <o>tap.python</o> class's outlets, changes
+		the object's inlets and outlets to match, keeping the patch cords of those that stay. Every object
+		using the file shares one execution of it per save, and the console says so once. Send
+		<m>filechanged</m> to reload by hand.
+	</p>
+
+	<h2>Errors and the console</h2>
+	<p>
+		<m>print()</m> writes to the Max console. An exception your code raises — in a method, an
+		attribute's validator, the constructor, or the file itself — prints its traceback there and never
+		takes Max down; <m>sys.exit()</m> included. A file that fails to load is reported once, and the
+		object outputs silence, or nothing, until a save fixes it. What no object can catch is what
+		happens below Python: a crash in a C extension, <m>os._exit()</m>, or a loop that never ends.
+	</p>
+
+	<h2>More</h2>
+	<ul>
+		<li>The tutorials: <link type="tutorial" name="pythontap_01_gain">A gain, per sample and per vector</link>, <link type="tutorial" name="pythontap_02_filter">A filter that knows the sample rate</link> and <link type="tutorial" name="pythontap_03_control">An object without audio</link>.</li>
+		<li>The help files: <openfilelink filename="tap.python~.maxhelp">tap.python~</openfilelink> and <openfilelink filename="tap.python.maxhelp">tap.python</openfilelink>.</li>
+		<li>The examples, in the package's python folder: default.py, numpy_gain.py, allpass.py and numpy_allpass.py, stereo_width.py, euclid.py, scale.py and note_name.py.</li>
+		<li>The package's <a href="https://github.com/tap/PythonTap#readme">ReadMe</a>: every rule, the performance measurements, and how to add Python packages to the runtime.</li>
+	</ul>
+
+	<seealsolist>
+		<seealso name="tap.python~" />
+		<seealso name="tap.python" />
+		<seealso name="js" />
+		<seealso name="node.script" />
+	</seealsolist>
+</vignette>

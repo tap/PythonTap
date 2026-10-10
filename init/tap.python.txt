@@ -1,1 +1,2 @@
 max objectfile tap.python tap.python~;
+max objectfile mc.tap.python~ mc.wrapper~ tap.python~;

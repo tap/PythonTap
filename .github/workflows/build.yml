@@ -136,6 +136,12 @@ jobs:
           libpython=$(python -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR') + '/' + sysconfig.get_config_var('LDLIBRARY'))")
           scripts/check-data-imports.sh externals/tap.python~.mxl_x86_64 "$libpython"
 
+      # What is written by hand, which no build makes and no test runs (plan 9.4): the reference
+      # pages, the guide and the tutorials well-formed and linked, the patchers' patch cords whole.
+      - name: Check the hand-made documentation
+        if: matrix.sanitize == ''
+        run: python scripts/check-docs.py
+
       # The release packaging's license collection (plan 4.6), against this interpreter's own
       # install, which is laid out like the macOS runtime and has the locked packages in it.
       - name: Collect the licenses a package would ship

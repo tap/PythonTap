@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?xml-stylesheet href="./_c74_tut.xsl" type="text/xsl"?>
+<chapter name="PythonTap Tutorial 3: An Object without Audio">
+	<openfile name="PythonTap Tutorial 3" patch="pythontap_03_control.maxpat"/>
+	<previous name="pythontap_02_filter"/>
+
+	<header>PythonTap Tutorial 3: An Object without Audio</header>
+
+	<subhead>What a method returns is what the object outputs</subhead>
+	<body>
+		Most Max objects are not audio objects: a bang asks for the next value, a list comes in and a list
+		goes out, a number becomes a name. <o>tap.python</o> runs a Python class as such an object. It
+		loads the class as <o>tap.python~</o> does — attributes from its typed fields, messages from its
+		methods, reloaded when saved — and adds one thing: what a method returns is what the object
+		outputs.
+	</body>
+	<body><openpatchlink>Open the tutorial patcher</openpatchlink>, and turn on the audio to hear the rhythm.</body>
+
+	<subhead>A rhythm from a bang</subhead>
+	<body>The top of the patcher loads euclid.py:</body>
+	<code>from attrs import define, field
+
+@define
+class euclid:
+    steps: int = field(default = 8)
+    pulses: int = field(default = 3)
+
+    def bang(self) -> list[int]:
+        steps = max(1, self.steps)
+        return [int((i * self.pulses) % steps &lt; self.pulses) for i in range(steps)]</code>
+	<body>
+		A bang calls <m>bang()</m>, and the list it returns — a Euclidean rhythm, steps beats with pulses
+		of them on, spread as evenly as they go — comes out of the left outlet. The <o>metro</o> bangs it
+		on every step, so a change to <at>steps</at> or <at>pulses</at> is heard at once; <o>zl.lookup</o>
+		picks the current step out of the list, and a 1 clicks.
+	</body>
+	<body>
+		The right outlet is the dumpout: <m>getsteps</m> outputs <m>steps 8</m> from it, as any Max
+		object with attributes does.
+	</body>
+
+	<subhead>Two outlets</subhead>
+	<body>The middle of the patcher loads note_name.py:</body>
+	<code>    def int(self, note: int) -> tuple[str, int]:
+        return NAMES[note % 12], note // 12 - 1</code>
+	<body>
+		The return hint, a tuple of two, gives the object two outlets, filled right to left as Max objects
+		do: the octave, then the name. Play the keyboard. The name is a str, which the object outputs as
+		<m>symbol</m> and the string — one symbol, whatever it holds — so <o>sel</o> matches it, and a
+		message box's <m>set $1</m> shows it.
+	</body>
+
+	<subhead>Lists through numpy</subhead>
+	<body>The bottom loads scale.py, whose list method takes a whole list as one numpy array:</body>
+	<code>    def list(self, values: np.ndarray) -> np.ndarray:
+        return values * self.factor + self.offset</code>
+	<body>
+		A last parameter hinted <m>np.ndarray</m> — or <m>list[float]</m> — takes every argument of the
+		message, and an array returned is output as a list.
+	</body>
+
+	<subhead>Threads</subhead>
+	<body>
+		A message runs on the thread it arrives on, as any object's does, and the method's result is output
+		before the message returns, so <o>trigger</o>, <o>metro</o> and the rest work with it as usual.
+		With Overdrive on, a <o>metro</o>'s bangs arrive on the scheduler thread, which a long method
+		holds while it runs; with Scheduler in Audio Interrupt also on, that is the audio thread, and the
+		object says so in the console. Send such messages through <o>deferlow</o> to run them on the main
+		thread.
+	</body>
+
+	<subhead>Summary</subhead>
+	<body>
+		<o>tap.python</o> outputs what a method returns: a number as a number, a str as a symbol, a list
+		or an array as a list, and the values of a method hinted <m>-> tuple[...]</m> one per outlet.
+		The ReadMe and the help file have the whole table.
+	</body>
+
+	<seealsolist>
+		<seealso name="tap.python"/>
+		<seealso name="zl.lookup"/>
+		<seealso name="sel"/>
+		<seealso name="deferlow"/>
+	</seealsolist>
+</chapter>

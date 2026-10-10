@@ -50,6 +50,20 @@ in the same binary by 9.3; its documentation (9.4) and runtime tests (9.5) are s
   (`tap.python_package.h`) and the file watcher (`tap.python_filewatch.h`). Its `_test.cpp` drives
   the Max glue of both through min-api's mock kernel, with stubs for what that kernel lacks made
   faithful to the SDK (the obex's dumpout, `outlet_insert_after`, the box's dynlets).
+- **Documentation in Max's own system** (plan 9.4) — `docs/tap.python~.maxref.xml` (min's, never by
+  hand) and `docs/tap.python.maxref.xml` (by hand: a plain SDK class has no generator); the package
+  topic in `docs/topics/`, the guide *Writing Max Objects in Python* in `docs/vignettes/`, and three
+  tutorials with their patchers in `docs/tutorials/pythontap-tut/` — the Documentation window's
+  Package Docs › PythonTap lists them under Topics, Guides and Tutorials, by those folders; the help
+  patchers `help/tap.python~.maxhelp` and `help/tap.python.maxhelp`, in tabs (`[p name]` with
+  `showontab`, and an empty `[p ?]` that Max fills); and `extras/PythonTap Overview.maxpat`, in the
+  Extras menu and the package's home patcher (`package-info.json.in`). The Documentation window
+  lists `tap.python` as a reference page, not an object — it has no file of its own, as Max's
+  `init`-mapped objects (`mc.abs~`) have not. `scripts/check-docs.py` (CI) checks them all: the XML
+  well-formed, every link resolving, every patch cord whole.
+- **`init/tap.python.txt`** — read by Max at launch: `tap.python` and `mc.tap.python~` are mapped to
+  the `tap.python~` binary (the second through Max's MC wrapper, as Max's own `init/` maps
+  `mc.cycle~`); `assemble-package.py` fails a package without both lines.
 - **`python/`** — the user's script folder in the package (and the examples: `default.py`,
   `numpy_gain.py`, `allpass.py`, `numpy_allpass.py` — the same filter per vector, checked equal
   sample for sample by the core battery — `stereo_width.py`, two inputs and two outputs, and
@@ -106,7 +120,7 @@ python3 runtime-tests/run.py
 ```
 
 CI (`build.yml`): `linux-core` and `linux-max-glue` (each release, asan-ubsan, tsan — the glue
-test's `TAP_PYTHON_SANITIZE`, as the core's), `macos` (universal + `lipo`/`otool` checks, including
+test's `TAP_PYTHON_SANITIZE`, as the core's; the release row also runs `scripts/check-docs.py`), `macos` (universal + `lipo`/`otool` checks, including
 no absolute rpath, and the package assembled, which fails without `init/tap.python.txt`), `windows`. `style.yml`: TapHouse drift check,
 clang-format, clang-tidy (a clang-tidy failure or crash fails the gate, not just a finding). Workflows
 run with `contents: read`, pin third-party actions by commit SHA (tag noted beside it), and cancel
@@ -207,7 +221,8 @@ attaches all the zips + SHA256s to a release — a pre-release for 0.x, a draft 
   (`MIN_DESCRIPTION`, argument and message descriptions — min regenerates
   `docs/tap.python~.maxref.xml` from them when Max loads an external newer than the page, so never
   hand-edit the page: rebuild, run Max once — `runtime-tests/run.py` says when the page was
-  rewritten — and commit it), `help/tap.python~.maxhelp`, the examples and their notebook
-  (committed executed), and the plan.
+  rewritten — and commit it), `docs/tap.python.maxref.xml` (by hand), the guide and tutorials in
+  `docs/`, both help patchers and the Overview — checked open in Max, not only by
+  `scripts/check-docs.py` — the examples and their notebook (committed executed), and the plan.
 - **Implement from documentation and published sources only** — the CPython C-API docs, the Max SDK
   docs — never by reverse-engineering another product.
