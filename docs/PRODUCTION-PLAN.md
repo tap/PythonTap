@@ -823,7 +823,7 @@ row shipped what only a host platform could show.
   notice; `init/tap.python.txt`; the glue test with faithful stubs; the examples (`euclid.py`,
   `scale.py`, `note_name.py`, `default.py`'s `bang`); packaging; `linux-max-glue` gains sanitizer
   rows for the lock and the reload race; CHANGELOG 2.0.0 started.
-- [ ] **9.4 Documentation, in Max's own system and the ReadMe:** the ReadMe section, output
+- [x] **9.4 Documentation, in Max's own system and the ReadMe** (#49)**:** the ReadMe section, output
   table and limits, CLAUDE.md; `docs/tap.python.maxref.xml` by hand (a plain SDK class has no min
   generator); a vignette and three tutorials with patchers for the Documentation window; an
   Extras overview named as the landing patcher; help patchers with tabs for both objects; CI

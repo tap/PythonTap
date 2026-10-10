@@ -8,7 +8,7 @@ change — and the plan to build it (Phase 9 of the production plan, which point
 Drafted 2026-10-02 against 1.0.0 and audited the same day (`AUDIT-TAP-PYTHON-PLAN.md`: two
 blockers, six major findings, nine minor; its addendum of 2026-10-09 records what 1.0.1 and 1.0.2
 changed). **Revised 2026-10-09 against 1.0.2** for every finding; the [revision record](#revision-record)
-at the end says what each changed. 9.0 to 9.3 are built — the spike ran in Max on a Mac
+at the end says what each changed. 9.0 to 9.4 are built — the spike ran in Max on a Mac
 and on Windows: its answers are under [9.0](#what-90-found), and the design below follows them. Tick the
 items below (with the PR) as they land, and keep the design current where a PR decides differently.
 
@@ -420,7 +420,7 @@ third was Windows-only.
   and Max's `doesn't understand "nonesuch"` from the forwarder. The Windows glue test found the one
   fault: its console checks redirected `std::cout`, which a DLL's kernel does not share; the test
   now stubs `object_post`/`object_warn`/`object_error` to hear them.)*
-- [ ] **9.4 Documentation, in Max's own system and the ReadMe.** The ReadMe section, the output
+- [x] **9.4 Documentation, in Max's own system and the ReadMe** (#49). The ReadMe section, the output
   table and the limits; CLAUDE.md. For the Documentation window: `docs/tap.python.maxref.xml` by
   hand, with see-also links between the two pages; a vignette, *Writing Max objects in Python* —
   the ReadMe's "Writing a class" and the threads and performance sections, rewritten for the
@@ -436,8 +436,22 @@ third was Windows-only.
   Packages page says `patchers/`). CI checks for what is written
   by hand: the reference page, the vignette and the tutorials well-formed XML, and the help
   patchers' JSON as 5.2 checked by hand (ids unique, every line connects), in one script. All
-  checked open in Max in 9.6.
-- [ ] **9.5 Runtime tests.** The patchers above in `make_patchers.py`; `run.py` aware of the
+  checked open in Max in 9.6. *(As built: the Documentation window's Package Docs › PythonTap lists
+  `docs/topics/` under Topics, `docs/vignettes/` under Guides and `docs/tutorials/` under Tutorials,
+  so the package has a short topic beside the guide; a tutorial's Open Tutorial finds its patcher
+  beside it. Cycling '74's packages keep the home patcher in `extras/`, and Max lists it in the
+  Extras menu, so `homepatcher` names it there. `tap.python` is listed as a reference page, not an
+  object — it has no file of its own — exactly as Max lists its own `init`-mapped objects
+  (`mc.abs~`), so no stub external for it. The help patchers were laid out by a script and checked
+  open in Max, every tab; `tap.python~`'s old single page, which overlapped its own objects at this
+  font, is its basic tab rebuilt. The mc. tab found `[mc.tap.python~]` "No such object": Max wraps
+  an external in mc. through an `init/` mapping, which the package lacked — now in
+  `init/tap.python.txt`, required by `assemble-package.py`, and pinned by a runtime test (one of
+  9.5's), which also shows that the wrapper passes a class's attributes and messages on only through
+  `setvalue` and `applyvalues`. The ReadMe's message sentence is the perf script's, written when
+  the tables are next measured (9.6). Checked in Max 9.1.5 on the Mac; Windows in 9.6.)*
+- [ ] **9.5 Runtime tests.** The patchers above in `make_patchers.py` (9.4 added `tap.python~.mc`,
+  for the `init/` mapping of `mc.tap.python~`); `run.py` aware of the
   second object (the `init/` mapping in the installed package, the `--package` mode, the
   reference-page rule for `tap.python~`'s page only). What 9.0's runner learned: a fresh Max
   needs Restore Windows on Launch off (a restored window loads the binary first); patchers are
