@@ -154,6 +154,11 @@ class Test:
                 self.send(f"voices {voices}", host),
                 self.send(f"patchername {HOST}", host)]
 
+    def control(self, arguments: str, value_outlets: int = 1, column: int = 2, varname: str = "") -> str:
+        """A [tap.python …] box: its value outlets, and the dumpout at the right."""
+        extra = {"varname": varname} if varname else {}
+        return self.patcher.box(f"tap.python {arguments}".strip(), 1, value_outlets + 1, column=column, **extra)
+
     # -- actions -----------------------------------------------------------------------------
 
     def send(self, text: str, destination: str, inlet: int = 0) -> str:
@@ -251,6 +256,40 @@ class Test:
         self.patcher.connect(gate, 0, zero)
         self._assert(name, zero)
         return start, check
+
+    def output_is(self, name: str, source: str, outlet: int, expected: str) -> str:
+        """Check what `source`'s `outlet` output last, as [tosymbol] writes it ("symbol C", "1 0 1",
+        "0.5000", "note 60 100"): bang the returned box to check. Nothing output fails the check (the
+        harness records an assertion that never answers)."""
+        text = self.patcher.box("tosymbol", column=3)
+        held = self.patcher.box("zl.reg", inlets=2, outlets=2, column=3)
+        select = self.patcher.box(f'sel "{expected}"', inlets=2, outlets=2, column=3)
+        yes = self.patcher.message("1", column=3)
+        no = self.patcher.message("0", column=3)
+        self.patcher.connect(source, outlet, text)
+        self.patcher.connect(text, 0, held, 1)  # kept, not output, until the check
+        self.patcher.connect(held, 0, select)
+        self.patcher.connect(select, 0, yes)
+        self.patcher.connect(select, 1, no)
+        self.patcher.connect(no, 0, self._assert(name, yes))
+        return held
+
+    def output_count(self, source: str, outlet: int) -> str:
+        """A [counter] of the messages `source`'s `outlet` outputs, from when the patcher opened."""
+        trigger = self.patcher.box("t b", column=3)
+        counter = self.patcher.box("counter 1 1000000", inlets=3, outlets=4, column=3)
+        self.patcher.connect(source, outlet, trigger)
+        self.patcher.connect(trigger, 0, counter)
+        return counter
+
+    def count_is(self, name: str, counter: str, compare: str) -> str:
+        """Check a counter (output_count()) so far: `compare` is a Max comparison, e.g. "== 3"."""
+        count = self.patcher.box("i", inlets=2, column=3)
+        test = self.patcher.box(compare, inlets=2, column=3)
+        self.patcher.connect(counter, 0, count, 1)
+        self.patcher.connect(count, 0, test)
+        self._assert(name, test)
+        return count
 
     def metro(self, interval_ms: int, *targets: str) -> tuple[str, str]:
         """A [metro] banging `targets` (in order): returns (start, stop) actions."""
@@ -795,6 +834,253 @@ def multichannel() -> Test:
     return t
 
 
+def control_load() -> Test:
+    t = Test("tap.python.load.maxtest.maxpat",
+             "tap.python (plan 9.5), the first patcher a fresh Max opens (run.py sees to it): Max finds the "
+             "object through the package's init/ mapping to tap.python~'s binary. With no argument it "
+             "loads python/default.py; each example outputs what its method returns — euclid's list from a "
+             "bang (its steps set by an @attribute argument), scale's array as a list, note_name's two values "
+             "right to left, the name as a symbol.", audio=False)
+    default = t.control("")
+    euclid = t.control("euclid")
+    shorter = t.control("euclid @steps 5")
+    scale = t.control("scale @factor 2")
+    note = t.control("note_name", value_outlets=2)
+    gain = t.output_is("default-bang-outputs-the-gain", default, 0, "1.0000")
+    rhythm = t.output_is("euclid-bang-outputs-a-list", euclid, 0, "1 0 0 1 0 0 1 0")
+    short = t.output_is("attribute-argument-applies", shorter, 0, "1 0 1 0 1")
+    scaled = t.output_is("scale-list-through-numpy", scale, 0, "2.0000 4.0000 6.0000")
+    name = t.output_is("note-name-is-a-symbol", note, 0, "symbol C")
+    octave = t.output_is("octave-from-the-second-outlet", note, 1, "4")
+    # right to left, as Max objects do: the octave is already out when the name comes
+    octave_held = t.patcher.box("tosymbol", column=3)
+    held = t.patcher.box("zl.reg", inlets=2, outlets=2, column=3)
+    on_name = t.patcher.box("t b", column=3)
+    t.patcher.connect(note, 1, octave_held)
+    t.patcher.connect(octave_held, 0, held, 1)
+    t.patcher.connect(note, 0, on_name)
+    t.patcher.connect(on_name, 0, held)
+    select = t.patcher.box('sel "4"', inlets=2, outlets=2, column=3)
+    yes, no = t.patcher.message("1", column=3), t.patcher.message("0", column=3)
+    t.patcher.connect(held, 0, select)
+    t.patcher.connect(select, 0, yes)
+    t.patcher.connect(select, 1, no)
+    t.patcher.connect(no, 0, t._assert("outlets-right-to-left", yes))
+    t.step(t.send("bang", default), t.send("bang", euclid), t.send("bang", shorter), t.send("1 2 3", scale),
+           t.send("60", note))
+    t.step(gain, rhythm, short, scaled, name, octave,
+           t.attribute_equals("attribute-reads-back", shorter, "steps", 5), t.errors_are("console-clean", "== 0"))
+    return t
+
+
+def control_outputs() -> Test:
+    t = Test("tap.python.outputs.maxtest.maxpat",
+             "Every row of tap.python's output table (plan 9.5), one method of maxtest_outputs each: None "
+             "nothing; a bool (numpy's too) 0 or 1; an int, a float; a str as symbol <s>, whatever it says; "
+             "a list, an unhinted tuple, an array as a list; a list whose first element is a str the message "
+             "it names; an empty list nothing; a value past 64 bits, a dict or a nested list nothing, "
+             "reported; a tuple[str, int] one value per outlet, None in a slot nothing from it.", audio=False)
+    outputs = t.control("maxtest_outputs", value_outlets=2)
+    first, second = t.output_count(outputs, 0), t.output_count(outputs, 1)
+    pattern = "nothing.output"
+    t.count_errors(pattern)
+
+    def row(method: str, expected: str, outlet: int = 0) -> list[str]:
+        return [t.send(method, outputs), t.output_is(f"{method}-outputs-{expected.replace(' ', '-')}", outputs,
+                                                      outlet, expected)]
+
+    def nothing(method: str, firsts: int, errors: int) -> list[str]:
+        return [t.send(method, outputs), t.count_is(f"{method}-outputs-nothing", first, f"== {firsts}"),
+                t.errors_are(f"{method}-reported-or-not", f"== {errors}", pattern)]
+
+    t.step(nothing("nothing", 0, 0))
+    t.step(row("yes", "1"))
+    t.step(row("numpy_no", "0"))
+    t.step(row("integer", "42"))
+    t.step(row("real", "0.5000"))
+    t.step(row("text", "symbol hello world"))
+    t.step(row("word", "symbol bang"))
+    t.step(row("numbers", "1 2.5000 3"))
+    t.step(row("message", "note 60 100"))
+    t.step(row("pair", "7 8"))
+    t.step(row("array", "1.0000 2.0000"))
+    t.step(row("scalar", "0.2500"))
+    t.step(nothing("empty", 11, 0))
+    t.step(nothing("big", 11, 1))
+    t.step(nothing("mapping", 11, 2))
+    t.step(nothing("nested", 11, 3))
+    t.step(row("spread", "symbol left"), t.output_is("spread-second-outlet", outputs, 1, "9"))
+    t.step(t.send("partial", outputs), t.output_is("partial-second-outlet", outputs, 1, "5"),
+           t.count_is("partial-outputs-nothing-from-the-first", first, "== 12"),
+           t.count_is("second-outlet-twice", second, "== 2"),
+           t.errors_are("only-what-cannot-be-output-reported", "== 3"))
+    return t
+
+
+def control_messages() -> Test:
+    t = Test("tap.python.messages.maxtest.maxpat",
+             "tap.python's messages (plan 9.5): an attribute set by its name and read back by getattr, and "
+             "by get<name> from the dumpout; a method called by its message; a message the class has no "
+             "method for passed to its anything, with the selector first (int and symbol too, which never "
+             "reach a class's anything in Max); and a class without anything not understanding one.",
+             audio=False)
+    forward = t.control("maxtest_forward")
+    plain = t.control("maxtest_echo")
+    pattern = "doesn.t.understand"
+    t.count_errors(pattern)
+    t.step(t.send("getsteps", forward))
+    t.step(t.output_is("get-attribute-from-the-dumpout", forward, 1, "steps 8"), t.send("steps 3", forward))
+    t.step(t.attribute_equals("attribute-set-by-its-name", forward, "steps", 3), t.send("getsteps", forward))
+    t.step(t.output_is("get-attribute-follows-it", forward, 1, "steps 3"), t.send("hello 1", forward))
+    t.step(t.output_is("method-called-by-its-message", forward, 0, "2"), t.send("foo 1 two", forward))
+    t.step(t.output_is("anything-gets-the-selector-first", forward, 0, "foo 1 two"), t.send("symbol hi", forward))
+    t.step(t.output_is("symbol-reaches-anything", forward, 0, "symbol hi"), t.send("int 5", forward))
+    t.step(t.output_is("int-reaches-anything", forward, 0, "5"), t.send("nonesuch 1", plain))
+    t.step(t.errors_are("without-anything-not-understood", "== 1", pattern), t.send("7", plain))
+    t.step(t.output_is("its-int-method-still-answers", plain, 0, "7"),
+           t.errors_are("console-clean-but-that", "== 1"))
+    return t
+
+
+def control_reload() -> Test:
+    t = Test("tap.python.reload.maxtest.maxpat",
+             "tap.python reloading (plan 9.5): a save that widens a method's tuple return hint adds an outlet "
+             "in place, before the dumpout, which takes a patch cord and carries its value, while the cords "
+             "of the outlets that stay keep theirs; narrowing removes it with its cord; a file that fails to "
+             "load is reported once and outputs nothing until a save fixes it.", audio=False)
+    widen = t.control("maxtest_widen", varname="widen")
+    editor = t.python("maxtest_editor", column=1)
+    added = t.patcher.box("t l", column=3, varname="added")
+    scripting = t.obj("thispatcher")
+    first = t.output_count(widen, 0)
+    dump = t.output_count(widen, 1)
+    from_added = t.output_count(added, 0)
+    t.count_errors("Failed.to.load")
+    t.step(t.send("bang", widen))
+    t.step(t.output_is("one-value", widen, 0, "1"), t.send("returns maxtest_widen 2", editor),
+           t.send("filechanged", widen))
+    t.step(t.send("script connect widen 1 added 0", scripting))
+    t.step(t.send("bang", widen))
+    t.step(t.output_is("first-outlet-keeps-its-cord", widen, 0, "1"),
+           t.output_is("added-outlet-carries-its-value", added, 0, "2"),
+           t.count_is("dumpout-cord-moved-with-the-dumpout", dump, "== 0"),
+           t.send("returns maxtest_widen 1", editor), t.send("filechanged", widen))
+    t.step(t.send("bang", widen))
+    t.step(t.count_is("first-outlet-output-three-times", first, "== 3"),
+           t.count_is("removed-outlet-took-its-cord", from_added, "== 1"),
+           t.send("corrupt maxtest_widen", editor))
+    t.step(t.send("bang", widen), t.errors_are("broken-save-reported-once", "== 1", "Failed.to.load"), wait=WATCH)
+    t.step(t.count_is("broken-outputs-nothing", first, "== 3"), t.send("restore maxtest_widen", editor))
+    t.step(t.send("bang", widen), wait=WATCH)
+    # the object's own errors: the broken save's report alone (its traceback is Python's)
+    t.step(t.count_is("fixed-outputs-again", first, "== 4"),
+           t.errors_are("nothing-else-reported", "== 1", "tap.python~?:"))
+    return t
+
+
+def control_shared() -> Test:
+    t = Test("tap.python.shared.maxtest.maxpat",
+             "One file for a tap.python~ and a tap.python (plan 9.5): a save runs it once for both and both "
+             "follow; each kind says once what it owes — mode is reserved by tap.python~ only, dumpout by "
+             "tap.python only — on load and again after a change, whichever kind ran the file.", audio=True)
+    source = t.signal(1.0)
+    host = t.host()  # loaded by a step, so that what the audio object prints is caught
+    t.patcher.connect(source, 0, host)
+    scripting = t.obj("thispatcher")
+    editor = t.python("maxtest_editor", column=1)
+    t.count_errors("mode.. is.reserved")
+    t.count_errors("dumpout.. is.reserved")
+    # the tap.python is made by scripting a step in, so that what its constructor prints is caught too
+    made = t.send("script newdefault control 600 400 tap.python maxtest_shared, "
+                  "script connect asked 0 control 0, script connect control 0 answered 0", scripting)
+    asked = t.patcher.message("value", column=1)
+    t.patcher.boxes[-1]["box"]["varname"] = "asked"
+    answered = t.patcher.box("t l", column=3, varname="answered")
+    t.step(t.load(host, "maxtest_shared"), made)
+    t.step(asked, t.errors_are("mode-reserved-said-by-the-audio-kind-only", "== 1", "mode.. is.reserved"),
+           t.errors_are("dumpout-reserved-said-by-the-control-kind-only", "== 1", "dumpout.. is.reserved"))
+    t.step(t.output_is("control-reads-the-file", answered, 0, "1.0000"), t.send("scale maxtest_shared 2.", editor))
+    t.step(t.send("filechanged", host), t.send("script send control filechanged", scripting))
+    t.step(asked)
+    t.step(t.output_is("control-follows-the-save", answered, 0, "2.0000"),
+           t.errors_are("mode-said-again-once", "== 2", "mode.. is.reserved"),
+           t.errors_are("dumpout-said-again-once", "== 2", "dumpout.. is.reserved"),
+           t.errors_are("nothing-else", "== 4"))
+    return t
+
+
+def control_threads() -> Test:
+    t = Test("tap.python.threads.maxtest.maxpat",
+             "tap.python's messages on the thread they come on (plan 9.5): a metro's every 5 ms, through a "
+             "counter, each output checked against its input — on the main thread (Overdrive off), the "
+             "scheduler thread (Overdrive on), and the audio thread (Scheduler in Audio Interrupt on, audio "
+             "running). Puts Overdrive and Audio Interrupt back as they were.", audio=True)
+    echo = t.control("maxtest_echo")
+    metro = t.patcher.box("metro 5", inlets=2, column=1)
+    counter = t.patcher.box("counter 0 1000000", inlets=3, outlets=4, column=1)
+    split = t.patcher.box("t i i", outlets=2, column=1)
+    expected = t.patcher.box("i", inlets=2, column=3)
+    t.patcher.connect(metro, 0, counter)
+    t.patcher.connect(counter, 0, split)
+    t.patcher.connect(split, 1, expected, 1)
+    t.patcher.connect(split, 0, echo)
+    differs = t.patcher.box("!=", inlets=2, column=3)
+    t.patcher.connect(expected, 0, differs, 1)
+    on_output = t.patcher.box("t i b", outlets=2, column=3)
+    t.patcher.connect(echo, 0, on_output)
+    t.patcher.connect(on_output, 1, expected)
+    t.patcher.connect(on_output, 0, differs)
+    mismatch = t.patcher.box("sel 1", inlets=2, outlets=2, column=3)
+    t.patcher.connect(differs, 0, mismatch)
+    wrong = t.output_count(mismatch, 0)
+    right = t.output_count(echo, 0)
+    # Overdrive and Audio Interrupt as they were, to put back at the end
+    states = []
+    for setting in ("overdrive", "takeover"):
+        status = t.patcher.box(f"adstatus {setting}", inlets=2, outlets=2, column=4)
+        was = t.patcher.box("i", inlets=2, column=4)
+        first = t.patcher.box("gate 1 1", inlets=2, column=4)
+        t.patcher.connect(status, 1, first, 1)
+        t.patcher.connect(first, 0, was, 1)
+        t.patcher.connect(was, 0, status)
+        close = t.patcher.message("0", column=4)
+        t.patcher.connect(close, 0, first)
+        states.append((status, was, close))
+    start, stop = t.send("1", metro), t.send("0", metro)
+    t.step([states[0][0], states[1][0]])
+    t.step([states[0][2], states[1][2]], t.patcher.message("; max preempt 0; dsp takeover 0", column=1))
+    t.step(start, wait=300)
+    t.step(stop, wait=1000)
+    t.step(t.count_is("main-thread-in-order", wrong, "== 0"), t.count_is("main-thread-outputs", right, ">= 50"),
+           t.patcher.message("; max preempt 1", column=1))
+    t.step(start, wait=300)
+    t.step(stop, wait=1000)
+    t.step(t.count_is("scheduler-thread-in-order", wrong, "== 0"), t.count_is("scheduler-thread-outputs", right, ">= 100"),
+           t.patcher.message("; dsp takeover 1", column=1))
+    t.step(start, wait=1500)
+    t.step(stop, wait=1000)
+    t.step(t.count_is("audio-thread-in-order", wrong, "== 0"), t.count_is("audio-thread-outputs", right, ">= 150"),
+           states[0][1], states[1][1], t.errors_are("console-clean", "== 0"))
+    return t
+
+
+def control_faults() -> Test:
+    t = Test("tap.python.faults.maxtest.maxpat",
+             "What tap.python reports and survives (plan 9.5): sys.exit() in a method is reported, not obeyed; "
+             "an exception prints its traceback; neither outputs anything, and the object still answers.",
+             audio=False)
+    faults = t.control("maxtest_control_faults")
+    outputs = t.output_count(faults, 0)
+    t.count_errors("SystemExit")
+    t.count_errors("ValueError")
+    t.step(t.send("leave", faults))
+    t.step(t.errors_are("sys-exit-reported", ">= 1", "SystemExit"), t.send("fail", faults))
+    t.step(t.errors_are("exception-reported", ">= 1", "ValueError"),
+           t.count_is("neither-output-anything", outputs, "== 0"), t.send("ok", faults))
+    t.step(t.output_is("still-answers", faults, 0, "1"))
+    return t
+
+
 def soak(minutes: float) -> Test:
     """Plan 6.2, run by `run.py --session soak`: not a .maxtest, so the quick suite skips it."""
     duration = int(minutes * 60_000)
@@ -806,8 +1092,11 @@ def soak(minutes: float) -> Test:
              "maxtest_editor saves both files with a new revision and every instance is told to reload. A "
              "third of the way through the poly~ changes its sample rate (up 2), and back at two thirds. "
              "Every output sample must stay exact in each phase, the console clean, and the saves must have run "
-             "the module again. Logged: Max's DSP CPU after 30 quiet seconds (no reloads, to compare with "
-             "core/bench) and then each minute, with the module's executions and Python's object count.",
+             "the module again. And a tap.python (plan 9.5), answering a metro every 10 ms with what it is "
+             "given while its file is saved and reloaded every second too: every output checked against its "
+             "input, none missing but a few. Logged: Max's DSP CPU after 30 quiet seconds (no reloads, to "
+             "compare with core/bench) and then each minute, with the module's executions and Python's "
+             "object count.",
              watchdog=duration + 180_000)
     source = t.signal(1.0)
     host = t.host("maxtest_soak", voices=24)
@@ -817,13 +1106,48 @@ def soak(minutes: float) -> Test:
     for py in (host, census, *blocks):
         t.patcher.connect(source, 0, py)
 
-    # each second: a real save of both files (so the module runs again), then every instance reloads —
+    # tap.python, answering a metro: each output checked against what was sent (plan 9.5)
+    control = t.control("maxtest_soak_control")
+    asking = t.patcher.box("metro 10", inlets=2, column=1)
+    counter = t.patcher.box("counter 0 100000000", inlets=3, outlets=4, column=1)
+    split = t.patcher.box("t i i", outlets=2, column=1)
+    sent = t.patcher.box("i", inlets=2, column=3)
+    t.patcher.connect(asking, 0, counter)
+    t.patcher.connect(counter, 0, split)
+    t.patcher.connect(split, 1, sent, 1)
+    t.patcher.connect(split, 0, control)
+    differs = t.patcher.box("!=", inlets=2, column=3)
+    answered = t.patcher.box("t i b", outlets=2, column=3)
+    t.patcher.connect(control, 0, answered)
+    t.patcher.connect(answered, 1, sent)
+    t.patcher.connect(sent, 0, differs, 1)
+    t.patcher.connect(answered, 0, differs)
+    mismatch = t.patcher.box("sel 1", inlets=2, outlets=2, column=3)
+    t.patcher.connect(differs, 0, mismatch)
+    wrong, right = t.output_count(mismatch, 0), t.output_count(control, 0)
+    asks = t.output_count(counter, 0)
+    # at the end: asked, less answered — read then, from both counts, so that neither is a step behind
+    asked_held, answered_held = t.patcher.box("i", inlets=2, column=3), t.patcher.box("i", inlets=2, column=3)
+    t.patcher.connect(asks, 0, asked_held, 1)
+    t.patcher.connect(right, 0, answered_held, 1)
+    unanswered = t.patcher.box("-", inlets=2, column=3)
+    t.patcher.connect(answered_held, 0, unanswered, 1)
+    t.patcher.connect(asked_held, 0, unanswered)
+    every_answered = t.patcher.box("t b b", outlets=2, column=3)
+    t.patcher.connect(every_answered, 1, answered_held)
+    t.patcher.connect(every_answered, 0, asked_held)
+    none_left = t.patcher.box("== 0", inlets=2, column=3)
+    t.patcher.connect(unanswered, 0, none_left)
+    t._assert("control-answered-every-message", none_left)
+
+    # each second: a real save of the files (so the module runs again), then every instance reloads —
     # the file watcher coalesces saves this close together, so it is not left to deliver them
     reload_all = t.patcher.message("filechanged", column=1)
-    for py in (host, census, *blocks):
+    for py in (host, census, *blocks, control):
         t.patcher.connect(reload_all, 0, py)
     saves_start, saves_stop = t.metro(1000, t.send("bump maxtest_soak", editor),
-                                      t.send("bump maxtest_soak_block", editor), reload_all)
+                                      t.send("bump maxtest_soak_block", editor),
+                                      t.send("bump maxtest_soak_control", editor), reload_all)
     minute_start, minute_stop = t.metro(60_000, t.send("census", census),
                                         t.log_attribute("executions", census, "executions"),
                                         t.log_attribute("objects", census, "objects"), t.cpu_reading("cpu"))
@@ -836,7 +1160,7 @@ def soak(minutes: float) -> Test:
 
     t.step(t.send("resampling 0", host), t.send("target 0", host))  # constants pass unchanged; to every voice
     t.step(t.cpu_reading("cpu-quiet"), wait=30_000)  # 33 objects running, nothing else going on
-    t.step(phases[0][0][0], phases[0][1][0], saves_start, minute_start)
+    t.step(phases[0][0][0], phases[0][1][0], saves_start, minute_start, t.send("1", asking))
     t.step(audio_flowed(1), wait=third - 200)
     t.step(phases[0][0][1], phases[0][1][1], t.send("up 2", host), t.dsp(False))
     t.step(t.dsp(True), wait=100)
@@ -846,10 +1170,13 @@ def soak(minutes: float) -> Test:
     t.step(t.dsp(True), wait=100)
     t.step(phases[2][0][0], phases[2][1][0], wait=1500)
     t.step(audio_flowed(3), wait=third - 1800)
-    t.step(phases[2][0][1], phases[2][1][1], saves_stop, minute_stop)
+    t.step(phases[2][0][1], phases[2][1][1], saves_stop, minute_stop, t.send("0", asking))
     t.step(t.send("census", census), t.log_attribute("executions", census, "executions"),
            t.log_attribute("objects", census, "objects"),
            t.attribute_compare("saves-ran-the-module-again", census, "executions", f">= {saves * 9 // 10}"),
+           t.count_is("control-every-output-its-input", wrong, "== 0"),
+           t.count_is("control-answered", right, f">= {duration // 10 * 8 // 10}"),
+           every_answered,
            t.errors_are("console-clean", "== 0"), wait=WATCH)
     return t
 
@@ -920,6 +1247,8 @@ def without_runtime_restart() -> Test:
 TESTS_TO_WRITE = [load, attributes_and_messages, reload, reload_under_audio, many_instances, channels, announce_once,
                   faults,
                   prepare, worker, multichannel,
+                  control_load, control_outputs, control_messages, control_reload, control_shared,
+                  control_threads, control_faults,
                   without_runtime, without_runtime_restart]
 
 

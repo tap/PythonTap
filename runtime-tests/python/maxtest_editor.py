@@ -34,6 +34,14 @@ class maxtest_editor:
         source = f"class {name}:\n    def process(self{parameters}) -> {returns}:\n        return {result}\n"
         self._file(name).write_text(source, encoding="utf-8")
 
+    def returns(self, name: str, count: int) -> None:
+        """Save the file as a tap.python class whose bang returns `count` values, 1 to count, hinted
+        tuple[int, ...] of that many when more than one: the object's value outlets follow (plan 9.5)."""
+        values = ", ".join(str(n + 1) for n in range(count))
+        hint = "int" if count == 1 else "tuple[" + ", ".join(["int"] * count) + "]"
+        source = f"class {name}:\n    def bang(self) -> {hint}:\n        return {values}\n"
+        self._file(name).write_text(source, encoding="utf-8")
+
     def remove_field(self, name: str, field: str) -> None:
         path = self._file(name)
         source = re.sub(rf"^\s+{field}: .*\n", "", path.read_text(encoding="utf-8"), count=1, flags=re.M)

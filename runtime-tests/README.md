@@ -1,7 +1,8 @@
 # Runtime tests in Max
 
 The unit tests (`core/tests/`, and the external's `_test.cpp` against min's mock kernel) never load
-the object into Max. These do: each is a patcher that Max runs, driven by Cycling '74's
+the objects into Max. These do — `tap.python~` and, since plan 9.5, `tap.python` (the
+`tap.python.*` patchers): each is a patcher that Max runs, driven by Cycling '74's
 [max-test](https://github.com/Cycling74/max-test) harness (MIT, the `max-test` submodule), checking
 what only a real Max shows — the file watcher, `getattr` on the Python-defined attributes, audio
 through the real signal chain, `poly~`, the console, and loading without a runtime. (Plan 6.1 and
@@ -41,26 +42,32 @@ runtime-tests/
 
 ## What the runner does
 
-1. Builds the harness's `oscar` extension if needed, and installs the harness into `Packages` as
+1. Checks the package: the external built from the current sources, a runtime, and the lines of
+   `init/tap.python.txt` without which Max finds neither `tap.python` nor `mc.tap.python~`. Then
+   backs up Max's preference files, turns off **Restore Windows on Launch** and moves aside the
+   workspaces Max would reopen (into `logs/`) — a window reopened at launch would load the binary
+   before the first test — and puts the preferences back when the run ends.
+2. Builds the harness's `oscar` extension if needed, and installs the harness into `Packages` as
    `max-test` — a **copy**, not a link, because Max loads a package's extensions only from a real
    folder. The copy is marked `INSTALLED-BY-PYTHONTAP.txt`, replaced on every run, and left
    installed afterwards (Max then loads `oscar` at every launch; delete the folder to uninstall).
    Another `max-test` already in `Packages` is refused, not replaced.
-2. Links `runtime-tests/` into `Packages` as `PythonTap-runtime-tests` (so Max finds the patchers
+3. Links `runtime-tests/` into `Packages` as `PythonTap-runtime-tests` (so Max finds the patchers
    by name), and copies `python/maxtest_*.py` into the package's `python/` folder (the object loads
    classes from there only). Both are removed afterwards.
-3. **Session `without-runtime`**: moves `support/` aside and starts Max. The object must load and
+4. **Session `without-runtime`**: moves `support/` aside and starts Max. The object must load and
    say the runtime is missing; then, with `support/` put back while Max runs, a new object must
    say to restart Max (on macOS the weak binding to libpython is fixed when the external loads).
    `support/` is always put back — and a run killed midway leaves it as `support.maxtest-aside/`,
    which the next run restores.
-4. **Session `main`**: starts Max again and runs every `*.maxtest.maxpat`.
-5. Only when asked for: **session `soak`** (plan 6.2) runs `soak/tap.python~.soak.maxpat` for an
+5. **Session `main`**: starts Max again and runs every `*.maxtest.maxpat` — `tap.python.load` first,
+   so that the fresh Max must find `tap.python` through the package's `init/` mapping (plan 9.0).
+6. Only when asked for: **session `soak`** (plan 6.2) runs `soak/tap.python~.soak.maxpat` for an
    hour, sampling Max's memory every minute, and writes a summary — memory, reloads, and what the
    patcher logged each minute — to `logs/soak.summary`; **session `perf`** (plan 6.3) runs
    `perf/tap.python~.perf.maxpat` and averages Max's CPU-meter readings into `logs/perf.json`,
    which `scripts/update-perf-docs.py --max` turns into the ReadMe's table.
-6. Reads the results from the harness's SQLite database (in the installed `max-test`) and prints
+7. Reads the results from the harness's SQLite database (in the installed `max-test`) and prints
    them. Max's standard output goes to `runtime-tests/logs/` — only min's own lines appear there;
    the console errors seen during a failing test are printed from its log instead.
 
@@ -97,13 +104,27 @@ first runs taught, built into the helpers:
   rate is not like for like, so the perf patcher measures at the device's own rate.
 - **A check that audio did not change passes vacuously if no audio ran**: pair each with a sample
   check (the soak's `phase-N-…-output`).
+- **`tap.python`'s output is checked as `[tosymbol]` writes it** (`Test.output_is()`): one symbol for
+  the whole message — `symbol C` (the word `symbol` kept), `1 0 1`, `note 60 100`, and floats with
+  four decimals, `0.5000` — held in a `[zl.reg]` until the check compares it with a quoted
+  `[sel "…"]`. A `bang` makes `[tosymbol]` repeat its last symbol, so a bang output is not checked
+  this way. An output that never came fails the check: the harness records an assertion that never
+  answers as a failure ("never returned results"). `Test.output_count()` and `Test.count_is()` check
+  how many messages an outlet sent — nothing, for `None`.
+- **Text logged with spaces breaks the harness's SQL** (its log line goes between double quotes, and
+  Max quotes a symbol with a space): log codes, not text — `[atoi]`, as the probe that found the
+  formats above did.
+- **Overdrive is `; max preempt 1`, Scheduler in Audio Interrupt `; dsp takeover 1`**; the threads
+  test reads both through `[adstatus]` first and puts them back at the end.
 
 The fixtures' docstrings say what each is for. Open a patcher in Max to watch a test run; its
 `test.*` objects only record anything when the harness opened it.
 
 ## Not covered here
 
-Some of the runbook's checks still need a person: that a `bool` attribute shows as a toggle in the
+`tap.python`'s once-per-session notice that Scheduler in Audio Interrupt runs Python on the audio
+thread is a warning, which `[error]` does not see: the glue test checks it, and the threads test only
+that the messages run there correctly. Some of the runbook's checks still need a person: that a `bool` attribute shows as a toggle in the
 inspector, that an `attrui` displaying a removed attribute looks right (the tests check only that
 nothing breaks), and whether the audio *device* drops out while a reload holds the GIL (the tests
 check every sample the object outputs, not the driver). Changing the sample rate in Audio Status is
