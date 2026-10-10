@@ -5,11 +5,15 @@ breaking changes to the contract were allowed where they bought correctness (D5 
 `docs/PRODUCTION-PLAN.md`); each is recorded here. From 1.0.0, a change to the class contract is
 a major version.
 
-## 2.0.0 — unreleased
+## 2.0.0 — 2026-10-10
 
-The release that brings `tap.python`, a Python class as a Max object without audio
-(`docs/TAP-PYTHON-PLAN.md`, Phase 9 of the production plan). Its entries are added as the phase
-lands.
+The release that brings `tap.python`, a Python class as a Max object without audio, beside
+`tap.python~` in the same package and the same binary (`docs/TAP-PYTHON-PLAN.md`, Phase 9 of the
+production plan). It is a major version because of one change to the class contract — a message's
+last parameter hinted `list[…]` or `np.ndarray` now takes the remaining atoms (Changed, below);
+classes that do not use such a hint load and behave as they did. Verified in Max 9.1.5 on macOS —
+every runtime test, `tap.python`'s included, and the hour-long soak — and on Windows 11, where both
+objects, their attributes and messages, a reload and the help files were checked in Max by hand.
 
 ### Added — `tap.python`, a Python class as a Max object without audio
 
@@ -27,7 +31,6 @@ lands.
   Audio Interrupt on that is the audio thread, which the object says once per session.
 - **`default.py` has a `bang`**, which returns the gain: `[tap.python]` with no argument outputs it.
   In `tap.python~` a `bang` now calls that method, its result dropped there as every method's is.
-
 - **Documentation in Max's own system** (plan 9.4): a reference page for `tap.python`, a guide —
   *Writing Max Objects in Python* — and three tutorials with their patchers in the Documentation
   window (Package Docs › PythonTap), the help patchers of both objects in tabs, and a *PythonTap

@@ -830,7 +830,7 @@ row shipped what only a host platform could show.
   checks for the hand-made XML and JSON.
 - [x] **9.5 Runtime tests** (#50)**:** the `tap.python.*` patchers in `make_patchers.py`; `run.py` aware of
   the second object; the soak session gains a `metro`-driven `tap.python` under saves.
-- [ ] **9.6 The release session, Mac and Windows:** the whole suite on the Mac, the help patcher
+- [x] **9.6 The release session, Mac and Windows** (#51)**:** the whole suite on the Mac, the help patcher
   checked and re-saved, Max's page for `tap.python~` committed, the hand checks; the package by
   hand on Windows; then tag `v2.0.0`.
 - [ ] **9.7 The book:** after 2.0.0, the family's mdBook under `book/`, published by CI, with the
