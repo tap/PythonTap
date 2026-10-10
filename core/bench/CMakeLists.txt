@@ -3,7 +3,7 @@
 #
 # The process() benchmark (plan 6.3): how much of a CPU core a class's audio callback needs.
 # Measure from a Release build; scripts/update-perf-docs.py builds it, runs it, and writes the
-# ReadMe's table.
+# book's table (book/src/performance.md).
 
 find_package(Python3 3.13 EXACT REQUIRED COMPONENTS Interpreter Development.Embed)
 execute_process(

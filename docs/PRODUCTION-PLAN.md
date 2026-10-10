@@ -833,7 +833,7 @@ row shipped what only a host platform could show.
 - [x] **9.6 The release session, Mac and Windows** (#51)**:** the whole suite on the Mac, the help patcher
   checked and re-saved, Max's page for `tap.python~` committed, the hand checks; the package by
   hand on Windows; then tag `v2.0.0`.
-- [ ] **9.7 The book:** after 2.0.0, the family's mdBook under `book/`, published by CI, with the
+- [x] **9.7 The book** (#52)**:** after 2.0.0, the family's mdBook under `book/`, published by CI, with the
   examples and performance tables pulled from what ships; the ReadMe becomes the front door.
 
 ## Sequencing (one PR each)

@@ -10,7 +10,7 @@ class numpy_allpass:
     feedback reaches back D samples, so any stretch of up to D samples depends only on samples
     before it: each stretch is one numpy expression, and a vector is split only when the delay
     is shorter than it. The output is the same as allpass.py's, sample for sample, at a small
-    fraction of the cost — compare the two in the ReadMe's performance note.
+    fraction of the cost — compare the two in the PythonTap book's Performance chapter.
     """
 
     delay:  float   = field(default = 1.0)      # delay time in ms

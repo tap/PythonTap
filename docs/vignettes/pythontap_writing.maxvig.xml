@@ -22,8 +22,8 @@
 	<p>
 		Both come with CPython 3.13, numpy and attrs, and share one interpreter: Python's own modules,
 		anything you install into the package's runtime, and your own helper modules are there for every
-		class. This guide is the short form; the package's <a href="https://github.com/tap/PythonTap#readme">ReadMe</a>
-		says every rule in full, and the tutorials build three objects step by step.
+		class. This guide is the short form; the <a href="https://tap.github.io/PythonTap/">PythonTap book</a>, online, says every rule in
+		full, and the tutorials build three objects step by step.
 	</p>
 
 	<h2>The class and its file</h2>
@@ -137,7 +137,7 @@ class euclid:
 		<li>The tutorials: <link type="tutorial" name="pythontap_01_gain">A gain, per sample and per vector</link>, <link type="tutorial" name="pythontap_02_filter">A filter that knows the sample rate</link> and <link type="tutorial" name="pythontap_03_control">An object without audio</link>.</li>
 		<li>The help files: <openfilelink filename="tap.python~.maxhelp">tap.python~</openfilelink> and <openfilelink filename="tap.python.maxhelp">tap.python</openfilelink>.</li>
 		<li>The examples, in the package's python folder: default.py, numpy_gain.py, allpass.py and numpy_allpass.py, stereo_width.py, euclid.py, scale.py and note_name.py.</li>
-		<li>The package's <a href="https://github.com/tap/PythonTap#readme">ReadMe</a>: every rule, the performance measurements, and how to add Python packages to the runtime.</li>
+		<li>The <a href="https://tap.github.io/PythonTap/">PythonTap book</a>: every rule, the performance measurements, and how to add Python packages to the runtime.</li>
 	</ul>
 
 	<seealsolist>

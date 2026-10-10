@@ -489,7 +489,7 @@ third was Windows-only.
   the Mac was not idle (media analysis on a core, load average 4; the same code measured 25–50%
   slower), so Sep 30's stay, by the maintainer's decision, and the message sentence 9.1 measured
   joins them when the Mac is next idle, after the tag. v2.0.0 is tagged on #51's merge.)*
-- [ ] **9.7 The book.** After 2.0.0, the family's shape: an mdBook under `book/` (TapHouse's icon
+- [x] **9.7 The book** (#52). After 2.0.0, the family's shape: an mdBook under `book/` (TapHouse's icon
   rule already knows `book/book.toml` and guards `book/theme/favicon.*`), built and published by
   CI. Chapters from the ReadMe's sections — install, writing a class, audio, worker mode, control
   objects, performance, errors and limits, building, testing — plus the examples, the notebook
@@ -499,7 +499,15 @@ third was Windows-only.
   what ships. The ReadMe then shrinks to the front door — what it is, install, a quick start, and
   links — so that each fact has one home. *Decided 2026-10-09 (the maintainer):* the vignette is
   the short form, written separately — a few screens in Max's own conventions that point to the
-  ReadMe and the book for the contract's facts — not generated from the book's source.
+  ReadMe and the book for the contract's facts — not generated from the book's source. *(2026-10-10: the
+  book is built and published from `main` by `book-pages.yml`, at https://tap.github.io/PythonTap/,
+  and checked on every push by `build.yml`'s `book` job. The examples and the CHANGELOG are
+  included, and the notebook page is rendered at build time (`scripts/notebook-to-book.py`), so
+  nothing in it is a copy. The performance tables were moved, not doubled: their one home is
+  `book/src/performance.md`, still Sep 30's measurements until the Mac is next idle. The ReadMe is
+  66 lines, and what pointed to it for a rule now points to the book, the vignette included.
+  `check-docs.py` checks what mdBook does not: every chapter listed, every include and relative
+  link resolving, anchors included, in the book and the ReadMe.)*
 
 ## What 9.0 found
 

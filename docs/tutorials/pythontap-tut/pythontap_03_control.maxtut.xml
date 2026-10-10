@@ -73,7 +73,7 @@ class euclid:
 	<body>
 		<o>tap.python</o> outputs what a method returns: a number as a number, a str as a symbol, a list
 		or an array as a list, and the values of a method hinted <m>-> tuple[...]</m> one per outlet.
-		The ReadMe and the help file have the whole table.
+		The help file and the <a href="https://tap.github.io/PythonTap/control-objects.html">PythonTap book</a> have the whole table.
 	</body>
 
 	<seealsolist>

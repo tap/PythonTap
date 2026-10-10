@@ -1,0 +1,76 @@
+name: book-pages
+
+# Publishes the book (book/, plan 9.7) to GitHub Pages on every push to main that changes what it is
+# built from: its chapters, the examples and notebook it includes, the CHANGELOG, and the scripts.
+# The site is public, at https://tap.github.io/PythonTap/. Pages must be enabled once, with
+# Settings → Pages → Source: "GitHub Actions"; build.yml's book job builds the same thing on every
+# push, so a broken book fails there first.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "book/**"
+      - "python/**"
+      - "CHANGELOG.md"
+      - "scripts/notebook-to-book.py"
+      - ".github/workflows/book-pages.yml"
+  workflow_dispatch:
+
+# Pages deploys with an OIDC token; nothing else is written. Third-party actions are pinned by
+# commit SHA (the tag each SHA was cut from is noted beside it).
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and never one cancelled halfway.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  MDBOOK_URL: https://github.com/rust-lang/mdBook/releases/download/v0.4.40/mdbook-v0.4.40-x86_64-unknown-linux-gnu.tar.gz
+  MDBOOK_SHA256: "9ef07fd288ba58ff3b99d1c94e6d414d431c9a61fdb20348e5beb74b823d546b"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install mdBook (pinned)
+        run: |
+          curl -sfLo /tmp/mdbook.tar.gz "$MDBOOK_URL"
+          actual=$(sha256sum /tmp/mdbook.tar.gz | cut -d' ' -f1)
+          if [ "$actual" != "$MDBOOK_SHA256" ]; then
+            echo "::error::mdbook checksum mismatch"; exit 1
+          fi
+          tar -xzf /tmp/mdbook.tar.gz -C /tmp
+
+      - name: Render the notebook
+        run: python3 scripts/notebook-to-book.py
+
+      - name: Build the book (warnings are errors)
+        run: |
+          /tmp/mdbook build book 2>&1 | tee /tmp/book-build.log
+          if grep -qiE 'warning|error' /tmp/book-build.log; then
+            echo "::error::mdbook reported warnings/errors (an include naming no file?)"
+            exit 1
+          fi
+
+      - name: Configure Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+        with:
+          path: book/book
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5

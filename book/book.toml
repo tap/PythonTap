@@ -1,0 +1,14 @@
+[book]
+title = "PythonTap: Write Max Objects in Python"
+description = "tap.python~ runs a Python class as a Max audio object, and tap.python as a Max object without audio: attributes and messages from the class's type hints, hot reload on save, and the measurements behind it."
+authors = ["Timothy Place"]
+language = "en"
+src = "src"
+
+[build]
+create-missing = false
+
+[output.html]
+default-theme = "rust"
+git-repository-url = "https://github.com/tap/PythonTap"
+site-url = "/PythonTap/"

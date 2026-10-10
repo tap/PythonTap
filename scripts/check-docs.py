@@ -14,6 +14,9 @@
 - Every patcher — the help files, the tutorials' patchers, the Overview — is JSON in which, in each
   patcher and subpatcher, box ids are unique and every patch cord joins two boxes that exist, from
   an outlet the source has to an inlet the destination has.
+- The book (plan 9.7) and the ReadMe: every chapter is in book/src/SUMMARY.md, every file a chapter
+  includes exists, and every relative link — in the book or the ReadMe — names a file that exists
+  and, for a heading, one that page has. (mdBook checks none of that; a broken link is a 404.)
 
 Standard library only. Exits non-zero, naming each problem, if anything is wrong.
 """
@@ -21,12 +24,17 @@ Standard library only. Exits non-zero, naming each problem, if anything is wrong
 from __future__ import annotations
 
 import json
+import re
 import sys
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
+BOOK = ROOT / "book" / "src"
+# Rendered by scripts/notebook-to-book.py at build time, so absent from a fresh checkout; CI's book
+# job renders it and builds the book with warnings as errors.
+GENERATED = {BOOK / "notebook.md"}
 
 problems: list[str] = []
 
@@ -128,9 +136,53 @@ def check_patchers() -> None:
         check_patcher(path, document["patcher"], "the patcher")
 
 
+def anchor(heading: str) -> str:
+    """The id mdBook and GitHub give a heading: lower case, punctuation dropped, spaces as hyphens."""
+    heading = re.sub(r"<[^>]+>", "", heading).strip().lower()
+    return re.sub(r"[^\w\- ]", "", heading).replace(" ", "-")
+
+
+def anchors(path: Path) -> set[str]:
+    text = re.sub(r"^```.*?^```", "", path.read_text(encoding="utf-8"), flags=re.M | re.S)
+    return {anchor(heading) for heading in re.findall(r"^#+\s+(.*)$", text, re.M)}
+
+
+def check_links(path: Path) -> None:
+    text = re.sub(r"^```.*?^```", "", path.read_text(encoding="utf-8"), flags=re.M | re.S)
+    for target in re.findall(r"\]\(([^)\s]+)\)|srcset=\"([^\"]+)\"|src=\"([^\"]+)\"", text):
+        target = next(t for t in target if t)
+        if target.startswith(("http:", "https:", "mailto:")):
+            continue
+        file, _, heading = target.partition("#")
+        destination = (path.parent / file) if file else path
+        if destination in GENERATED:
+            continue
+        if not destination.exists():
+            problem(path, f"links to {target}, which does not exist")
+        elif heading and destination.suffix == ".md" and heading not in anchors(destination):
+            problem(path, f"links to {target}, a heading {destination.name} does not have")
+
+
+def check_book() -> None:
+    summary = (BOOK / "SUMMARY.md").read_text(encoding="utf-8")
+    listed = set(re.findall(r"\]\(([^)]+\.md)\)", summary))
+    for path in sorted(BOOK.glob("*.md")):
+        if path.name != "SUMMARY.md" and path.name not in listed and path not in GENERATED:
+            problem(path, "is not in SUMMARY.md")
+    for name in sorted(listed - {p.name for p in BOOK.glob("*.md")} - {p.name for p in GENERATED}):
+        problem(BOOK / "SUMMARY.md", f"lists {name}, which does not exist")
+    for path in sorted(set(BOOK.glob("*.md")) - GENERATED):
+        for include in re.findall(r"\{\{#include ([^}:\s]+)", path.read_text(encoding="utf-8")):
+            if not (path.parent / include).exists():
+                problem(path, f"includes {include}, which does not exist")
+        check_links(path)
+    check_links(ROOT / "ReadMe.md")
+
+
 def main() -> int:
     check_pages()
     check_patchers()
+    check_book()
     for line in problems:
         print(line, file=sys.stderr)
     if problems:

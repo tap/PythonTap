@@ -31,3 +31,8 @@ support.previous/
 # and Max's output
 /python/maxtest_*.py
 /runtime-tests/logs/
+
+# The book (plan 9.7): mdBook's output, and the notebook page scripts/notebook-to-book.py renders
+/book/book/
+/book/src/notebook.md
+/book/src/notebook/

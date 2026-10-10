@@ -18,7 +18,7 @@
 # Usage:
 #   ./scripts/install-runtime.sh              # this Mac's architecture (what users run)
 #   ./scripts/install-runtime.sh --universal  # ALSO lipo a universal libpython, for building
-#                                             # universal externals (CI; see ReadMe)
+#                                             # universal externals (CI; see the book's Building chapter)
 
 set -euo pipefail
 
@@ -37,7 +37,7 @@ done
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
     echo "error: this installer is for macOS; on Windows run scripts/install-runtime.ps1." >&2
-    echo "       (On Linux, development builds embed a system CPython 3.13 — see ReadMe.md.)" >&2
+    echo "       (On Linux, development builds embed a system CPython 3.13 — see the book's Testing chapter.)" >&2
     exit 1
 fi
 
