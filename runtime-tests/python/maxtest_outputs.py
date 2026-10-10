@@ -1,5 +1,5 @@
 # Runtime-test fixture (runtime-tests/run.py copies it into python/): for tap.python, one method per row
-# of the output table (docs/TAP-PYTHON-PLAN.md; the ReadMe's "Objects without audio"). spread() and
+# of the output table (docs/TAP-PYTHON-PLAN.md; the book's "Objects without audio"). spread() and
 # partial() are hinted tuple[str, int], so the object has two value outlets.
 import numpy as np
 

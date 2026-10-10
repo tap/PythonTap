@@ -477,7 +477,7 @@
                                     "numinlets": 1,
                                     "numoutlets": 0,
                                     "patching_rect": [ 20.0, 285.0, 330.0, 69.0 ],
-                                    "text": "Choose one with the message boxes and watch the CPU meter: the ReadMe's performance note has the measurements, per sample and per vector, at 48 and 96 kHz."
+                                    "text": "Choose one with the message boxes and watch the CPU meter. The PythonTap book has the measurements, per sample and per vector, at 48 and 96 kHz."
                                 }
                             },
                             {

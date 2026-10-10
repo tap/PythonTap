@@ -629,7 +629,7 @@ SCENARIO("Methods named like messages Max sends with C arguments are not exposed
                      // a name only the guard reserves: the test's object_getmethod answers it as
                      // Max's would for a method the class registered
                      "    def maxtest_host_answers(self) -> None:\n        pass\n"
-                     // what the ReadMe promises stays a message, whatever the guard answers
+                     // what the documentation promises stays a message, whatever the guard answers
                      "    def int(self, n: int) -> None:\n        pass\n"
                      "    def float(self, x: float) -> None:\n        pass\n"
                      "    def symbol(self, s: str) -> None:\n        pass\n"

@@ -7,12 +7,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **PythonTap** — the `tap.python~` Max package: a Max external that embeds CPython 3.13 and runs a
 user's Python class as an audio object. `[tap.python~ name]` loads `python/name.py`, instantiates
 `class name`, turns its annotated public fields into Max attributes and its public methods into Max
-messages, calls its `process()` on the signal, and hot-reloads on save. `ReadMe.md` is the user-facing
-contract; **`docs/PRODUCTION-PLAN.md` is the authoritative roadmap** — its settled decisions (D1–D6),
-its phases, and the audit findings behind them. Tick its items (with the PR) as they land. Its
-Phase 9 is a second object, **`tap.python`**, a Python class as a Max object without audio (what a
-method returns is what it outputs): designed in `docs/TAP-PYTHON-PLAN.md` (decisions D7–D11), built
-in the same binary by 9.3; its documentation (9.4) and runtime tests (9.5) are still to come.
+messages, calls its `process()` on the signal, and hot-reloads on save. Since 2.0.0 the package has a
+second object, **`tap.python`**, a Python class as a Max object without audio (what a method returns
+is what it outputs), in the same binary: designed in `docs/TAP-PYTHON-PLAN.md` (decisions D7–D11).
+**The book (`book/`, published at https://tap.github.io/PythonTap/) is the user-facing contract**;
+`ReadMe.md` is only the front door — what it is, install, a quick start, links — so each fact has
+one home (plan 9.7). **`docs/PRODUCTION-PLAN.md` is the authoritative roadmap** — its settled
+decisions (D1–D6), its phases, and the audit findings behind them. Tick its items (with the PR) as
+they land.
 
 ## Layout (D6: a host-independent core plus a thin Max wrapper)
 
@@ -37,7 +39,7 @@ in the same binary by 9.3; its documentation (9.4) and runtime tests (9.5) are s
   (plan 6.3); `tap_python_reload_bench` times the audio buffers while the class reloads, with the
   audio thread scheduled as Core Audio's are (plan 2.6: why the runtime sets a 0.5 ms switch
   interval). `scripts/update-perf-docs.py` builds it (Release), runs it, and
-  rewrites the ReadMe's generated performance tables — with `--max`, Max's CPU meter too, through
+  rewrites the book's generated performance tables (`book/src/performance.md`) — with `--max`, Max's CPU meter too, through
   `runtime-tests/run.py --session perf`. Never hand-edit those tables; measure on an idle machine.
 - **`source/projects/tap.python_tilde/`** — one binary, two Max classes (D11), its `ext_main`
   registering both: the Min external `tap.python~` (`tap.python_tilde.h`) and, after it, `tap.python`,
@@ -61,6 +63,14 @@ in the same binary by 9.3; its documentation (9.4) and runtime tests (9.5) are s
   lists `tap.python` as a reference page, not an object — it has no file of its own, as Max's
   `init`-mapped objects (`mc.abs~`) have not. `scripts/check-docs.py` (CI) checks them all: the XML
   well-formed, every link resolving, every patch cord whole.
+- **`book/`** — the book (plan 9.7), mdBook 0.4.40: `book/src/SUMMARY.md` and a chapter per
+  topic. The examples and the CHANGELOG are included as they are (`{{#include}}`), never copied; the
+  notebook page is rendered from `python/allpass-doc.ipynb` by `scripts/notebook-to-book.py` before
+  `mdbook build book` (generated, gitignored); the performance tables are written by
+  `scripts/update-perf-docs.py`. `scripts/check-docs.py` checks every chapter is listed and every
+  include and relative link (the ReadMe's too) resolves. CI's `book` job builds it, warnings as
+  errors; `book-pages.yml` publishes it from `main`. The favicons in `book/theme/` are TapHouse
+  copies (`sync.sh --icon PythonTap`), drift-checked like the rest.
 - **`init/tap.python.txt`** — read by Max at launch: `tap.python` and `mc.tap.python~` are mapped to
   the `tap.python~` binary (the second through Max's MC wrapper, as Max's own `init/` maps
   `mc.cycle~`); `assemble-package.py` fails a package without both lines.
@@ -122,7 +132,7 @@ python3 runtime-tests/run.py
 ```
 
 CI (`build.yml`): `linux-core` and `linux-max-glue` (each release, asan-ubsan, tsan — the glue
-test's `TAP_PYTHON_SANITIZE`, as the core's; the release row also runs `scripts/check-docs.py`), `macos` (universal + `lipo`/`otool` checks, including
+test's `TAP_PYTHON_SANITIZE`, as the core's; the release row also runs `scripts/check-docs.py`), `book`, `macos` (universal + `lipo`/`otool` checks, including
 no absolute rpath, and the package assembled, which fails without `init/tap.python.txt`), `windows`. `style.yml`: TapHouse drift check,
 clang-format, clang-tidy (a clang-tidy failure or crash fails the gate, not just a finding). Workflows
 run with `contents: read`, pin third-party actions by commit SHA (tag noted beside it), and cancel
@@ -131,6 +141,8 @@ on runners of that architecture — the runtime is per arch, only libpython is u
 the secrets exist, merges the three into one package for every platform (`assemble-package.py
 --merge`: each runtime in `support/<platform>`, where the external looks before `support/`), and
 attaches all the zips + SHA256s to a release — a pre-release for 0.x, a draft from 1.0.
+`book-pages.yml`: on a push to `main` that changes the book or what it includes, builds it and
+deploys it to GitHub Pages (`pages: write`, `id-token: write` — the one workflow that writes).
 
 ## Threads and the GIL (load-bearing)
 
@@ -208,7 +220,7 @@ attaches all the zips + SHA256s to a release — a pre-release for 0.x, a draft 
 - **Honest limits are pinned, not hidden.** A known bug or limit gets a test that states it (named
   for the promise, with the plan item that will change it); fixes land against a test that reproduces
   the bug first. The core battery is where that happens. Limits no test can pin are written in the
-  ReadMe's errors paragraph and stay there: the guards catch every Python *exception*, not a
+  book's Errors and limits chapter and stay there: the guards catch every Python *exception*, not a
   process exit below Python (`os._exit()`), a crash in a C extension, or code that never returns;
   helper modules load once per session; a second embedded CPython in the same Max is unsupported.
   Never let a document claim more than that.
@@ -219,7 +231,8 @@ attaches all the zips + SHA256s to a release — a pre-release for 0.x, a draft 
   tests through its compile database.
 - **C++20** everywhere; the root `CMakeLists.txt` forces it on every object and `_test` target (Min pins
   C++17), as TapTools-Max does.
-- **Keep in sync when behavior changes:** `ReadMe.md`, the object's min metadata
+- **Keep in sync when behavior changes:** the book's chapters (and `ReadMe.md`, if its quick start
+  or install steps change), the object's min metadata
   (`MIN_DESCRIPTION`, argument and message descriptions — min regenerates
   `docs/tap.python~.maxref.xml` from them when Max loads an external newer than the page, so never
   hand-edit the page: rebuild, run Max once — `runtime-tests/run.py` says when the page was

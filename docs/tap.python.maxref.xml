@@ -3,7 +3,7 @@
 <?xml-stylesheet href="./_c74_ref.xsl" type="text/xsl"?>
 
 <!-- Written by hand (plan 9.4): tap.python is a plain SDK class, so nothing generates this page as
-     min generates tap.python~'s. Keep it in step with the ReadMe's "Objects without audio" section
+     min generates tap.python~'s. Keep it in step with the book's "Objects without audio" chapter
      and with the object (source/projects/tap.python_tilde/tap.python.h). -->
 <c74object name="tap.python" module="PythonTap" category="Programming">
 

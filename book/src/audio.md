@@ -1,0 +1,11 @@
+# Audio: `tap.python~`
+
+A method `process()` runs on the signal, in one of two forms chosen by its type hint:
+- `process(self, x: np.ndarray) -> np.ndarray` is called **once per signal vector** with a numpy array of the input and must return an array of the same length (any numeric dtype, or a list; it is converted). This is the form to use for anything that must run in real time — see `python/numpy_gain.py`, and `python/numpy_allpass.py` for a filter with feedback. The input array is reused from one call to the next: copy it if you want to keep it.
+- `process(self, x: float) -> float` is called **once per sample** — simplest for sketching; the call is cheap, but every line of Python in it runs once per sample (see [the performance chapter](performance.md)).
+
+Its parameters are the object's signal inlets and its return hint its outlets: `process(self, left: np.ndarray, right: np.ndarray) -> tuple[np.ndarray, np.ndarray]` makes an object with two of each (see `python/stereo_width.py`), and `process(self) -> float`, with no inputs, a generator — the first inlet is always there, for messages. The inputs are all `np.ndarray` or all per sample, and a tuple return must say how many values it has (`tuple[float, float]`). A save that changes how many changes the object's inlets and outlets to match, keeping the patch cords of those that stay. Wrap the object in `mc.` — `[mc.tap.python~ numpy_gain]` — to run one instance per channel of a multichannel signal. A class's attributes and messages are each instance's own, so Max's MC wrapper passes them on through its own messages, not as they are: `setvalue 2 gain 0.1` to the second instance, `applyvalues gain 0.5 0.25` one value to each; a plain `gain 0.5` is not understood. Output that is not a number, or not finite (NaN, infinity), is replaced with 0.0 and reported once in the Max console, as is a return with the wrong number of values.
+
+## Audio settings
+
+An optional method `prepare(self, sample_rate: float, vector_size: int) -> None` is called with Max's sample rate and vector size before the object processes any audio, again whenever they change, and on every reload before the new code runs. `python/allpass.py` uses it to size its delay line.

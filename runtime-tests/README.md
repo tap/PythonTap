@@ -21,7 +21,8 @@ instead of this checkout: its external, its runtime and its `python/` folder; th
 patchers and the fixtures still come from here (plan 6.5).
 
 Needs macOS, Max 9 in `/Applications` (`--max` for another), the external built, the runtime
-installed, and the package in Max's `Packages` folder as `PythonTap` (see the ReadMe). Quit Max
+installed, and the package in Max's `Packages` folder as `PythonTap` (see the book's
+[Installing](https://tap.github.io/PythonTap/installing.html)). Quit Max
 first: the runner launches its own, drives it over OSC (UDP 4791/4792 on localhost) and quits it.
 Unlicensed Max runs patchers, which is all this needs.
 
@@ -66,7 +67,7 @@ runtime-tests/
    hour, sampling Max's memory every minute, and writes a summary — memory, reloads, and what the
    patcher logged each minute — to `logs/soak.summary`; **session `perf`** (plan 6.3) runs
    `perf/tap.python~.perf.maxpat` and averages Max's CPU-meter readings into `logs/perf.json`,
-   which `scripts/update-perf-docs.py --max` turns into the ReadMe's table.
+   which `scripts/update-perf-docs.py --max` turns into the book's table (`book/src/performance.md`).
 7. Reads the results from the harness's SQLite database (in the installed `max-test`) and prints
    them. Max's standard output goes to `runtime-tests/logs/` — only min's own lines appear there;
    the console errors seen during a failing test are printed from its log instead.
