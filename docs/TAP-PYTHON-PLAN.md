@@ -8,7 +8,7 @@ change — and the plan to build it (Phase 9 of the production plan, which point
 Drafted 2026-10-02 against 1.0.0 and audited the same day (`AUDIT-TAP-PYTHON-PLAN.md`: two
 blockers, six major findings, nine minor; its addendum of 2026-10-09 records what 1.0.1 and 1.0.2
 changed). **Revised 2026-10-09 against 1.0.2** for every finding; the [revision record](#revision-record)
-at the end says what each changed. 9.0 to 9.4 are built — the spike ran in Max on a Mac
+at the end says what each changed. 9.0 to 9.5 are built — the spike ran in Max on a Mac
 and on Windows: its answers are under [9.0](#what-90-found), and the design below follows them. Tick the
 items below (with the PR) as they land, and keep the design current where a PR decides differently.
 
@@ -450,7 +450,7 @@ third was Windows-only.
   9.5's), which also shows that the wrapper passes a class's attributes and messages on only through
   `setvalue` and `applyvalues`. The ReadMe's message sentence is the perf script's, written when
   the tables are next measured (9.6). Checked in Max 9.1.5 on the Mac; Windows in 9.6.)*
-- [ ] **9.5 Runtime tests.** The patchers above in `make_patchers.py` (9.4 added `tap.python~.mc`,
+- [x] **9.5 Runtime tests** (#50). The patchers above in `make_patchers.py` (9.4 added `tap.python~.mc`,
   for the `init/` mapping of `mc.tap.python~`); `run.py` aware of the
   second object (the `init/` mapping in the installed package, the `--package` mode, the
   reference-page rule for `tap.python~`'s page only). What 9.0's runner learned: a fresh Max
@@ -458,7 +458,22 @@ third was Windows-only.
   opened with an "open document" event, never `max openfile` through the harness's OSC (it crashes
   Max); and Max's log drops a `[print]`'s name. The soak session (6.2) gains a
   `tap.python` driven by a `metro` while its file is saved every second: every output checked,
-  memory flat, the console counts exact.
+  memory flat, the console counts exact. *(As built: seven `tap.python.*` patchers — load (opened
+  first, in a Max with Restore Windows on Launch off for the run, so `init/` must find the object),
+  outputs (every row of the table), messages (attributes, `get<attr>` from the dumpout, the
+  forwarder), reload (an outlet added before the dumpout takes a scripted cord and carries; one
+  removed takes its cord; a broken save reported once), shared (one file for both kinds: both follow
+  a save, each kind's reserved name said once — `mode` by `tap.python~`, `dumpout` by `tap.python`,
+  as Max answers `dumpout` on neither but the class that registers it), threads (a `metro` every 5
+  ms, every output against its input, on the main, scheduler and audio threads) and faults. Outputs
+  are checked as `[tosymbol]` writes them — floats with four decimals, `symbol` kept before a
+  string — which a probe in Max found; the README records it. The `[print]`-free checks needed no
+  `max openfile`: run.py opens patchers through the harness's `test.master run`, which 6.1 already
+  used. `run.py` requires the package's `init/` lines, warns if the hand-written page changes, and
+  puts Max's preferences back. All 21 runtime tests pass in Max 9.1.5 on macOS; the hour-long soak
+  passed all 18 of its checks, the `tap.python` answering every message of a 10 ms metro correctly
+  for 60 minutes of saves: Max's memory 658 MB a minute in, 663 MB at the end (peak 675), 3601
+  executions of the file, Python's object count between 18,700 and 22,000 throughout.)*
 - [ ] **9.6 The release session, Mac and Windows.** Build, run the whole runtime suite on the Mac,
   check the help patcher and re-save it, commit the page Max writes for `tap.python~`, the hand
   checks the tests cannot make (`get<attr>` through the dumpout in a patcher, attrui on a

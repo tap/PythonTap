@@ -828,7 +828,7 @@ row shipped what only a host platform could show.
   generator); a vignette and three tutorials with patchers for the Documentation window; an
   Extras overview named as the landing patcher; help patchers with tabs for both objects; CI
   checks for the hand-made XML and JSON.
-- [ ] **9.5 Runtime tests:** the `tap.python.*` patchers in `make_patchers.py`; `run.py` aware of
+- [x] **9.5 Runtime tests** (#50)**:** the `tap.python.*` patchers in `make_patchers.py`; `run.py` aware of
   the second object; the soak session gains a `metro`-driven `tap.python` under saves.
 - [ ] **9.6 The release session, Mac and Windows:** the whole suite on the Mac, the help patcher
   checked and re-saved, Max's page for `tap.python~` committed, the hand checks; the package by
