@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+
+<?xml-stylesheet href="./_c74_ref.xsl" type="text/xsl"?>
+
+<!-- Written by hand (plan 9.4): tap.python is a plain SDK class, so nothing generates this page as
+     min generates tap.python~'s. Keep it in step with the ReadMe's "Objects without audio" section
+     and with the object (source/projects/tap.python_tilde/tap.python.h). -->
+<c74object name="tap.python" module="PythonTap" category="Programming">
+
+	<digest>
+		Run a Python class as a Max object
+	</digest>
+	<description>
+		Run a Python class as a Max object without audio: messages in, and what its methods return out. The argument names a file in the package's python folder, which must define a class of the same name. The class's type-annotated public fields become attributes and its public methods messages, as in <o>tap.python~</o>; what a method returns is output, converted by its type, from as many outlets as the widest tuple return hint among its methods asks for. The file is watched and reloaded when saved, keeping attribute values.
+	</description>
+
+	<discussion>
+		<p>
+			<o>tap.python</o> loads its class file exactly as <o>tap.python~</o> does — the same python folder, the same attributes and messages from the class's type hints, the same hot reload, console and error guards; one file can serve both objects at once — but runs no audio. Instead, what each method returns is what the object outputs, before the message returns:
+		</p>
+		<ul>
+			<li>None outputs nothing; a bool an int, 0 or 1; an int an int; a float a float.</li>
+			<li>A str outputs <m>symbol</m> followed by the string, one symbol whatever it holds: <o>sel</o> matches it, <o>route</o> needs <m>route symbol</m> first, and a message box's <m>set $1</m> displays it.</li>
+			<li>A list, a range, a one-dimensional numpy array, or a tuple from a method not hinted to return a tuple outputs a list; when its first element is a str, the message that names, with the rest as arguments (["note", 60, 100] outputs <m>note 60 100</m>).</li>
+			<li>A method hinted to return tuple[A, B, ...] fills one outlet per value, right to left; None in a slot outputs nothing from that outlet.</li>
+			<li>Anything else — a dict, a set, a two-dimensional array, an object — outputs nothing, and the console says why.</li>
+		</ul>
+		<p>
+			A message runs on the thread it arrives on, as an ordinary Max object's does: the main thread, or the scheduler thread with Overdrive on. With Scheduler in Audio Interrupt on, a message from the scheduler runs Python on the audio thread, which the object says once per session: send such messages through <o>deferlow</o> to run them on the main thread.
+		</p>
+	</discussion>
+
+	<!--METADATA-->
+	<metadatalist>
+		<metadata name="author">Tim Place</metadata>
+		<metadata name="tag">PythonTap</metadata>
+		<metadata name="tag">Programming</metadata>
+		<metadata name="tag">Languages</metadata>
+	</metadatalist>
+
+	<!--INLETS-->
+	<inletlist>
+		<inlet id="0" type="anything">
+			<digest>Messages for the class's methods, and its attributes</digest>
+			<description>A message calls the class's method of that name with its arguments; an attribute's name sets it, and get followed by its name outputs it from the dumpout.</description>
+		</inlet>
+	</inletlist>
+
+	<!--OUTLETS-->
+	<outletlist>
+		<outlet id="0" type="anything">
+			<digest>What a method returns</digest>
+			<description>What a method returns, converted by its type — or, from a method hinted to return a tuple of several values, the first of them. A method's tuple return hint of n values gives the object n such outlets, filled right to left.</description>
+		</outlet>
+		<outlet id="1" type="anything">
+			<digest>Dumpout: attribute values</digest>
+			<description>The rightmost outlet: an attribute's name and value, in answer to get followed by its name (<m>getsteps</m> outputs <m>steps 8</m>).</description>
+		</outlet>
+	</outletlist>
+
+	<!--ARGUMENTS-->
+	<objarglist>
+		<objarg name="source" optional="1" type="symbol">
+			<digest>Python class file</digest>
+			<description>The name of a .py file in the package's python folder, without the extension, which must define a class of the same name; it must be a valid Python identifier. Without an argument, python/default.py is loaded.</description>
+		</objarg>
+	</objarglist>
+
+	<!--MESSAGES-->
+	<methodlist>
+		<method name="bang">
+			<arglist />
+			<digest>Call the class's bang method</digest>
+			<description>Calls the class's method named bang, and outputs what it returns. Without one, the class's anything method, if it has one.</description>
+		</method>
+		<method name="int">
+			<arglist>
+				<arg name="value" optional="0" type="int" />
+			</arglist>
+			<digest>Call the class's int method</digest>
+			<description>Calls the class's method named int with the number, and outputs what it returns. Without one, the class's anything method, if it has one.</description>
+		</method>
+		<method name="float">
+			<arglist>
+				<arg name="value" optional="0" type="float" />
+			</arglist>
+			<digest>Call the class's float method</digest>
+			<description>Calls the class's method named float with the number, and outputs what it returns. Without one, the class's anything method, if it has one.</description>
+		</method>
+		<method name="list">
+			<arglist>
+				<arg name="values" optional="0" type="list" />
+			</arglist>
+			<digest>Call the class's list method</digest>
+			<description>Calls the class's method named list with the list's elements — all of them, as one list or numpy array, when its last parameter is hinted list[...] or np.ndarray — and outputs what it returns. Without one, the class's anything method, if it has one.</description>
+		</method>
+		<method name="anything">
+			<arglist>
+				<arg name="arguments" optional="1" type="list" />
+			</arglist>
+			<digest>Call the class's method of that name</digest>
+			<description>A message calls the class's public method of that name, its arguments converted by the method's type hints, and outputs what it returns; an attribute's name sets the attribute. A message the class has no method or attribute for goes to the class's method named anything, with the message's name as its first argument — <code>def anything(self, selector: str, *args)</code> — and is otherwise not understood.</description>
+		</method>
+		<method name="filechanged">
+			<arglist />
+			<digest>Reload the Python file</digest>
+			<description>Reload the Python file. The object's file watcher sends it when the file is saved; send it yourself to force a reload.</description>
+		</method>
+	</methodlist>
+
+	<!--ATTRIBUTES-->
+	<attributelist>
+	</attributelist>
+
+	<misc name="Attributes">
+		<entry name="The class's fields">
+			<description>Each type-annotated public field of the class is an attribute: int and bool fields are long (a bool an on/off toggle), float fields float64, and any other a symbol. They are set and read as any attribute is — in the object box (<m>@steps 16</m>), by message, with <o>attrui</o> and <o>getattr</o>, and get followed by the name outputs the value from the dumpout — and keep their values when the file is saved.</description>
+		</entry>
+	</misc>
+
+	<misc name="Output">
+		<entry name="anything">
+			<description>What a method returns, converted by its type: nothing for None; an int or a float; <m>symbol</m> and the string for a str; a list for a list, a range or a numpy array, or the message a list names when its first element is a str; one value per outlet from a method hinted to return a tuple.</description>
+		</entry>
+	</misc>
+
+	<!--SEEALSO-->
+	<seealsolist>
+		<seealso name="tap.python~" />
+		<seealso name="js" />
+		<seealso name="node.script" />
+		<seealso name="deferlow" />
+		<seealso name="sel" />
+	</seealsolist>
+
+</c74object>

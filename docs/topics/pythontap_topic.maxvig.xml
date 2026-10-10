@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?xml-stylesheet href="_c74_vig.xsl" type="text/xsl"?>
+<vignette name="PythonTap Package Overview" package="PythonTap">
+	<metadatalist>
+		<metadata name="author">Tim Place</metadata>
+		<metadata name="tag">PythonTap</metadata>
+		<metadata name="tag">Python</metadata>
+		<metadata name="tag">Languages</metadata>
+	</metadatalist>
+
+	<h1>PythonTap</h1>
+	<p>
+		Write Max objects in Python. PythonTap runs a Python class as a Max object: the class's typed
+		fields become attributes, its methods messages, and saving the file reloads it in place. It comes
+		with CPython 3.13, numpy and attrs.
+	</p>
+
+	<h2>Objects</h2>
+	<ul>
+		<li><openfilelink filename="tap.python~.maxhelp">tap.python~</openfilelink> - Process audio with a Python class: its process() method runs on the signal, per sample or per vector.</li>
+		<li><openfilelink filename="tap.python.maxhelp">tap.python</openfilelink> - Run a Python class as a Max object without audio: what a method returns is what it outputs.</li>
+	</ul>
+
+	<h2>Learning</h2>
+	<ul>
+		<li><link type="vignette" name="pythontap_writing">Writing Max Objects in Python</link> - the guide to both objects.</li>
+		<li><link type="tutorial" name="pythontap_01_gain">Tutorial 1: A gain, per sample and per vector</link></li>
+		<li><link type="tutorial" name="pythontap_02_filter">Tutorial 2: A filter that knows the sample rate</link></li>
+		<li><link type="tutorial" name="pythontap_03_control">Tutorial 3: An object without audio</link></li>
+		<li><openfilelink filename="PythonTap Overview.maxpat">PythonTap Overview</openfilelink> - both objects at work, from the Extras menu.</li>
+	</ul>
+
+	<seealsolist>
+		<seealso name="tap.python~" />
+		<seealso name="tap.python" />
+	</seealsolist>
+</vignette>

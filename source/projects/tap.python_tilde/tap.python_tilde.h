@@ -55,7 +55,7 @@ class python : public object<python>, public vector_operator<> {
                     "printed to the Max console and never take Max down."};
     MIN_TAGS{"programming"};
     MIN_AUTHOR{"Tim Place"};
-    MIN_RELATED{"js, node.script"};
+    MIN_RELATED{"tap.python, js, node.script"};
 
     // The first inlet and outlet; the constructor adds as many more as the class's process()
     // declares, and a reload changes them to match (plan 2.4).

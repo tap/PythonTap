@@ -31,6 +31,8 @@ class default:
 [tap.python~ default]   ← loads python/default.py, exposes a 'gain' attribute
 ```
 
+`tap.python`, in the same package, runs a class as an object without audio — messages in, messages out — and **outputs what its methods return**: a bang to `[tap.python euclid]` outputs a Euclidean rhythm as a list. See [Objects without audio](#objects-without-audio-tappython).
+
 ## Requirements
 
 - **Max 9** or later (macOS 11.0+ on Intel or Apple Silicon, Windows 10 22H2+ / Windows 11, 64-bit).
@@ -44,7 +46,7 @@ Download a package from the [releases page](https://github.com/tap/PythonTap/rel
 - `PythonTap-<version>-macos-x86_64.zip` — Intel Macs, and Apple Silicon Macs running Max under Rosetta.
 - `PythonTap-<version>-windows-x64.zip` — Windows.
 
-Unzip it into your `Documents/Max 9/Packages` folder, restart Max, and open the `tap.python~` help patcher. Each zip has a `.sha256` beside it, and the release's `SHA256SUMS` lists them all. The package's `licenses/` folder holds the license of everything it ships.
+Unzip it into your `Documents/Max 9/Packages` folder, restart Max, and open **PythonTap Overview** from the Extras menu — or the help patcher of `tap.python~` or `tap.python`, or the package's guide and tutorials in the Documentation window. Each zip has a `.sha256` beside it, and the release's `SHA256SUMS` lists them all. The package's `licenses/` folder holds the license of everything it ships.
 
 Releases are not code-signed yet. On a Mac, a downloaded unsigned external is quarantined and Max will not load it; clear the quarantine once after unzipping:
 ```sh
@@ -94,7 +96,7 @@ Python sources live in the package's `python` folder. `[tap.python~ name]` loads
   - `process(self, x: np.ndarray) -> np.ndarray` is called **once per signal vector** with a numpy array of the input and must return an array of the same length (any numeric dtype, or a list; it is converted). This is the form to use for anything that must run in real time — see `python/numpy_gain.py`, and `python/numpy_allpass.py` for a filter with feedback. The input array is reused from one call to the next: copy it if you want to keep it.
   - `process(self, x: float) -> float` is called **once per sample** — simplest for sketching; the call is cheap, but every line of Python in it runs once per sample (see [the performance note](#a-note-on-performance)).
 
-  Its parameters are the object's signal inlets and its return hint its outlets: `process(self, left: np.ndarray, right: np.ndarray) -> tuple[np.ndarray, np.ndarray]` makes an object with two of each (see `python/stereo_width.py`), and `process(self) -> float`, with no inputs, a generator — the first inlet is always there, for messages. The inputs are all `np.ndarray` or all per sample, and a tuple return must say how many values it has (`tuple[float, float]`). A save that changes how many changes the object's inlets and outlets to match, keeping the patch cords of those that stay. Wrap the object in `mc.` to run one instance per channel of a multichannel signal. Output that is not a number, or not finite (NaN, infinity), is replaced with 0.0 and reported once in the Max console, as is a return with the wrong number of values.
+  Its parameters are the object's signal inlets and its return hint its outlets: `process(self, left: np.ndarray, right: np.ndarray) -> tuple[np.ndarray, np.ndarray]` makes an object with two of each (see `python/stereo_width.py`), and `process(self) -> float`, with no inputs, a generator — the first inlet is always there, for messages. The inputs are all `np.ndarray` or all per sample, and a tuple return must say how many values it has (`tuple[float, float]`). A save that changes how many changes the object's inlets and outlets to match, keeping the patch cords of those that stay. Wrap the object in `mc.` — `[mc.tap.python~ numpy_gain]` — to run one instance per channel of a multichannel signal. A class's attributes and messages are each instance's own, so Max's MC wrapper passes them on through its own messages, not as they are: `setvalue 2 gain 0.1` to the second instance, `applyvalues gain 0.5 0.25` one value to each; a plain `gain 0.5` is not understood. Output that is not a number, or not finite (NaN, infinity), is replaced with 0.0 and reported once in the Max console, as is a return with the wrong number of values.
 - **Worker mode** — by default `process()` runs on Max's audio thread, so whatever else holds Python's interpreter — a reload, a message, another instance — holds up the audio while it does. With `@mode worker` it runs on a thread of its own instead, `@latency` milliseconds behind the audio (30 by default, rounded up to whole signal vectors): the audio thread then only copies vectors to and from that thread, and never waits for Python. Max computes a whole I/O vector's worth of signal vectors at once, so `@latency` must be longer than the I/O vector (Options > Audio Status: 512 samples is 11.6 ms at 44.1 kHz) — what is left over is the time Python has to keep up; raise it with a larger I/O vector. If Python falls further behind, the vectors it is late for are output as silence and the console says so, once per load; the delay stays the same. The read-only `@latencysamples` gives the delay in samples, for aligning other signal paths (a `delay~`, say); in direct mode it is 0. The worker thread has the real-time scheduling of an audio thread. `@mode` and `@latency` take effect as soon as they are set, by rebuilding the signal chain. Stopping the worker (DSP off, a chain rebuild, the object deleted) waits up to 100 ms for the vector in progress; a `process()` that has not returned by then is interrupted with a `WorkerStopped` exception (a `BaseException`, so `except Exception:` does not swallow it), that vector is silence, the console says so once, and the class stays bound; one that still has not returned after a further 250 ms is blocked in a call Python cannot interrupt (`time.sleep`, a long C call) and is abandoned: audio continues on a new worker, while the abandoned thread keeps costing a core until Max quits.
 - **Audio settings** — an optional method `prepare(self, sample_rate: float, vector_size: int) -> None` is called with Max's sample rate and vector size before the object processes any audio, again whenever they change, and on every reload before the new code runs. `python/allpass.py` uses it to size its delay line.
 - **Hot reload** — saving the `.py` file reloads it in place, as a fresh module (names you deleted from the file are gone): the attributes and messages follow the new class, and audio resumes with the new code. Until the new code is ready the object keeps running the old one, so a successful reload swaps in without a gap in the audio. Attribute values carry over — set from the patcher or by your own code — for every attribute the new class still has with the same type; an attribute whose type changed starts from its new default, and one you removed disappears from the object. If the file has an error, the object prints the traceback to the Max console and outputs silence until the next successful reload (and the attribute values come back with it); a save that breaks a file shared by many objects is reported once, not by each, while an object created later with the file still broken says so again. Every object using the same file shares one execution of it per save, and the console says so once — `Loaded name.py: process() bound, one call per sample` (or per vector), from whichever object ran the file — along with anything true of the class, such as a method skipped for its name; a save that changes nothing reloads silently. Errors that belong to one object, such as an exception in its constructor, are still reported by each. Max's file watcher notices a save within a couple of seconds, but it coalesces saves made in quick succession — a script saving once a second, say — so the object then reloads for only some of them, and can lag behind until they stop; sending the object `filechanged` reloads it at once.
@@ -140,6 +142,50 @@ In Max itself, measured by Max's own CPU meter — which covers everything the a
 Max's own DSP CPU meter (`adstatus cpu`): the mean of ten readings a second apart with the instances running in a `poly~`, less the reading with no object (0.0%); *each* divides by the number running. The audio device ran at 96 kHz with 64-sample signal vectors and a 512-sample I/O vector. The meter reads in whole percent. Measured 2026-09-30 with Max 9.1.5, on Intel(R) Core(TM) i9-8950HK CPU @ 2.90GHz, macOS 15.7.9 (x86_64), CPython 3.13.14, numpy 2.5.3.
 
 <!-- perf-max:end -->
+
+## Objects without audio: `tap.python`
+
+`[tap.python name]` runs a class as an ordinary Max object — messages in, messages out, no signal — with everything [Writing a class](#writing-a-class) says but the audio: the same `python` folder and loader (one file can serve a `tap.python~` and a `tap.python` at once, executed once per save), the same attributes, messages, hot reload, console and error guards. And one thing more: **what a method returns is what the object outputs**.
+
+```python
+from attrs import define, field
+
+@define
+class euclid:
+    steps: int = field(default = 8)
+    pulses: int = field(default = 3)
+
+    def bang(self) -> list[int]:
+        steps = max(1, self.steps)
+        return [int((i * self.pulses) % steps < self.pulses) for i in range(steps)]
+```
+
+```
+[tap.python euclid]   ← a bang outputs 1 0 0 1 0 0 1 0; steps 16, @pulses 5 or an attrui change it
+```
+
+- **Output** — what a method returns goes out of the object before the message returns, converted by its type:
+
+  | The method returns | The object outputs |
+  |---|---|
+  | `None` | nothing |
+  | a `bool` (numpy's too) | an int, 0 or 1 |
+  | an `int` (anything with `__index__`: `np.int64`, an `IntEnum`) | an int (64-bit: a value past it is reported, and nothing is output) |
+  | a `float` (anything with `__float__`: `np.float32`) | a float — NaN and infinity as they are |
+  | a `str` | `symbol <s>`: one symbol, whatever it holds — `"hello world"` is one symbol, `"60"` the symbol and not the number |
+  | a `list`, a `range`, a 1-D `np.ndarray`, or a `tuple` from a method not hinted `-> tuple[…]` | a list, each element by the rows above — or, when the first element is a `str`, the message it names (`["note", 60, 100]` outputs `note 60 100`); an empty one outputs nothing |
+  | *n* values from a method hinted `-> tuple[…]` of *n* members | one value per outlet, right to left; `None` in a slot outputs nothing from that outlet |
+  | anything else — a `dict`, a `set`, `bytes`, a 2-D array, an object — or a list holding `None` or another list | nothing, and the console says why |
+
+  A `str` is output as `symbol <s>` because that is what reaches every receiver as the string it is: as the message it names, `"bang"`, `"int"` and `"list"` would not be data at all. `[sel C]` matches it; `[route C]` does not (put `[route symbol]` first), `[prepend]` keeps the word `symbol`, and a message box's `[set $1(` displays it. To output the message a string names, return it in a list — `["start"]`.
+- **Outlets** — the object has as many outlets as the widest `tuple[…]` return hint among its methods, at least one, plus a dumpout at the right: `getsteps` outputs `steps 8` from it, as a Max object with attributes does. The hint is the one place a type hint changes what a value does: unhinted, a returned tuple is a list from the first outlet. A tuple of unsaid length (`tuple[int, ...]`) keeps one outlet and is output as a list, which the console says once. A save that changes how many outlets the class needs changes the object's outlets in place, keeping the patch cords of those that stay.
+- **Messages** — as in `tap.python~`, called according to their signatures, with `int`, `float`, `symbol`, `bang` and `list` answering those standard messages. A method named `anything` answers every message the class has no method or attribute for, with the selector first — `def anything(self, selector: str, *args)`; without one, the object says it doesn't understand, as Max objects do. `process()` and `prepare()` are ordinary methods here: `process 0.5` calls the class's `process()` and outputs what it returns, a way to try a filter sample by sample. The names Max or the object handle themselves are `tap.python~`'s less the audio ones (`dsp64`, `mode`, `latency` and the rest are free), plus `dumpout`.
+- **Threads** — a message runs on the thread it arrives on, as an ordinary Max object's does — Max's main thread, or its scheduler thread with Overdrive on — and its result is output before the message returns, so `trigger`, `metro` and the rest compose with it as with any object. The limits:
+  - A method holds the thread it runs on for as long as it takes: under Overdrive, a heavy method driven by a `metro` holds Max's scheduler meanwhile. Sent through `[deferlow]`, it runs on the main thread instead.
+  - With **Scheduler in Audio Interrupt** on (and audio running), the scheduler thread is the audio thread, so a message from a `metro` runs Python on the audio thread, where it waits for any other Python — a reload, another object's message — and can interrupt the audio. The object says so in the console, once per session; `[deferlow]` takes the work off the audio thread.
+  - What a method returns is the only output: a thread your class starts (`threading.Thread`) has no outlet to reach.
+  - A `dict` is not output as a Max dictionary yet.
+- **Performance** — a message costs the conversion of its arguments in, your method, and the conversion of what it returns out, all on the thread the message came on; [the performance note](#a-note-on-performance) has what the bridge itself costs.
 
 ## Building from source
 

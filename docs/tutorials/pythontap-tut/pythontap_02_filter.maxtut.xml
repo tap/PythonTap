@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?xml-stylesheet href="./_c74_tut.xsl" type="text/xsl"?>
+<chapter name="PythonTap Tutorial 2: A Filter That Knows the Sample Rate">
+	<openfile name="PythonTap Tutorial 2" patch="pythontap_02_filter.maxpat"/>
+	<previous name="pythontap_01_gain"/>
+	<next name="pythontap_03_control"/>
+
+	<header>PythonTap Tutorial 2: A Filter That Knows the Sample Rate</header>
+
+	<subhead>State, and the audio settings</subhead>
+	<body>
+		A gain needs nothing but its input. A filter remembers the samples before, and to turn a time in
+		milliseconds or a frequency in hertz into samples it needs the sample rate. This tutorial uses
+		allpass.py, a Schroeder allpass filter, to show both.
+	</body>
+	<body><openpatchlink>Open the tutorial patcher</openpatchlink>, and turn on the audio.</body>
+
+	<subhead>prepare()</subhead>
+	<body>
+		An optional method <m>prepare(self, sample_rate: float, vector_size: int) -> None</m> is called
+		with Max's sample rate and signal vector size before the object processes any audio, again
+		whenever either changes, and on every reload before the new code runs. allpass.py uses it to size
+		its delay line, and prints what it did: look in the Max console for "Setting delay to 1.0 ms".
+	</body>
+
+	<subhead>Hearing an allpass</subhead>
+	<body>
+		An allpass filter passes every frequency at the same level and shifts their phase: alone, it
+		sounds like its input. Mixed with the dry signal, as in the patcher, the phase shifts cancel some
+		frequencies and reinforce others. Change <at>delay</at> and <at>alpha</at> with the <o>attrui</o>
+		objects and listen to the notches move.
+	</body>
+
+	<subhead>Validators</subhead>
+	<body>
+		The class's fields are attrs fields, and alpha has a validator: it must stay strictly between -1
+		and 1. Click <m>alpha 1</m>: the validator raises an exception, its traceback prints to the Max
+		console, and alpha keeps the value it had. An exception in your code never takes Max down.
+	</body>
+
+	<subhead>The same filter, per vector</subhead>
+	<body>
+		numpy_allpass.py computes exactly what allpass.py does — sample for sample — but a vector at a
+		time, with numpy. Switch to it and compare the CPU meter: per sample, every line of the filter's
+		Python runs once per sample; per vector, a few numpy expressions run once per vector.
+	</body>
+
+	<subhead>Your own</subhead>
+	<body>Here is a one-pole lowpass filter, per sample, with its cutoff in hertz:</body>
+	<code>import math
+from attrs import define, field
+
+@define
+class onepole:
+    cutoff: float = field(default = 1000.0)     # Hz
+
+    _fs: float = field(init = False, default = 48000.0)
+    _y:  float = field(init = False, default = 0.0)
+
+    def prepare(self, sample_rate: float, vector_size: int) -> None:
+        self._fs = sample_rate
+
+    def process(self, x: float) -> float:
+        a = math.exp(-2.0 * math.pi * self.cutoff / self._fs)
+        self._y = (1.0 - a) * x + a * self._y
+        return self._y</code>
+	<body>
+		Save it as python/onepole.py and make a <m>tap.python~ onepole</m> object. Fields whose names
+		start with an underscore are private: they are not attributes, so only cutoff appears in the
+		inspector. Try computing <m>a</m> in <m>prepare()</m> and again only when cutoff changes, instead
+		of on every sample.
+	</body>
+
+	<subhead>Summary</subhead>
+	<body>
+		<m>prepare()</m> tells the class the sample rate and vector size whenever they change. Its state
+		lives in private fields, which start afresh on a reload — <m>prepare()</m> is called again before
+		the new code runs — while its attributes keep their values, guarded by their validators.
+	</body>
+
+	<seealsolist>
+		<seealso name="tap.python~"/>
+		<seealso name="noise~"/>
+		<seealso name="allpass~"/>
+	</seealsolist>
+</chapter>

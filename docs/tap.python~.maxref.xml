@@ -67,6 +67,7 @@
 	<!--RELATED-->
 
 	<seealsolist>
+		<seealso name='tap.python' />
 		<seealso name='js' />
 		<seealso name='node.script' />
 	</seealsolist>

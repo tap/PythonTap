@@ -764,6 +764,37 @@ def prepare() -> Test:
     return t
 
 
+def multichannel() -> Test:
+    t = Test("tap.python~.mc.maxtest.maxpat",
+             "[mc.tap.python~ default]: one instance per channel, through the package's init/ mapping "
+             "of mc.tap.python~ to Max's MC wrapper (plan 9.4: before it, No such object). The class's "
+             "attributes and messages are each instance's own, so the wrapper passes them on through "
+             "setvalue (one instance) and applyvalues (one value each), not as plain messages.")
+    one = t.signal(1.0)
+    pack = t.obj("mc.pack~ 2", inlets=2, outlets=1)
+    t.patcher.connect(one, 0, pack)
+    t.patcher.connect(one, 0, pack, 1)
+    wrapped = t.obj("mc.tap.python~ default", outlets=1)
+    t.patcher.connect(pack, 0, wrapped)
+    unpack = t.obj("mc.unpack~ 2", inlets=1, outlets=2, signal=True)
+    t.patcher.connect(wrapped, 0, unpack)
+    first = t.obj("+~ 0.", inlets=2, signal=True)
+    second = t.obj("+~ 0.", inlets=2, signal=True)
+    t.patcher.connect(unpack, 0, first)
+    t.patcher.connect(unpack, 1, second)
+    t.step(t.sample_equals("first-instance-runs", first, 1.0), t.sample_equals("second-instance-runs", second, 1.0))
+    t.step(t.send("setvalue 2 gain 0.1", wrapped))
+    t.step(t.sample_equals("setvalue-leaves-the-first", first, 1.0),
+           t.sample_equals("setvalue-sets-the-second-attribute", second, 0.1))
+    t.step(t.send("applyvalues gain 0.5 0.25", wrapped))
+    t.step(t.sample_equals("applyvalues-first", first, 0.5), t.sample_equals("applyvalues-second", second, 0.25))
+    t.step(t.send("setvalue 1 float 0.75", wrapped))
+    t.step(t.sample_equals("setvalue-calls-the-first-method", first, 0.75),
+           t.sample_equals("setvalue-leaves-the-second", second, 0.25),
+           t.errors_are("console-clean", "== 0"))
+    return t
+
+
 def soak(minutes: float) -> Test:
     """Plan 6.2, run by `run.py --session soak`: not a .maxtest, so the quick suite skips it."""
     duration = int(minutes * 60_000)
@@ -888,7 +919,7 @@ def without_runtime_restart() -> Test:
 
 TESTS_TO_WRITE = [load, attributes_and_messages, reload, reload_under_audio, many_instances, channels, announce_once,
                   faults,
-                  prepare, worker,
+                  prepare, worker, multichannel,
                   without_runtime, without_runtime_restart]
 
 

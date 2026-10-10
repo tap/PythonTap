@@ -13,7 +13,7 @@
 			100.0,
 			100.0,
 			800.0,
-			680.0
+			620.0
 		],
 		"bglocked": 0,
 		"openinpresentation": 0,
@@ -128,7 +128,7 @@
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "tap.python~",
+									"text": "tap.python",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
@@ -145,7 +145,7 @@
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "Process audio with a Python class",
+									"text": "Run a Python class as a Max object",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
@@ -167,44 +167,44 @@
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "[tap.python~ name] loads python/name.py from this package and runs the class name in it as an audio object. With no argument it loads python/default.py: open it to follow along.",
+									"text": "[tap.python name] loads python/name.py from this package and makes an object of the class name in it: its typed fields are attributes, its methods are messages, and what a method returns is what the object outputs.",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
 										20.0,
 										90.0,
 										330.0,
-										83.39999999999999
+										102.25
 									],
-									"linecount": 4,
+									"linecount": 5,
 									"id": "obj-3"
 								}
 							},
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "Its typed fields are attributes (gain), its public methods are messages called according to their signatures (greet, float, int, bang), and its process() method runs on the signal — here once per sample; the numpy tab has the form that runs once per vector.",
+									"text": "This one is euclid.py. A bang outputs a Euclidean rhythm: steps beats, pulses of them on, spread as evenly as they go. steps and pulses are attributes, from the class's two typed fields.",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
 										20.0,
-										170.0,
+										185.0,
 										330.0,
-										121.1
+										102.25
 									],
-									"linecount": 6,
+									"linecount": 5,
 									"id": "obj-4"
 								}
 							},
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "Save the .py file and the object loads it again, keeping its attribute values, and the audio carries on with the new code. A mistake prints its traceback to the Max console, and the object outputs silence until a save fixes it.",
+									"text": "Open python/euclid.py in a text editor to see the class. Save a change and the object loads it again, keeping steps and pulses; a mistake prints its traceback to the Max console, and the object outputs nothing until a save fixes it.",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
 										20.0,
-										285.0,
+										280.0,
 										330.0,
 										121.1
 									],
@@ -215,143 +215,50 @@
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "@mode worker runs process() on a thread of its own, @latency milliseconds (30) behind the audio, so that a reload or a message never holds the audio up.",
+									"text": "Every object using the file shares one load of it per save, tap.python~ objects included.",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
 										20.0,
-										400.0,
+										390.0,
 										330.0,
-										83.39999999999999
+										45.699999999999996
 									],
-									"linecount": 4,
+									"linecount": 2,
 									"id": "obj-6"
 								}
 							},
 							{
 								"box": {
-									"maxclass": "newobj",
-									"text": "saw~ 110",
-									"numinlets": 2,
+									"maxclass": "button",
+									"numinlets": 1,
 									"numoutlets": 1,
 									"outlettype": [
-										"signal"
+										"bang"
 									],
 									"patching_rect": [
 										400.0,
 										90.0,
-										74.0,
+										24.0,
 										24.0
 									],
+									"parameter_enable": 0,
 									"id": "obj-7"
 								}
 							},
 							{
 								"box": {
-									"maxclass": "newobj",
-									"text": "saw~ 221",
-									"numinlets": 2,
-									"numoutlets": 1,
-									"outlettype": [
-										"signal"
-									],
+									"maxclass": "comment",
+									"text": "bang: output the rhythm",
+									"numinlets": 1,
+									"numoutlets": 0,
 									"patching_rect": [
-										480.0,
+										430.0,
 										90.0,
-										74.0,
-										24.0
+										200,
+										26.849999999999998
 									],
 									"id": "obj-8"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "newobj",
-									"text": "*~ 0.5",
-									"numinlets": 2,
-									"numoutlets": 1,
-									"outlettype": [
-										"signal"
-									],
-									"patching_rect": [
-										400.0,
-										125.0,
-										60.0,
-										24.0
-									],
-									"id": "obj-9"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "message",
-									"text": "greet max",
-									"numinlets": 2,
-									"numoutlets": 1,
-									"outlettype": [
-										""
-									],
-									"patching_rect": [
-										400.0,
-										160.0,
-										92.39999999999999,
-										24.0
-									],
-									"id": "obj-10"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "message",
-									"text": "float 0.5",
-									"numinlets": 2,
-									"numoutlets": 1,
-									"outlettype": [
-										""
-									],
-									"patching_rect": [
-										500.4,
-										160.0,
-										92.39999999999999,
-										24.0
-									],
-									"id": "obj-11"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "message",
-									"text": "int 2",
-									"numinlets": 2,
-									"numoutlets": 1,
-									"outlettype": [
-										""
-									],
-									"patching_rect": [
-										600.8,
-										160.0,
-										62.0,
-										24.0
-									],
-									"id": "obj-12"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "message",
-									"text": "filechanged",
-									"numinlets": 2,
-									"numoutlets": 1,
-									"outlettype": [
-										""
-									],
-									"patching_rect": [
-										670.8,
-										160.0,
-										107.6,
-										24.0
-									],
-									"id": "obj-13"
 								}
 							},
 							{
@@ -364,28 +271,120 @@
 									],
 									"patching_rect": [
 										400.0,
-										195.0,
+										130.0,
 										150,
 										24.0
 									],
 									"parameter_enable": 0,
-									"attr": "gain",
-									"id": "obj-14"
+									"attr": "steps",
+									"id": "obj-9"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "attrui",
+									"numinlets": 1,
+									"numoutlets": 1,
+									"outlettype": [
+										""
+									],
+									"patching_rect": [
+										560.0,
+										130.0,
+										150,
+										24.0
+									],
+									"parameter_enable": 0,
+									"attr": "pulses",
+									"id": "obj-10"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "message",
+									"text": "getsteps",
+									"numinlets": 2,
+									"numoutlets": 1,
+									"outlettype": [
+										""
+									],
+									"patching_rect": [
+										560.0,
+										170.0,
+										84.8,
+										24.0
+									],
+									"id": "obj-11"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "message",
+									"text": "filechanged",
+									"numinlets": 2,
+									"numoutlets": 1,
+									"outlettype": [
+										""
+									],
+									"patching_rect": [
+										652.8,
+										170.0,
+										107.6,
+										24.0
+									],
+									"id": "obj-12"
 								}
 							},
 							{
 								"box": {
 									"maxclass": "newobj",
-									"text": "tap.python~",
+									"text": "tap.python euclid",
 									"numinlets": 1,
-									"numoutlets": 1,
+									"numoutlets": 2,
 									"outlettype": [
-										"signal"
+										"",
+										""
 									],
 									"patching_rect": [
 										400.0,
-										235.0,
+										215.0,
+										137.0,
+										24.0
+									],
+									"id": "obj-13"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "newobj",
+									"text": "prepend set",
+									"numinlets": 1,
+									"numoutlets": 1,
+									"outlettype": [
+										""
+									],
+									"patching_rect": [
+										400.0,
+										265.0,
 										95.0,
+										24.0
+									],
+									"id": "obj-14"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "message",
+									"text": "",
+									"numinlets": 2,
+									"numoutlets": 1,
+									"outlettype": [
+										""
+									],
+									"patching_rect": [
+										400.0,
+										300.0,
+										230,
 										24.0
 									],
 									"id": "obj-15"
@@ -393,137 +392,101 @@
 							},
 							{
 								"box": {
-									"maxclass": "comment",
-									"text": "filechanged reloads at once; saving the file does it for you",
+									"maxclass": "newobj",
+									"text": "prepend set",
 									"numinlets": 1,
-									"numoutlets": 0,
-									"patching_rect": [
-										490.0,
-										235.0,
-										260,
-										45.699999999999996
+									"numoutlets": 1,
+									"outlettype": [
+										""
 									],
-									"linecount": 2,
+									"patching_rect": [
+										650.0,
+										265.0,
+										95.0,
+										24.0
+									],
 									"id": "obj-16"
 								}
 							},
 							{
 								"box": {
-									"maxclass": "scope~",
-									"numinlets": 2,
-									"numoutlets": 0,
-									"outlettype": [],
-									"patching_rect": [
-										490.0,
-										280.0,
-										150,
-										70
-									],
-									"id": "obj-17"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "newobj",
-									"text": "*~ 0.2",
-									"numinlets": 2,
-									"numoutlets": 1,
-									"outlettype": [
-										"signal"
-									],
-									"patching_rect": [
-										400.0,
-										280.0,
-										60.0,
-										24.0
-									],
-									"id": "obj-18"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "ezdac~",
-									"numinlets": 2,
-									"numoutlets": 0,
-									"outlettype": [],
-									"patching_rect": [
-										400.0,
-										315.0,
-										45.0,
-										45.0
-									],
-									"id": "obj-19"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "newobj",
-									"text": "metro 250 @active 1",
+									"maxclass": "message",
+									"text": "",
 									"numinlets": 2,
 									"numoutlets": 1,
 									"outlettype": [
 										""
 									],
 									"patching_rect": [
-										660.0,
-										280.0,
-										151.0,
+										650.0,
+										300.0,
+										120,
 										24.0
 									],
-									"id": "obj-20"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "newobj",
-									"text": "adstatus cpu",
-									"numinlets": 2,
-									"numoutlets": 2,
-									"outlettype": [
-										"",
-										"int"
-									],
-									"patching_rect": [
-										660.0,
-										310.0,
-										102.0,
-										24.0
-									],
-									"id": "obj-21"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "number",
-									"numinlets": 1,
-									"numoutlets": 2,
-									"outlettype": [
-										"",
-										"bang"
-									],
-									"patching_rect": [
-										660.0,
-										340.0,
-										60.0,
-										24.0
-									],
-									"parameter_enable": 0,
-									"id": "obj-22"
+									"id": "obj-17"
 								}
 							},
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "CPU %",
+									"text": "what a method returns",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
-										725.0,
-										340.0,
-										60,
+										400.0,
+										335.0,
+										200,
 										26.849999999999998
 									],
-									"id": "obj-23"
+									"id": "obj-18"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "comment",
+									"text": "the dumpout: get + an attribute's name",
+									"numinlets": 1,
+									"numoutlets": 0,
+									"patching_rect": [
+										650.0,
+										335.0,
+										190,
+										45.699999999999996
+									],
+									"linecount": 2,
+									"id": "obj-19"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "comment",
+									"text": "filechanged reloads the file at once; saving it does that for you.",
+									"numinlets": 1,
+									"numoutlets": 0,
+									"patching_rect": [
+										400.0,
+										390.0,
+										330,
+										45.699999999999996
+									],
+									"linecount": 2,
+									"id": "obj-20"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "comment",
+									"text": "More in the other tabs: lists, several outlets, messages and methods, threads.",
+									"numinlets": 1,
+									"numoutlets": 0,
+									"patching_rect": [
+										400.0,
+										435.0,
+										330,
+										45.699999999999996
+									],
+									"linecount": 2,
+									"id": "obj-21"
 								}
 							}
 						],
@@ -535,19 +498,7 @@
 										0
 									],
 									"destination": [
-										"obj-9",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-8",
-										0
-									],
-									"destination": [
-										"obj-9",
+										"obj-13",
 										0
 									]
 								}
@@ -559,7 +510,7 @@
 										0
 									],
 									"destination": [
-										"obj-15",
+										"obj-13",
 										0
 									]
 								}
@@ -571,7 +522,7 @@
 										0
 									],
 									"destination": [
-										"obj-15",
+										"obj-13",
 										0
 									]
 								}
@@ -583,7 +534,7 @@
 										0
 									],
 									"destination": [
-										"obj-15",
+										"obj-13",
 										0
 									]
 								}
@@ -595,7 +546,7 @@
 										0
 									],
 									"destination": [
-										"obj-15",
+										"obj-13",
 										0
 									]
 								}
@@ -607,7 +558,7 @@
 										0
 									],
 									"destination": [
-										"obj-15",
+										"obj-14",
 										0
 									]
 								}
@@ -627,71 +578,23 @@
 							{
 								"patchline": {
 									"source": [
-										"obj-15",
+										"obj-13",
+										1
+									],
+									"destination": [
+										"obj-16",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"source": [
+										"obj-16",
 										0
 									],
 									"destination": [
 										"obj-17",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-15",
-										0
-									],
-									"destination": [
-										"obj-18",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-18",
-										0
-									],
-									"destination": [
-										"obj-19",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-18",
-										0
-									],
-									"destination": [
-										"obj-19",
-										1
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-20",
-										0
-									],
-									"destination": [
-										"obj-21",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-21",
-										0
-									],
-									"destination": [
-										"obj-22",
 										0
 									]
 								}
@@ -705,7 +608,7 @@
 			{
 				"box": {
 					"maxclass": "newobj",
-					"text": "p numpy",
+					"text": "p lists",
 					"numinlets": 0,
 					"numoutlets": 0,
 					"patching_rect": [
@@ -774,7 +677,7 @@
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "Per vector, with numpy",
+									"text": "Lists in, lists out",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
@@ -791,7 +694,7 @@
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "One call per signal vector instead of one per sample",
+									"text": "A list message through numpy",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
@@ -813,79 +716,82 @@
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "process(self, x: float) -> float is called once per sample: simplest to write, but every line of Python in it runs tens of thousands of times a second.",
+									"text": "scale.py's method list(self, values: np.ndarray) takes the whole list as one numpy array — a last parameter hinted np.ndarray, or list[float], takes every argument left — and returns an array, which the object outputs as a list.",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
 										20.0,
 										90.0,
 										330.0,
-										83.39999999999999
+										121.1
 									],
-									"linecount": 4,
+									"linecount": 6,
 									"id": "obj-3"
 								}
 							},
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "process(self, x: np.ndarray) -> np.ndarray is called once per signal vector, with the vector as a numpy array, and numpy then works on the whole of it at C speed: the form for anything with real work in it. numpy_gain.py is default.py's gain written that way.",
+									"text": "What a method returns is output by its type: a number as a number, a str as symbol and the string, and a list, a range or a numpy array as a list.",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
 										20.0,
-										170.0,
+										205.0,
 										330.0,
-										121.1
+										83.39999999999999
 									],
-									"linecount": 6,
+									"linecount": 4,
 									"id": "obj-4"
 								}
 							},
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "Choose one with the message boxes and watch the CPU meter: the ReadMe's performance note has the measurements, per sample and per vector, at 48 and 96 kHz.",
+									"text": "A list whose first element is a str outputs the message it names: return [\"note\", 60, 100] and the object outputs note 60 100. A dict, a set or an object outputs nothing, and the console says why.",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
 										20.0,
 										285.0,
 										330.0,
-										83.39999999999999
+										102.25
 									],
-									"linecount": 4,
+									"linecount": 5,
 									"id": "obj-5"
 								}
 							},
 							{
 								"box": {
-									"maxclass": "comment",
-									"text": "Turn on audio with the speaker.",
-									"numinlets": 1,
-									"numoutlets": 0,
+									"maxclass": "message",
+									"text": "1 2 3 4",
+									"numinlets": 2,
+									"numoutlets": 1,
+									"outlettype": [
+										""
+									],
 									"patching_rect": [
-										20.0,
-										365.0,
-										330.0,
-										26.849999999999998
+										400.0,
+										90.0,
+										77.19999999999999,
+										24.0
 									],
 									"id": "obj-6"
 								}
 							},
 							{
 								"box": {
-									"maxclass": "newobj",
-									"text": "saw~ 110",
+									"maxclass": "message",
+									"text": "0.5 0.25 0.125",
 									"numinlets": 2,
 									"numoutlets": 1,
 									"outlettype": [
-										"signal"
+										""
 									],
 									"patching_rect": [
-										400.0,
+										485.2,
 										90.0,
-										74.0,
+										130.39999999999998,
 										24.0
 									],
 									"id": "obj-7"
@@ -893,43 +799,65 @@
 							},
 							{
 								"box": {
-									"maxclass": "newobj",
-									"text": "tap.python~ default",
+									"maxclass": "attrui",
 									"numinlets": 1,
 									"numoutlets": 1,
 									"outlettype": [
-										"signal"
+										""
 									],
 									"patching_rect": [
 										400.0,
-										165.0,
-										151.0,
+										130.0,
+										150,
 										24.0
 									],
+									"parameter_enable": 0,
+									"attr": "factor",
 									"id": "obj-8"
 								}
 							},
 							{
 								"box": {
-									"maxclass": "newobj",
-									"text": "tap.python~ numpy_gain",
+									"maxclass": "attrui",
 									"numinlets": 1,
 									"numoutlets": 1,
 									"outlettype": [
-										"signal"
+										""
 									],
 									"patching_rect": [
-										570.0,
-										165.0,
-										172.0,
+										560.0,
+										130.0,
+										150,
 										24.0
 									],
+									"parameter_enable": 0,
+									"attr": "offset",
 									"id": "obj-9"
 								}
 							},
 							{
 								"box": {
-									"maxclass": "attrui",
+									"maxclass": "newobj",
+									"text": "tap.python scale @factor 2 @offset 1",
+									"numinlets": 1,
+									"numoutlets": 2,
+									"outlettype": [
+										"",
+										""
+									],
+									"patching_rect": [
+										400.0,
+										175.0,
+										270.0,
+										24.0
+									],
+									"id": "obj-10"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "newobj",
+									"text": "prepend set",
 									"numinlets": 1,
 									"numoutlets": 1,
 									"outlettype": [
@@ -937,38 +865,17 @@
 									],
 									"patching_rect": [
 										400.0,
-										130.0,
-										150,
+										225.0,
+										95.0,
 										24.0
 									],
-									"parameter_enable": 0,
-									"attr": "gain",
-									"id": "obj-10"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "attrui",
-									"numinlets": 1,
-									"numoutlets": 1,
-									"outlettype": [
-										""
-									],
-									"patching_rect": [
-										570.0,
-										130.0,
-										150,
-										24.0
-									],
-									"parameter_enable": 0,
-									"attr": "gain",
 									"id": "obj-11"
 								}
 							},
 							{
 								"box": {
 									"maxclass": "message",
-									"text": "1",
+									"text": "",
 									"numinlets": 2,
 									"numoutlets": 1,
 									"outlettype": [
@@ -976,8 +883,8 @@
 									],
 									"patching_rect": [
 										400.0,
-										210.0,
-										40.0,
+										260.0,
+										300,
 										24.0
 									],
 									"id": "obj-12"
@@ -985,157 +892,17 @@
 							},
 							{
 								"box": {
-									"maxclass": "message",
-									"text": "2",
-									"numinlets": 2,
-									"numoutlets": 1,
-									"outlettype": [
-										""
-									],
+									"maxclass": "comment",
+									"text": "each value times factor, plus offset",
+									"numinlets": 1,
+									"numoutlets": 0,
 									"patching_rect": [
-										448.0,
-										210.0,
-										40.0,
-										24.0
+										400.0,
+										295.0,
+										300,
+										26.849999999999998
 									],
 									"id": "obj-13"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "comment",
-									"text": "per sample, per vector",
-									"numinlets": 1,
-									"numoutlets": 0,
-									"patching_rect": [
-										500.0,
-										210.0,
-										170,
-										26.849999999999998
-									],
-									"id": "obj-14"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "newobj",
-									"text": "selector~ 2 1",
-									"numinlets": 3,
-									"numoutlets": 1,
-									"outlettype": [
-										"signal"
-									],
-									"patching_rect": [
-										400.0,
-										250.0,
-										109.0,
-										24.0
-									],
-									"id": "obj-15"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "newobj",
-									"text": "*~ 0.2",
-									"numinlets": 2,
-									"numoutlets": 1,
-									"outlettype": [
-										"signal"
-									],
-									"patching_rect": [
-										400.0,
-										290.0,
-										60.0,
-										24.0
-									],
-									"id": "obj-16"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "ezdac~",
-									"numinlets": 2,
-									"numoutlets": 0,
-									"outlettype": [],
-									"patching_rect": [
-										400.0,
-										325.0,
-										45.0,
-										45.0
-									],
-									"id": "obj-17"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "newobj",
-									"text": "metro 250 @active 1",
-									"numinlets": 2,
-									"numoutlets": 1,
-									"outlettype": [
-										""
-									],
-									"patching_rect": [
-										570.0,
-										290.0,
-										151.0,
-										24.0
-									],
-									"id": "obj-18"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "newobj",
-									"text": "adstatus cpu",
-									"numinlets": 2,
-									"numoutlets": 2,
-									"outlettype": [
-										"",
-										"int"
-									],
-									"patching_rect": [
-										570.0,
-										320.0,
-										102.0,
-										24.0
-									],
-									"id": "obj-19"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "number",
-									"numinlets": 1,
-									"numoutlets": 2,
-									"outlettype": [
-										"",
-										"bang"
-									],
-									"patching_rect": [
-										570.0,
-										350.0,
-										60.0,
-										24.0
-									],
-									"parameter_enable": 0,
-									"id": "obj-20"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "comment",
-									"text": "CPU %",
-									"numinlets": 1,
-									"numoutlets": 0,
-									"patching_rect": [
-										635.0,
-										350.0,
-										60,
-										26.849999999999998
-									],
-									"id": "obj-21"
 								}
 							}
 						],
@@ -1143,11 +910,11 @@
 							{
 								"patchline": {
 									"source": [
-										"obj-7",
+										"obj-6",
 										0
 									],
 									"destination": [
-										"obj-8",
+										"obj-10",
 										0
 									]
 								}
@@ -1159,7 +926,31 @@
 										0
 									],
 									"destination": [
+										"obj-10",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"source": [
+										"obj-8",
+										0
+									],
+									"destination": [
+										"obj-10",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"source": [
 										"obj-9",
+										0
+									],
+									"destination": [
+										"obj-10",
 										0
 									]
 								}
@@ -1171,7 +962,7 @@
 										0
 									],
 									"destination": [
-										"obj-8",
+										"obj-11",
 										0
 									]
 								}
@@ -1183,115 +974,7 @@
 										0
 									],
 									"destination": [
-										"obj-9",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
 										"obj-12",
-										0
-									],
-									"destination": [
-										"obj-15",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-13",
-										0
-									],
-									"destination": [
-										"obj-15",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-8",
-										0
-									],
-									"destination": [
-										"obj-15",
-										1
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-9",
-										0
-									],
-									"destination": [
-										"obj-15",
-										2
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-15",
-										0
-									],
-									"destination": [
-										"obj-16",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-16",
-										0
-									],
-									"destination": [
-										"obj-17",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-16",
-										0
-									],
-									"destination": [
-										"obj-17",
-										1
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-18",
-										0
-									],
-									"destination": [
-										"obj-19",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-19",
-										0
-									],
-									"destination": [
-										"obj-20",
 										0
 									]
 								}
@@ -1305,7 +988,7 @@
 			{
 				"box": {
 					"maxclass": "newobj",
-					"text": "p allpass",
+					"text": "p outlets",
 					"numinlets": 0,
 					"numoutlets": 0,
 					"patching_rect": [
@@ -1374,7 +1057,7 @@
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "A filter that knows the sample rate",
+									"text": "One value per outlet",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
@@ -1391,7 +1074,7 @@
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "prepare(sample_rate, vector_size)",
+									"text": "A method hinted to return a tuple",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
@@ -1413,136 +1096,140 @@
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "allpass.py is a Schroeder allpass filter: it passes every frequency at the same level and shifts their phase, so mixed with the dry signal it notches the spectrum. Its delay is an attribute in milliseconds, which it turns into samples.",
+									"text": "note_name.py's method int(self, note: int) -> tuple[str, int] returns two values, so the object has two outlets for them, and outputs them right to left, as Max objects do: the octave, then the name.",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
 										20.0,
 										90.0,
 										330.0,
-										121.1
+										102.25
 									],
-									"linecount": 6,
+									"linecount": 5,
 									"id": "obj-3"
 								}
 							},
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "For that it needs the sample rate: an optional method prepare(self, sample_rate: float, vector_size: int) -> None is called before the object processes any audio, again whenever the rate or the vector size changes, and on every reload before the new code runs.",
+									"text": "The name is a str, which the object outputs as symbol and the string: sel matches it, and route needs route symbol first. Return it in a list, [\"C\"], to output the message C instead.",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
 										20.0,
 										205.0,
 										330.0,
-										121.1
+										102.25
 									],
-									"linecount": 6,
+									"linecount": 5,
 									"id": "obj-4"
 								}
 							},
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "Its fields are attrs fields with validators: alpha must stay strictly between -1 and 1. Try alpha 1 — the validator's error prints to the console, and alpha keeps its value.",
+									"text": "The object has as many outlets as the widest tuple return hint among the class's methods — a method returning one value fills the first — plus the dumpout at the right. A save that changes the number changes the outlets in place, keeping their patch cords.",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
 										20.0,
-										325.0,
+										305.0,
 										330.0,
-										83.39999999999999
+										121.1
 									],
-									"linecount": 4,
+									"linecount": 6,
 									"id": "obj-5"
 								}
 							},
 							{
 								"box": {
-									"maxclass": "comment",
-									"text": "numpy_allpass.py computes exactly the same, a vector at a time.",
-									"numinlets": 1,
-									"numoutlets": 0,
-									"patching_rect": [
-										20.0,
-										415.0,
-										330.0,
-										45.699999999999996
+									"maxclass": "kslider",
+									"numinlets": 2,
+									"numoutlets": 2,
+									"outlettype": [
+										"int",
+										"int"
 									],
-									"linecount": 2,
+									"patching_rect": [
+										400.0,
+										90.0,
+										168.0,
+										53.0
+									],
+									"parameter_enable": 0,
 									"id": "obj-6"
 								}
 							},
 							{
 								"box": {
-									"maxclass": "newobj",
-									"text": "noise~",
+									"maxclass": "number",
 									"numinlets": 1,
-									"numoutlets": 1,
+									"numoutlets": 2,
 									"outlettype": [
-										"signal"
+										"",
+										"bang"
 									],
 									"patching_rect": [
-										400.0,
-										90.0,
+										615.0,
+										105.0,
 										60.0,
 										24.0
 									],
+									"parameter_enable": 0,
 									"id": "obj-7"
 								}
 							},
 							{
 								"box": {
-									"maxclass": "attrui",
+									"maxclass": "newobj",
+									"text": "tap.python note_name",
 									"numinlets": 1,
-									"numoutlets": 1,
+									"numoutlets": 3,
 									"outlettype": [
+										"",
+										"",
 										""
 									],
 									"patching_rect": [
 										400.0,
-										125.0,
-										150,
+										175.0,
+										158.0,
 										24.0
 									],
-									"parameter_enable": 0,
-									"attr": "delay",
 									"id": "obj-8"
 								}
 							},
 							{
 								"box": {
-									"maxclass": "attrui",
-									"numinlets": 1,
-									"numoutlets": 1,
-									"outlettype": [
-										""
-									],
-									"patching_rect": [
-										560.0,
-										125.0,
-										150,
-										24.0
-									],
-									"parameter_enable": 0,
-									"attr": "alpha",
-									"id": "obj-9"
-								}
-							},
-							{
-								"box": {
 									"maxclass": "message",
-									"text": "alpha 1",
+									"text": "set $1",
 									"numinlets": 2,
 									"numoutlets": 1,
 									"outlettype": [
 										""
 									],
 									"patching_rect": [
-										560.0,
-										160.0,
-										77.19999999999999,
+										400.0,
+										225.0,
+										69.6,
+										24.0
+									],
+									"id": "obj-9"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "message",
+									"text": "",
+									"numinlets": 2,
+									"numoutlets": 1,
+									"outlettype": [
+										""
+									],
+									"patching_rect": [
+										400.0,
+										260.0,
+										120,
 										24.0
 									],
 									"id": "obj-10"
@@ -1550,35 +1237,37 @@
 							},
 							{
 								"box": {
-									"maxclass": "message",
-									"text": "clear",
-									"numinlets": 2,
-									"numoutlets": 1,
+									"maxclass": "number",
+									"numinlets": 1,
+									"numoutlets": 2,
 									"outlettype": [
-										""
+										"",
+										"bang"
 									],
 									"patching_rect": [
-										645.2,
-										160.0,
-										62.0,
+										540.0,
+										225.0,
+										60.0,
 										24.0
 									],
+									"parameter_enable": 0,
 									"id": "obj-11"
 								}
 							},
 							{
 								"box": {
 									"maxclass": "newobj",
-									"text": "tap.python~ allpass",
-									"numinlets": 1,
-									"numoutlets": 1,
+									"text": "sel C",
+									"numinlets": 2,
+									"numoutlets": 2,
 									"outlettype": [
-										"signal"
+										"",
+										""
 									],
 									"patching_rect": [
-										400.0,
-										195.0,
-										151.0,
+										620.0,
+										225.0,
+										53.0,
 										24.0
 									],
 									"id": "obj-12"
@@ -1586,32 +1275,32 @@
 							},
 							{
 								"box": {
-									"maxclass": "newobj",
-									"text": "+~",
-									"numinlets": 2,
+									"maxclass": "button",
+									"numinlets": 1,
 									"numoutlets": 1,
 									"outlettype": [
-										"signal"
+										"bang"
 									],
 									"patching_rect": [
-										400.0,
-										235.0,
-										40.0,
+										620.0,
+										260.0,
+										24.0,
 										24.0
 									],
+									"parameter_enable": 0,
 									"id": "obj-13"
 								}
 							},
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "with the dry signal",
+									"text": "name",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
-										445.0,
-										235.0,
-										150,
+										400.0,
+										290.0,
+										120,
 										26.849999999999998
 									],
 									"id": "obj-14"
@@ -1619,33 +1308,30 @@
 							},
 							{
 								"box": {
-									"maxclass": "newobj",
-									"text": "*~ 0.1",
-									"numinlets": 2,
-									"numoutlets": 1,
-									"outlettype": [
-										"signal"
-									],
+									"maxclass": "comment",
+									"text": "octave",
+									"numinlets": 1,
+									"numoutlets": 0,
 									"patching_rect": [
-										400.0,
-										275.0,
-										60.0,
-										24.0
+										540.0,
+										255.0,
+										70,
+										26.849999999999998
 									],
 									"id": "obj-15"
 								}
 							},
 							{
 								"box": {
-									"maxclass": "ezdac~",
-									"numinlets": 2,
+									"maxclass": "comment",
+									"text": "every C",
+									"numinlets": 1,
 									"numoutlets": 0,
-									"outlettype": [],
 									"patching_rect": [
-										400.0,
-										310.0,
-										45.0,
-										45.0
+										650.0,
+										260.0,
+										80,
+										26.849999999999998
 									],
 									"id": "obj-16"
 								}
@@ -1655,11 +1341,59 @@
 							{
 								"patchline": {
 									"source": [
+										"obj-6",
+										0
+									],
+									"destination": [
+										"obj-8",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"source": [
 										"obj-7",
 										0
 									],
 									"destination": [
-										"obj-12",
+										"obj-8",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"source": [
+										"obj-8",
+										0
+									],
+									"destination": [
+										"obj-9",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"source": [
+										"obj-9",
+										0
+									],
+									"destination": [
+										"obj-10",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"source": [
+										"obj-8",
+										1
+									],
+									"destination": [
+										"obj-11",
 										0
 									]
 								}
@@ -1679,96 +1413,12 @@
 							{
 								"patchline": {
 									"source": [
-										"obj-9",
-										0
-									],
-									"destination": [
-										"obj-12",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-10",
-										0
-									],
-									"destination": [
-										"obj-12",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-11",
-										0
-									],
-									"destination": [
-										"obj-12",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
 										"obj-12",
 										0
 									],
 									"destination": [
 										"obj-13",
 										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-7",
-										0
-									],
-									"destination": [
-										"obj-13",
-										1
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-13",
-										0
-									],
-									"destination": [
-										"obj-15",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-15",
-										0
-									],
-									"destination": [
-										"obj-16",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-15",
-										0
-									],
-									"destination": [
-										"obj-16",
-										1
 									]
 								}
 							}
@@ -1781,13 +1431,13 @@
 			{
 				"box": {
 					"maxclass": "newobj",
-					"text": "p mc",
+					"text": "p messages",
 					"numinlets": 0,
 					"numoutlets": 0,
 					"patching_rect": [
 						320.0,
 						20.0,
-						46.0,
+						88.0,
 						24.0
 					],
 					"patcher": {
@@ -1850,7 +1500,7 @@
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "Many channels",
+									"text": "Messages and methods",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
@@ -1867,7 +1517,7 @@
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "mc., and a class with several inputs",
+									"text": "The class's methods are the object's messages",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
@@ -1889,82 +1539,80 @@
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "Wrap the object in mc. to run one instance per channel of a multichannel signal: [mc.tap.python~ numpy_gain] here, over two channels. The class's attributes and messages are each instance's own, so the MC wrapper passes them on through its own messages: setvalue, an instance's number and the message, for one; applyvalues, the name and a value for each, for all.",
+									"text": "With no argument the object loads python/default.py, which tap.python~ loads too. Its public methods are messages, called according to their signatures: bang returns the gain, float and int set it, greet prints to the Max console.",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
 										20.0,
 										90.0,
 										330.0,
-										177.65
+										121.1
 									],
-									"linecount": 9,
+									"linecount": 6,
 									"id": "obj-3"
 								}
 							},
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "Or write one class with several channels: process()'s parameters are the object's signal inlets and its return hint its outlets. stereo_width.py takes left and right, returns tuple[np.ndarray, np.ndarray], and gets two of each.",
+									"text": "process() is an ordinary method here: process 0.25 calls it, and outputs what it returns — a way to try a tap.python~ class sample by sample.",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
 										20.0,
-										255.0,
+										205.0,
 										330.0,
-										121.1
+										83.39999999999999
 									],
-									"linecount": 6,
+									"linecount": 4,
 									"id": "obj-4"
 								}
 							},
 							{
 								"box": {
 									"maxclass": "comment",
-									"text": "A save that changes process()'s inputs or outputs changes the object's inlets and outlets to match, keeping the patch cords of those that stay.",
+									"text": "A method named anything answers every message the class has no method or attribute for, with the message's name first: def anything(self, selector: str, *args). Without one, the object doesn't understand it — try nonesuch.",
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
 										20.0,
-										370.0,
+										280.0,
 										330.0,
-										83.39999999999999
+										102.25
 									],
-									"linecount": 4,
+									"linecount": 5,
 									"id": "obj-5"
 								}
 							},
 							{
 								"box": {
-									"maxclass": "newobj",
-									"text": "saw~ 110",
-									"numinlets": 2,
-									"numoutlets": 1,
-									"outlettype": [
-										"signal"
-									],
+									"maxclass": "comment",
+									"text": "Names Max and the object keep — dumpout, filechanged, assist and Max's own messages — are not exposed: the console says so, so that you can rename the method.",
+									"numinlets": 1,
+									"numoutlets": 0,
 									"patching_rect": [
-										400.0,
-										90.0,
-										74.0,
-										24.0
+										20.0,
+										380.0,
+										330.0,
+										83.39999999999999
 									],
+									"linecount": 4,
 									"id": "obj-6"
 								}
 							},
 							{
 								"box": {
-									"maxclass": "newobj",
-									"text": "saw~ 165",
+									"maxclass": "message",
+									"text": "bang",
 									"numinlets": 2,
 									"numoutlets": 1,
 									"outlettype": [
-										"signal"
+										""
 									],
 									"patching_rect": [
-										480.0,
+										400.0,
 										90.0,
-										74.0,
+										54.4,
 										24.0
 									],
 									"id": "obj-7"
@@ -1972,17 +1620,17 @@
 							},
 							{
 								"box": {
-									"maxclass": "newobj",
-									"text": "mc.pack~ 2",
+									"maxclass": "message",
+									"text": "float 0.5",
 									"numinlets": 2,
 									"numoutlets": 1,
 									"outlettype": [
-										"multichannelsignal"
+										""
 									],
 									"patching_rect": [
-										400.0,
-										125.0,
-										88.0,
+										462.4,
+										90.0,
+										92.39999999999999,
 										24.0
 									],
 									"id": "obj-8"
@@ -1991,16 +1639,16 @@
 							{
 								"box": {
 									"maxclass": "message",
-									"text": "applyvalues gain 0.5 0.25",
+									"text": "int 2",
 									"numinlets": 2,
 									"numoutlets": 1,
 									"outlettype": [
 										""
 									],
 									"patching_rect": [
-										400.0,
-										160.0,
-										214.0,
+										562.8,
+										90.0,
+										62.0,
 										24.0
 									],
 									"id": "obj-9"
@@ -2009,16 +1657,16 @@
 							{
 								"box": {
 									"maxclass": "message",
-									"text": "setvalue 2 gain 0.1",
+									"text": "greet max",
 									"numinlets": 2,
 									"numoutlets": 1,
 									"outlettype": [
 										""
 									],
 									"patching_rect": [
-										622.0,
-										160.0,
-										168.4,
+										632.8,
+										90.0,
+										92.39999999999999,
 										24.0
 									],
 									"id": "obj-10"
@@ -2026,17 +1674,17 @@
 							},
 							{
 								"box": {
-									"maxclass": "newobj",
-									"text": "mc.tap.python~ numpy_gain",
-									"numinlets": 1,
+									"maxclass": "message",
+									"text": "process 0.25",
+									"numinlets": 2,
 									"numoutlets": 1,
 									"outlettype": [
-										"multichannelsignal"
+										""
 									],
 									"patching_rect": [
 										400.0,
-										195.0,
-										193.0,
+										125.0,
+										115.19999999999999,
 										24.0
 									],
 									"id": "obj-11"
@@ -2044,72 +1692,20 @@
 							},
 							{
 								"box": {
-									"maxclass": "newobj",
-									"text": "mc.*~ 0.2",
+									"maxclass": "message",
+									"text": "nonesuch 1",
 									"numinlets": 2,
 									"numoutlets": 1,
 									"outlettype": [
-										"multichannelsignal"
+										""
 									],
 									"patching_rect": [
-										400.0,
-										230.0,
-										81.0,
+										523.2,
+										125.0,
+										100.0,
 										24.0
 									],
 									"id": "obj-12"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "newobj",
-									"text": "mc.dac~ 1 2",
-									"numinlets": 1,
-									"numoutlets": 0,
-									"outlettype": [],
-									"patching_rect": [
-										400.0,
-										265.0,
-										95.0,
-										24.0
-									],
-									"id": "obj-13"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "newobj",
-									"text": "saw~ 110",
-									"numinlets": 2,
-									"numoutlets": 1,
-									"outlettype": [
-										"signal"
-									],
-									"patching_rect": [
-										400.0,
-										330.0,
-										74.0,
-										24.0
-									],
-									"id": "obj-14"
-								}
-							},
-							{
-								"box": {
-									"maxclass": "newobj",
-									"text": "saw~ 110.5",
-									"numinlets": 2,
-									"numoutlets": 1,
-									"outlettype": [
-										"signal"
-									],
-									"patching_rect": [
-										480.0,
-										330.0,
-										88.0,
-										24.0
-									],
-									"id": "obj-15"
 								}
 							},
 							{
@@ -2121,85 +1717,551 @@
 										""
 									],
 									"patching_rect": [
-										570.0,
-										330.0,
+										400.0,
+										165.0,
 										150,
 										24.0
 									],
 									"parameter_enable": 0,
-									"attr": "width",
+									"attr": "gain",
+									"id": "obj-13"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "newobj",
+									"text": "tap.python",
+									"numinlets": 1,
+									"numoutlets": 2,
+									"outlettype": [
+										"",
+										""
+									],
+									"patching_rect": [
+										400.0,
+										210.0,
+										88.0,
+										24.0
+									],
+									"id": "obj-14"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "newobj",
+									"text": "prepend set",
+									"numinlets": 1,
+									"numoutlets": 1,
+									"outlettype": [
+										""
+									],
+									"patching_rect": [
+										400.0,
+										260.0,
+										95.0,
+										24.0
+									],
+									"id": "obj-15"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "message",
+									"text": "",
+									"numinlets": 2,
+									"numoutlets": 1,
+									"outlettype": [
+										""
+									],
+									"patching_rect": [
+										400.0,
+										295.0,
+										120,
+										24.0
+									],
 									"id": "obj-16"
 								}
 							},
 							{
 								"box": {
-									"maxclass": "newobj",
-									"text": "tap.python~ stereo_width",
-									"numinlets": 2,
-									"numoutlets": 2,
-									"outlettype": [
-										"signal",
-										"signal"
-									],
+									"maxclass": "comment",
+									"text": "what the method returned",
+									"numinlets": 1,
+									"numoutlets": 0,
 									"patching_rect": [
-										400.0,
-										370.0,
-										186.0,
-										24.0
+										530.0,
+										295.0,
+										180,
+										26.849999999999998
 									],
 									"id": "obj-17"
 								}
-							},
+							}
+						],
+						"lines": [
 							{
-								"box": {
-									"maxclass": "newobj",
-									"text": "*~ 0.2",
-									"numinlets": 2,
-									"numoutlets": 1,
-									"outlettype": [
-										"signal"
+								"patchline": {
+									"source": [
+										"obj-7",
+										0
 									],
-									"patching_rect": [
-										400.0,
-										405.0,
-										60.0,
-										24.0
-									],
-									"id": "obj-18"
+									"destination": [
+										"obj-14",
+										0
+									]
 								}
 							},
 							{
-								"box": {
-									"maxclass": "newobj",
-									"text": "*~ 0.2",
-									"numinlets": 2,
-									"numoutlets": 1,
-									"outlettype": [
-										"signal"
+								"patchline": {
+									"source": [
+										"obj-8",
+										0
 									],
-									"patching_rect": [
-										480.0,
-										405.0,
-										60.0,
-										24.0
-									],
-									"id": "obj-19"
+									"destination": [
+										"obj-14",
+										0
+									]
 								}
 							},
 							{
+								"patchline": {
+									"source": [
+										"obj-9",
+										0
+									],
+									"destination": [
+										"obj-14",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"source": [
+										"obj-10",
+										0
+									],
+									"destination": [
+										"obj-14",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"source": [
+										"obj-11",
+										0
+									],
+									"destination": [
+										"obj-14",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"source": [
+										"obj-12",
+										0
+									],
+									"destination": [
+										"obj-14",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"source": [
+										"obj-13",
+										0
+									],
+									"destination": [
+										"obj-14",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"source": [
+										"obj-14",
+										0
+									],
+									"destination": [
+										"obj-15",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"source": [
+										"obj-15",
+										0
+									],
+									"destination": [
+										"obj-16",
+										0
+									]
+								}
+							}
+						],
+						"showontab": 1
+					},
+					"id": "obj-4"
+				}
+			},
+			{
+				"box": {
+					"maxclass": "newobj",
+					"text": "p threads",
+					"numinlets": 0,
+					"numoutlets": 0,
+					"patching_rect": [
+						420.0,
+						20.0,
+						81.0,
+						24.0
+					],
+					"patcher": {
+						"fileversion": 1,
+						"appversion": {
+							"major": 9,
+							"minor": 1,
+							"revision": 5,
+							"architecture": "x64",
+							"modernui": 1
+						},
+						"classnamespace": "box",
+						"rect": [
+							100.0,
+							100.0,
+							900.0,
+							700.0
+						],
+						"bglocked": 0,
+						"openinpresentation": 0,
+						"default_fontsize": 13.0,
+						"default_fontface": 0,
+						"default_fontname": "Ableton Sans Light Regular",
+						"gridonopen": 1,
+						"gridsize": [
+							5.0,
+							5.0
+						],
+						"gridsnaponopen": 2,
+						"objectsnaponopen": 0,
+						"statusbarvisible": 2,
+						"toolbarvisible": 1,
+						"boxanimatetime": 200,
+						"enablehscroll": 1,
+						"enablevscroll": 1,
+						"description": "",
+						"digest": "",
+						"tags": "",
+						"style": "",
+						"assistshowspatchername": 0,
+						"textcolor": [
+							0.847058823529412,
+							0.847058823529412,
+							0.847058823529412,
+							1.0
+						],
+						"bgcolor": [
+							0.109803921568627,
+							0.109803921568627,
+							0.109803921568627,
+							1.0
+						],
+						"editing_bgcolor": [
+							0.109803921568627,
+							0.109803921568627,
+							0.109803921568627,
+							1.0
+						],
+						"boxes": [
+							{
 								"box": {
-									"maxclass": "newobj",
-									"text": "dac~ 1 2",
-									"numinlets": 2,
+									"maxclass": "comment",
+									"text": "Threads",
+									"numinlets": 1,
 									"numoutlets": 0,
-									"outlettype": [],
+									"patching_rect": [
+										20.0,
+										15.0,
+										600.0,
+										45.699999999999996
+									],
+									"fontsize": 26.0,
+									"fontname": "Ableton Sans Bold Regular",
+									"id": "obj-1"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "comment",
+									"text": "A message runs on the thread it arrives on",
+									"numinlets": 1,
+									"numoutlets": 0,
+									"patching_rect": [
+										20.0,
+										55.0,
+										600.0,
+										29.75
+									],
+									"fontsize": 15.0,
+									"textcolor": [
+										0.976470588235294,
+										0.733333333333333,
+										0.258823529411765,
+										1.0
+									],
+									"id": "obj-2"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "comment",
+									"text": "As with any Max object, a message runs on the thread it arrives on, and what the method returns is output before the message returns. From a click or a message box that is Max's main thread; from a metro with Overdrive on, the scheduler thread — where a long method holds the scheduler while it runs.",
+									"numinlets": 1,
+									"numoutlets": 0,
+									"patching_rect": [
+										20.0,
+										90.0,
+										330.0,
+										139.95
+									],
+									"linecount": 7,
+									"id": "obj-3"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "comment",
+									"text": "With Scheduler in Audio Interrupt on, and audio running, the scheduler thread is the audio thread: Python then runs on it, where a long method, a reload or another object's Python can interrupt the audio. The object says so in the console, once. deferlow moves the message to the main thread.",
+									"numinlets": 1,
+									"numoutlets": 0,
+									"patching_rect": [
+										20.0,
+										225.0,
+										330.0,
+										139.95
+									],
+									"linecount": 7,
+									"id": "obj-4"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "comment",
+									"text": "Output is what a method returns: a thread the class starts itself has no outlet to reach.",
+									"numinlets": 1,
+									"numoutlets": 0,
+									"patching_rect": [
+										20.0,
+										360.0,
+										330.0,
+										45.699999999999996
+									],
+									"linecount": 2,
+									"id": "obj-5"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "toggle",
+									"numinlets": 1,
+									"numoutlets": 1,
+									"outlettype": [
+										"int"
+									],
 									"patching_rect": [
 										400.0,
-										440.0,
+										90.0,
+										24.0,
+										24.0
+									],
+									"parameter_enable": 0,
+									"id": "obj-6"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "newobj",
+									"text": "metro 125",
+									"numinlets": 2,
+									"numoutlets": 1,
+									"outlettype": [
+										""
+									],
+									"patching_rect": [
+										400.0,
+										125.0,
+										81.0,
+										24.0
+									],
+									"id": "obj-7"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "newobj",
+									"text": "tap.python euclid",
+									"numinlets": 1,
+									"numoutlets": 2,
+									"outlettype": [
+										"",
+										""
+									],
+									"patching_rect": [
+										400.0,
+										210.0,
+										137.0,
+										24.0
+									],
+									"id": "obj-8"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "newobj",
+									"text": "deferlow",
+									"numinlets": 1,
+									"numoutlets": 1,
+									"outlettype": [
+										""
+									],
+									"patching_rect": [
+										550.0,
+										165.0,
 										74.0,
 										24.0
 									],
-									"id": "obj-20"
+									"id": "obj-9"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "newobj",
+									"text": "tap.python euclid",
+									"numinlets": 1,
+									"numoutlets": 2,
+									"outlettype": [
+										"",
+										""
+									],
+									"patching_rect": [
+										550.0,
+										210.0,
+										137.0,
+										24.0
+									],
+									"id": "obj-10"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "newobj",
+									"text": "prepend set",
+									"numinlets": 1,
+									"numoutlets": 1,
+									"outlettype": [
+										""
+									],
+									"patching_rect": [
+										400.0,
+										260.0,
+										95.0,
+										24.0
+									],
+									"id": "obj-11"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "message",
+									"text": "",
+									"numinlets": 2,
+									"numoutlets": 1,
+									"outlettype": [
+										""
+									],
+									"patching_rect": [
+										400.0,
+										295.0,
+										140,
+										24.0
+									],
+									"id": "obj-12"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "newobj",
+									"text": "prepend set",
+									"numinlets": 1,
+									"numoutlets": 1,
+									"outlettype": [
+										""
+									],
+									"patching_rect": [
+										550.0,
+										260.0,
+										95.0,
+										24.0
+									],
+									"id": "obj-13"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "message",
+									"text": "",
+									"numinlets": 2,
+									"numoutlets": 1,
+									"outlettype": [
+										""
+									],
+									"patching_rect": [
+										550.0,
+										295.0,
+										140,
+										24.0
+									],
+									"id": "obj-14"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "comment",
+									"text": "on the scheduler thread (Overdrive on)",
+									"numinlets": 1,
+									"numoutlets": 0,
+									"patching_rect": [
+										400.0,
+										335.0,
+										140,
+										64.55
+									],
+									"linecount": 3,
+									"id": "obj-15"
+								}
+							},
+							{
+								"box": {
+									"maxclass": "comment",
+									"text": "on the main thread",
+									"numinlets": 1,
+									"numoutlets": 0,
+									"patching_rect": [
+										550.0,
+										335.0,
+										140,
+										26.849999999999998
+									],
+									"id": "obj-16"
 								}
 							}
 						],
@@ -2208,6 +2270,18 @@
 								"patchline": {
 									"source": [
 										"obj-6",
+										0
+									],
+									"destination": [
+										"obj-7",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"source": [
+										"obj-7",
 										0
 									],
 									"destination": [
@@ -2223,19 +2297,7 @@
 										0
 									],
 									"destination": [
-										"obj-8",
-										1
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-8",
-										0
-									],
-									"destination": [
-										"obj-11",
+										"obj-9",
 										0
 									]
 								}
@@ -2247,7 +2309,31 @@
 										0
 									],
 									"destination": [
+										"obj-10",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"source": [
+										"obj-8",
+										0
+									],
+									"destination": [
 										"obj-11",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"source": [
+										"obj-11",
+										0
+									],
+									"destination": [
+										"obj-12",
 										0
 									]
 								}
@@ -2259,30 +2345,6 @@
 										0
 									],
 									"destination": [
-										"obj-11",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-11",
-										0
-									],
-									"destination": [
-										"obj-12",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-12",
-										0
-									],
-									"destination": [
 										"obj-13",
 										0
 									]
@@ -2291,91 +2353,19 @@
 							{
 								"patchline": {
 									"source": [
+										"obj-13",
+										0
+									],
+									"destination": [
 										"obj-14",
 										0
-									],
-									"destination": [
-										"obj-17",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-15",
-										0
-									],
-									"destination": [
-										"obj-17",
-										1
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-16",
-										0
-									],
-									"destination": [
-										"obj-17",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-17",
-										0
-									],
-									"destination": [
-										"obj-18",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-17",
-										1
-									],
-									"destination": [
-										"obj-19",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-18",
-										0
-									],
-									"destination": [
-										"obj-20",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"source": [
-										"obj-19",
-										0
-									],
-									"destination": [
-										"obj-20",
-										1
 									]
 								}
 							}
 						],
 						"showontab": 1
 					},
-					"id": "obj-4"
+					"id": "obj-5"
 				}
 			},
 			{
@@ -2385,7 +2375,7 @@
 					"numinlets": 0,
 					"numoutlets": 0,
 					"patching_rect": [
-						420.0,
+						520.0,
 						20.0,
 						40.0,
 						24.0
@@ -2450,7 +2440,7 @@
 						"lines": [],
 						"showontab": 1
 					},
-					"id": "obj-5"
+					"id": "obj-6"
 				}
 			}
 		],

@@ -53,15 +53,20 @@ EXTERNALS = {
 # Package content copied as-is (relative to the package root).
 DOCUMENTS = ["ReadMe.md", "License.md", "CHANGELOG.md", "icon.png", "package-info.json"]
 # init/: text files Max reads at launch — tap.python.txt maps the object tap.python to the file
-# tap.python~, which registers both classes (docs/TAP-PYTHON-PLAN.md, D11; plan 9.0)
-FOLDERS = ["help", "docs", "python", "init"]
+# tap.python~, which registers both classes (docs/TAP-PYTHON-PLAN.md, D11; plan 9.0), and
+# mc.tap.python~ to Max's MC wrapper around it. extras/: the PythonTap Overview, in the Extras menu
+# and the package's home patcher (plan 9.4).
+FOLDERS = ["help", "docs", "python", "init", "extras"]
 
 # What a package must hold, checked once it is assembled or merged, so that a release cannot lack
-# it: above all init/tap.python.txt, the mapping without which Max does not find tap.python in
-# tap.python~'s binary ("tap.python: No such object", plan 9.0) — with the line it must say.
+# it: above all init/tap.python.txt, with the mappings without which Max finds neither tap.python in
+# tap.python~'s binary ("tap.python: No such object", plan 9.0) nor mc.tap.python~ (plan 9.4) —
+# with the lines each must say.
 REQUIRED = {
-    "init/tap.python.txt": "max objectfile tap.python tap.python~;",
-    "python/default.py": None,
+    "init/tap.python.txt": ["max objectfile tap.python tap.python~;",
+                            "max objectfile mc.tap.python~ mc.wrapper~ tap.python~;"],
+    "python/default.py": [],
+    "extras/PythonTap Overview.maxpat": [],
 }
 
 # Never shipped from the copied folders.
@@ -248,12 +253,14 @@ def assemble(platform: str, output: Path, expected_version: str | None) -> Path:
 
 def check_complete(package: Path) -> None:
     """Fail unless `package` holds everything REQUIRED, each saying what it must."""
-    for name, line in REQUIRED.items():
+    for name, lines in REQUIRED.items():
         path = package / name
         if not path.is_file():
             raise AssemblyError(f"the package has no {name}")
-        if line is not None and line not in path.read_text(encoding="utf-8").splitlines():
-            raise AssemblyError(f"the package's {name} does not say {line!r}")
+        said = path.read_text(encoding="utf-8").splitlines()
+        for line in lines:
+            if line not in said:
+                raise AssemblyError(f"the package's {name} does not say {line!r}")
 
 
 def same_content(a: Path, b: Path) -> bool:
