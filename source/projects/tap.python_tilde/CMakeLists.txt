@@ -172,6 +172,21 @@ if (TAP_PYTHON_SANITIZE AND TARGET ${PROJECT_NAME}_test)
         # stops at in every test; the rest of UBSan stays on
         list(APPEND _sanitize -fno-sanitize=vptr)
     endif ()
+    if (TAP_PYTHON_SANITIZE MATCHES "thread" AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+            AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 14)
+        # GCC answers __has_feature from GCC 14 on, and under TSan the readerwriterqueue min-api pins
+        # (a500a29) then puts no_sanitize("thread") after the declarator of function definitions,
+        # where only Clang accepts it (GCC 13 has no __has_feature, so the macro stayed empty). Its
+        # 5904a29 fixed that, and is the first to test __SANITIZE_THREAD__: until min-api pins it,
+        # say so here rather than in a page of compile errors. CI's tsan row builds with Clang.
+        file(READ "${C74_MIN_API_DIR}/include/readerwriterqueue/atomicops.h" _atomicops)
+        if (NOT _atomicops MATCHES "__SANITIZE_THREAD__")
+            message(FATAL_ERROR
+                "TAP_PYTHON_SANITIZE=thread: GCC ${CMAKE_CXX_COMPILER_VERSION} cannot compile the "
+                "readerwriterqueue min-api pins under ThreadSanitizer. Configure with Clang "
+                "(-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++), or GCC 13.")
+        endif ()
+    endif ()
     target_compile_options(${PROJECT_NAME}_test PRIVATE ${_sanitize} -fno-omit-frame-pointer)
     target_link_options(${PROJECT_NAME}_test PRIVATE ${_sanitize})
     set_tests_properties(${PROJECT_NAME}_test PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")

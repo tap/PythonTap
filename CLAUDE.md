@@ -132,7 +132,8 @@ python3 runtime-tests/run.py
 ```
 
 CI (`build.yml`): `linux-core` and `linux-max-glue` (each release, asan-ubsan, tsan — the glue
-test's `TAP_PYTHON_SANITIZE`, as the core's; the release row also runs `scripts/check-docs.py`), `book`, `macos` (universal + `lipo`/`otool` checks, including
+test's `TAP_PYTHON_SANITIZE`, as the core's — the glue's tsan row builds with Clang, since GCC 14+
+cannot compile min-api's pinned readerwriterqueue under TSan, and configure says so; the release row also runs `scripts/check-docs.py`), `book`, `macos` (universal + `lipo`/`otool` checks, including
 no absolute rpath, and the package assembled, which fails without `init/tap.python.txt`), `windows`. `style.yml`: TapHouse drift check,
 clang-format, clang-tidy (a clang-tidy failure or crash fails the gate, not just a finding). Workflows
 run with `contents: read`, pin third-party actions by commit SHA (tag noted beside it), and cancel
