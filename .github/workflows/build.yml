@@ -79,6 +79,9 @@ jobs:
 
   # The glue test under sanitizers as well (plan 9.3): tap.python's lock, and a reload racing a
   # message on another thread, live in the glue, which the core's battery cannot see.
+  # The tsan row builds with Clang: from GCC 14 on (ubuntu-latest's is 15), GCC cannot compile the
+  # readerwriterqueue min-api pins under TSan, which puts no_sanitize("thread") after a function's
+  # declarator, where only Clang accepts it. The source/projects CMakeLists says when that ends.
   linux-max-glue:
     name: linux-max-glue (${{ matrix.name }})
     runs-on: ubuntu-latest
@@ -89,12 +92,18 @@ jobs:
           - name: release
             build_type: Release
             sanitize: ""
+            cc: gcc
+            cxx: g++
           - name: asan-ubsan
             build_type: Debug
             sanitize: "address,undefined"
+            cc: gcc
+            cxx: g++
           - name: tsan
             build_type: Debug
             sanitize: "thread"
+            cc: clang
+            cxx: clang++
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -113,10 +122,22 @@ jobs:
         if: matrix.sanitize != ''
         run: sudo sysctl vm.mmap_rnd_bits=28
 
+      # Ubuntu packages Clang's sanitizer runtimes apart from Clang (a recommends, not a depends),
+      # so install them for the runner's default clang when the image does not have them.
+      - name: Install Clang's sanitizer runtimes
+        if: matrix.cxx == 'clang++'
+        run: |
+          v=$(clang++ -dumpversion | cut -d. -f1)
+          dpkg -s "libclang-rt-$v-dev" >/dev/null 2>&1 \
+            || { sudo apt-get update -q && sudo apt-get install -y -q "libclang-rt-$v-dev"; }
+          clang++ --version | head -1
+
       - name: Configure
         run: >
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DCMAKE_C_COMPILER=${{ matrix.cc }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
           -DPython3_EXECUTABLE="$(which python)"
           -DTAP_PYTHON_SANITIZE="${{ matrix.sanitize }}"
 
