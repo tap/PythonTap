@@ -26,9 +26,9 @@ concurrency:
 
 jobs:
   drift:
-    uses: tap/taphouse/.github/workflows/drift-check.yml@v7
+    uses: tap/taphouse/.github/workflows/drift-check.yml@v8
     with:
-      ref: v7
+      ref: v8
       icon: PythonTap
 
   clang-format:
